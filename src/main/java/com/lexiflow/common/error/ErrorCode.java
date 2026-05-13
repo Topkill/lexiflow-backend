@@ -21,6 +21,9 @@ public enum ErrorCode {
     WORDBOOK_NOT_FOUND(20001, "词库不存在", 404),
     WORD_NOT_FOUND(20002, "单词不存在", 404),
 
+    STUDY_PLAN_NOT_FOUND(30001, "学习计划不存在", 404),
+    STUDY_PLAN_STATUS_INVALID(30004, "学习计划状态不可变更", 409),
+
     NOT_FOUND(90004, "资源不存在", 404),
     CONFLICT(90009, "资源状态冲突", 409),
     TOO_MANY_REQUESTS(90029, "请求过于频繁", 429),
