@@ -26,6 +26,9 @@ public enum ErrorCode {
     TASK_ITEM_NOT_SUBMITTABLE(30003, "当前任务项不可提交", 409),
     STUDY_PLAN_STATUS_INVALID(30004, "学习计划状态不可变更", 409),
 
+    WRONG_WORD_NOT_FOUND(31001, "错词不存在", 404),
+    FAVORITE_WORD_NOT_FOUND(31002, "收藏词不存在", 404),
+
     NOT_FOUND(90004, "资源不存在", 404),
     CONFLICT(90009, "资源状态冲突", 409),
     TOO_MANY_REQUESTS(90029, "请求过于频繁", 429),
