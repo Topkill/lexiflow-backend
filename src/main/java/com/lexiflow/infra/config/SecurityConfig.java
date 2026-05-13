@@ -1,8 +1,9 @@
 package com.lexiflow.infra.config;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.lexiflow.auth.security.JwtAuthenticationFilter;
 import com.lexiflow.common.api.ApiResponse;
 import com.lexiflow.common.error.ErrorCode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
@@ -12,9 +13,10 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
-import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
 @Configuration
 @EnableWebSecurity
@@ -22,6 +24,7 @@ import org.springframework.security.web.SecurityFilterChain;
 public class SecurityConfig {
 
     private final ObjectMapper objectMapper;
+    private final JwtAuthenticationFilter jwtAuthenticationFilter;
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
@@ -33,6 +36,9 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(
                                 "/api/v1/ping",
+                                "/api/v1/auth/register",
+                                "/api/v1/auth/login",
+                                "/api/v1/auth/refresh",
                                 "/actuator/health",
                                 "/v3/api-docs/**",
                                 "/swagger-ui/**",
@@ -53,13 +59,16 @@ public class SecurityConfig {
                                 HttpServletResponse.SC_FORBIDDEN,
                                 ErrorCode.FORBIDDEN
                         ))
-                );
+                )
+                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }
 
     @Bean
-    public PasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder();
+    public UserDetailsService userDetailsService() {
+        return username -> {
+            throw new UsernameNotFoundException("不支持默认用户名密码登录");
+        };
     }
 
     private void writeErrorResponse(HttpServletResponse response, int status, ErrorCode errorCode) throws java.io.IOException {

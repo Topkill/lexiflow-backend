@@ -7,15 +7,23 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public enum ErrorCode {
 
-    SUCCESS("0", "success"),
-    BAD_REQUEST("400", "请求参数错误"),
-    UNAUTHORIZED("401", "请先登录"),
-    FORBIDDEN("403", "无权访问"),
-    NOT_FOUND("404", "资源不存在"),
-    CONFLICT("409", "资源状态冲突"),
-    TOO_MANY_REQUESTS("429", "请求过于频繁"),
-    INTERNAL_ERROR("500", "系统繁忙，请稍后再试");
+    SUCCESS(0, "ok", 200),
 
-    private final String code;
+    UNAUTHORIZED(10001, "登录已过期，请重新登录", 401),
+    BAD_REQUEST(10002, "参数校验失败", 400),
+    CSRF_INVALID(10003, "CSRF Token 无效", 403),
+    FORBIDDEN(10004, "权限不足", 403),
+
+    INVALID_CREDENTIALS(11001, "邮箱或密码错误", 400),
+    EMAIL_REGISTERED(11002, "邮箱已注册", 409),
+    USER_DISABLED(11003, "用户已被禁用", 403),
+
+    NOT_FOUND(90004, "资源不存在", 404),
+    CONFLICT(90009, "资源状态冲突", 409),
+    TOO_MANY_REQUESTS(90029, "请求过于频繁", 429),
+    INTERNAL_ERROR(90000, "系统异常", 500);
+
+    private final int code;
     private final String message;
+    private final int httpStatus;
 }

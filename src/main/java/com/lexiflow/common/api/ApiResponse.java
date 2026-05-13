@@ -14,7 +14,7 @@ import lombok.NoArgsConstructor;
 public class ApiResponse<T> {
 
     @Schema(description = "业务状态码", example = "0")
-    private String code;
+    private int code;
 
     @Schema(description = "响应消息", example = "success")
     private String message;
@@ -34,7 +34,7 @@ public class ApiResponse<T> {
         return fail(errorCode.getCode(), errorCode.getMessage());
     }
 
-    public static ApiResponse<Void> fail(String code, String message) {
+    public static ApiResponse<Void> fail(int code, String message) {
         return new ApiResponse<>(code, message, null);
     }
 }

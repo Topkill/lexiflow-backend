@@ -8,6 +8,7 @@ import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.BindException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -19,15 +20,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(BizException.class)
     public ResponseEntity<ApiResponse<Void>> handleBizException(BizException ex) {
-        HttpStatus status = switch (ex.getErrorCode()) {
-            case BAD_REQUEST -> HttpStatus.BAD_REQUEST;
-            case UNAUTHORIZED -> HttpStatus.UNAUTHORIZED;
-            case FORBIDDEN -> HttpStatus.FORBIDDEN;
-            case NOT_FOUND -> HttpStatus.NOT_FOUND;
-            case CONFLICT -> HttpStatus.CONFLICT;
-            case TOO_MANY_REQUESTS -> HttpStatus.TOO_MANY_REQUESTS;
-            default -> HttpStatus.OK;
-        };
+        HttpStatus status = HttpStatus.valueOf(ex.getErrorCode().getHttpStatus());
         return ResponseEntity.status(status)
                 .body(ApiResponse.fail(ex.getErrorCode().getCode(), ex.getCustomMessage()));
     }
@@ -55,6 +48,11 @@ public class GlobalExceptionHandler {
                 .map(violation -> violation.getPropertyPath() + " " + violation.getMessage())
                 .collect(Collectors.joining("; "));
         return ResponseEntity.badRequest().body(ApiResponse.fail(ErrorCode.BAD_REQUEST.getCode(), message));
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ApiResponse<Void>> handleHttpMessageNotReadableException(HttpMessageNotReadableException ex) {
+        return ResponseEntity.badRequest().body(ApiResponse.fail(ErrorCode.BAD_REQUEST));
     }
 
     @ExceptionHandler(Exception.class)
