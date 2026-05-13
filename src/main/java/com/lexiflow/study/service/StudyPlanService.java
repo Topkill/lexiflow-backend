@@ -60,6 +60,19 @@ public class StudyPlanService {
         return toResponse(plan);
     }
 
+    public StudyPlan getPrimaryActivePlanEntity(Long userId) {
+        StudyPlan plan = studyPlanMapper.selectOne(new LambdaQueryWrapper<StudyPlan>()
+                .eq(StudyPlan::getUserId, userId)
+                .eq(StudyPlan::getIsPrimary, true)
+                .eq(StudyPlan::getStatus, StudyPlanStatus.ACTIVE)
+                .orderByDesc(StudyPlan::getCreatedAt)
+                .last("LIMIT 1"));
+        if (plan == null) {
+            throw new BizException(ErrorCode.STUDY_PLAN_NOT_FOUND);
+        }
+        return plan;
+    }
+
     @Transactional
     public StudyPlanResponse pausePlan(Long userId, Long planId) {
         StudyPlan plan = getOwnedPlan(userId, planId);

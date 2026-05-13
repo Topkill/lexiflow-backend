@@ -32,4 +32,18 @@
         ORDER BY ww.sequence_no ASC, w.id ASC
     </select>
 
+    <select id="selectNewWordCandidates" resultType="com.lexiflow.wordbook.dto.WordbookWordPickRow">
+        SELECT
+            ww.word_id AS wordId,
+            ww.sequence_no AS sequenceNo
+        FROM wordbook_word ww
+        INNER JOIN word w ON w.id = ww.word_id AND w.deleted = 0
+        WHERE ww.deleted = 0
+          AND ww.enabled = 1
+          AND ww.wordbook_id = #{wordbookId}
+          AND ww.sequence_no &gt; #{startSequenceNo}
+        ORDER BY ww.sequence_no ASC, ww.word_id ASC
+        LIMIT #{limit}
+    </select>
+
 </mapper>
