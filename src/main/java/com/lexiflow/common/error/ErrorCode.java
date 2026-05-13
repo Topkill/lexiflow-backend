@@ -23,6 +23,7 @@ public enum ErrorCode {
 
     STUDY_PLAN_NOT_FOUND(30001, "学习计划不存在", 404),
     TODAY_TASK_NOT_FOUND(30002, "今日任务不存在或生成失败", 500),
+    TASK_ITEM_NOT_SUBMITTABLE(30003, "当前任务项不可提交", 409),
     STUDY_PLAN_STATUS_INVALID(30004, "学习计划状态不可变更", 409),
 
     NOT_FOUND(90004, "资源不存在", 404),
