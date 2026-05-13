@@ -18,6 +18,9 @@ public enum ErrorCode {
     EMAIL_REGISTERED(11002, "邮箱已注册", 409),
     USER_DISABLED(11003, "用户已被禁用", 403),
 
+    WORDBOOK_NOT_FOUND(20001, "词库不存在", 404),
+    WORD_NOT_FOUND(20002, "单词不存在", 404),
+
     NOT_FOUND(90004, "资源不存在", 404),
     CONFLICT(90009, "资源状态冲突", 409),
     TOO_MANY_REQUESTS(90029, "请求过于频繁", 429),
