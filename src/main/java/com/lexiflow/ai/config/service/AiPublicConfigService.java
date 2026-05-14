@@ -24,8 +24,8 @@ public class AiPublicConfigService {
 
     public List<AiPublicConfigResponse> listConfigs() {
         return aiPublicConfigMapper.selectList(new LambdaQueryWrapper<AiPublicConfig>()
-                        .orderByDesc(AiPublicConfig::getActive)
-                        .orderByDesc(AiPublicConfig::getUpdatedAt))
+                        .orderByAsc(AiPublicConfig::getCreatedAt)
+                        .orderByAsc(AiPublicConfig::getId))
                 .stream()
                 .map(AiPublicConfigResponse::from)
                 .toList();
