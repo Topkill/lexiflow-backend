@@ -22,6 +22,7 @@ import com.lexiflow.study.task.domain.DailyTaskItem;
 import com.lexiflow.study.task.domain.DailyTaskItemStatus;
 import com.lexiflow.study.task.domain.DailyTaskItemType;
 import com.lexiflow.study.task.domain.DailyTaskStatus;
+import com.lexiflow.study.task.dto.CreateWrongWordPracticeRequest;
 import com.lexiflow.study.task.dto.DailyTaskItemResponse;
 import com.lexiflow.study.task.dto.DailyTaskPlanResponse;
 import com.lexiflow.study.task.dto.DailyTaskResponse;
@@ -58,6 +59,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class DailyTaskService {
 
     private static final int REVIEW_SEQUENCE_BASE = -100_000;
+    private static final int EXTRA_SEQUENCE_BASE = 1_000_000;
 
     private final DailyTaskMapper dailyTaskMapper;
     private final DailyTaskItemMapper dailyTaskItemMapper;
@@ -91,6 +93,44 @@ public class DailyTaskService {
         FavoriteWord favorite = findFavoriteWord(userId, item.getWordbookId(), item.getWordId());
         MasteryStatus masteryStatus = state == null ? MasteryStatus.NEW : state.getMasteryStatus();
         return TaskItemCardResponse.from(item, word, favorite == null ? null : favorite.getId(), masteryStatus);
+    }
+
+    @Transactional
+    public DailyTaskResponse createWrongWordPractice(Long userId, CreateWrongWordPracticeRequest request) {
+        StudyPlan plan = studyPlanService.getPrimaryActivePlanEntity(userId);
+        Long targetWordbookId = request.wordbookId() == null ? plan.getWordbookId() : request.wordbookId();
+        if (!plan.getWordbookId().equals(targetWordbookId)) {
+            throw new BizException(ErrorCode.WORDBOOK_NOT_FOUND);
+        }
+        LocalDate today = LocalDate.now();
+        DailyTask task = findTodayTask(userId, plan.getId(), today);
+        if (task == null) {
+            task = generateTodayTask(userId, plan, today);
+        } else if (task.getStatus() != DailyTaskStatus.DONE) {
+            task = syncDueReviewItems(userId, plan, task, today);
+        }
+
+        Set<Long> existingWordIds = dailyTaskItemMapper.selectList(new LambdaQueryWrapper<DailyTaskItem>()
+                        .eq(DailyTaskItem::getDailyTaskId, task.getId())
+                        .and(wrapper -> wrapper
+                                .eq(DailyTaskItem::getStatus, DailyTaskItemStatus.PENDING)
+                                .or()
+                                .eq(DailyTaskItem::getItemType, DailyTaskItemType.EXTRA)))
+                .stream()
+                .map(DailyTaskItem::getWordId)
+                .collect(Collectors.toCollection(HashSet::new));
+        List<WrongWord> wrongWords = wrongWordMapper.selectList(new LambdaQueryWrapper<WrongWord>()
+                .eq(WrongWord::getUserId, userId)
+                .eq(WrongWord::getWordbookId, targetWordbookId)
+                .eq(WrongWord::getResolved, false)
+                .notIn(!existingWordIds.isEmpty(), WrongWord::getWordId, existingWordIds)
+                .orderByDesc(WrongWord::getWrongCount)
+                .orderByDesc(WrongWord::getLastWrongAt)
+                .orderByAsc(WrongWord::getId)
+                .last("LIMIT " + request.safeLimit()));
+        insertExtraItems(task, wrongWords, countTaskItems(task.getId(), DailyTaskItemType.EXTRA));
+        task = updateDailyTaskProgress(task.getId());
+        return toResponse(task, plan);
     }
 
     @Transactional
@@ -226,6 +266,24 @@ public class DailyTaskService {
             item.setItemType(DailyTaskItemType.REVIEW);
             item.setStatus(DailyTaskItemStatus.PENDING);
             item.setSequenceNo(REVIEW_SEQUENCE_BASE + index++);
+            item.setDeleted(0);
+            item.setVersion(0);
+            dailyTaskItemMapper.insert(item);
+        }
+    }
+
+    private void insertExtraItems(DailyTask task, List<WrongWord> wrongWords, int startIndex) {
+        int index = startIndex;
+        for (WrongWord wrongWord : wrongWords) {
+            DailyTaskItem item = new DailyTaskItem();
+            item.setDailyTaskId(task.getId());
+            item.setUserId(task.getUserId());
+            item.setPlanId(task.getPlanId());
+            item.setWordbookId(wrongWord.getWordbookId());
+            item.setWordId(wrongWord.getWordId());
+            item.setItemType(DailyTaskItemType.EXTRA);
+            item.setStatus(DailyTaskItemStatus.PENDING);
+            item.setSequenceNo(EXTRA_SEQUENCE_BASE + index++);
             item.setDeleted(0);
             item.setVersion(0);
             dailyTaskItemMapper.insert(item);

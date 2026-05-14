@@ -2,6 +2,7 @@ package com.lexiflow.study.task.controller;
 
 import com.lexiflow.auth.security.AuthContext;
 import com.lexiflow.common.api.ApiResponse;
+import com.lexiflow.study.task.dto.CreateWrongWordPracticeRequest;
 import com.lexiflow.study.task.dto.DailyTaskResponse;
 import com.lexiflow.study.task.dto.SubmitFeedbackRequest;
 import com.lexiflow.study.task.dto.SubmitFeedbackResponse;
@@ -33,6 +34,12 @@ public class DailyTaskController {
     @GetMapping("/tasks/today")
     public ApiResponse<DailyTaskResponse> today() {
         return ApiResponse.success(dailyTaskService.getTodayTask(AuthContext.currentUserId()));
+    }
+
+    @Operation(summary = "创建错词专项复习")
+    @PostMapping("/tasks/today/wrong-word-practice")
+    public ApiResponse<DailyTaskResponse> createWrongWordPractice(@Valid @RequestBody CreateWrongWordPracticeRequest request) {
+        return ApiResponse.success(dailyTaskService.createWrongWordPractice(AuthContext.currentUserId(), request));
     }
 
     @Operation(summary = "获取学习卡片详情")
