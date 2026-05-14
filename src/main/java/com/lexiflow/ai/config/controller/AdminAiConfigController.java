@@ -57,6 +57,13 @@ public class AdminAiConfigController {
         return ApiResponse.success();
     }
 
+    @Operation(summary = "启用公共配置")
+    @PostMapping("/{configId}/enable")
+    public ApiResponse<Void> enableConfig(@PathVariable @Positive Long configId) {
+        aiPublicConfigService.enableConfig(AuthContext.currentUserId(), configId);
+        return ApiResponse.success();
+    }
+
     @Operation(summary = "停用公共配置")
     @PostMapping("/{configId}/disable")
     public ApiResponse<Void> disableConfig(@PathVariable @Positive Long configId) {

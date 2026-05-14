@@ -68,6 +68,14 @@ public class AiPublicConfigService {
     }
 
     @Transactional
+    public void enableConfig(Long adminUserId, Long configId) {
+        AiPublicConfig config = getConfig(configId);
+        config.setEnabled(true);
+        config.setUpdatedBy(adminUserId);
+        aiPublicConfigMapper.updateById(config);
+    }
+
+    @Transactional
     public void disableConfig(Long adminUserId, Long configId) {
         AiPublicConfig config = getConfig(configId);
         config.setEnabled(false);
