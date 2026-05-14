@@ -1,0 +1,68 @@
+package com.lexiflow.system.config.controller;
+
+import com.lexiflow.auth.security.AuthContext;
+import com.lexiflow.common.api.ApiResponse;
+import com.lexiflow.common.api.PageResponse;
+import com.lexiflow.system.config.dto.SystemConfigQueryRequest;
+import com.lexiflow.system.config.dto.SystemConfigRequest;
+import com.lexiflow.system.config.dto.SystemConfigResponse;
+import com.lexiflow.system.config.service.SystemConfigService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.Positive;
+import lombok.RequiredArgsConstructor;
+import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.ModelAttribute;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+@Tag(name = "后台系统配置接口")
+@Validated
+@RestController
+@RequiredArgsConstructor
+@RequestMapping("/api/v1/admin/system-configs")
+public class AdminSystemConfigController {
+
+    private final SystemConfigService systemConfigService;
+
+    @Operation(summary = "系统配置分页列表")
+    @GetMapping
+    public ApiResponse<PageResponse<SystemConfigResponse>> pageConfigs(@Valid @ModelAttribute SystemConfigQueryRequest request) {
+        return ApiResponse.success(systemConfigService.pageConfigs(request));
+    }
+
+    @Operation(summary = "系统配置详情")
+    @GetMapping("/{configId}")
+    public ApiResponse<SystemConfigResponse> getConfig(@PathVariable @Positive Long configId) {
+        return ApiResponse.success(systemConfigService.getConfig(configId));
+    }
+
+    @Operation(summary = "新增系统配置")
+    @PostMapping
+    public ApiResponse<SystemConfigResponse> createConfig(@Valid @RequestBody SystemConfigRequest request) {
+        return ApiResponse.success(systemConfigService.createConfig(AuthContext.currentUserId(), request));
+    }
+
+    @Operation(summary = "编辑系统配置")
+    @PutMapping("/{configId}")
+    public ApiResponse<SystemConfigResponse> updateConfig(
+            @PathVariable @Positive Long configId,
+            @Valid @RequestBody SystemConfigRequest request
+    ) {
+        return ApiResponse.success(systemConfigService.updateConfig(AuthContext.currentUserId(), configId, request));
+    }
+
+    @Operation(summary = "删除系统配置")
+    @DeleteMapping("/{configId}")
+    public ApiResponse<Void> deleteConfig(@PathVariable @Positive Long configId) {
+        systemConfigService.deleteConfig(configId);
+        return ApiResponse.success();
+    }
+}
