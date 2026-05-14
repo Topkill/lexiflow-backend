@@ -41,6 +41,9 @@ public enum ErrorCode {
     ASYNC_TASK_NOT_FOUND(50001, "异步任务不存在", 404),
     ASYNC_TASK_FAILED(50002, "异步任务执行失败", 500),
 
+    FILE_TOO_LARGE(60001, "文件大小超过限制", 400),
+    EXCEL_TEMPLATE_INVALID(60002, "Excel 模板格式错误", 400),
+
     NOT_FOUND(90004, "资源不存在", 404),
     CONFLICT(90009, "资源状态冲突", 409),
     TOO_MANY_REQUESTS(90029, "请求过于频繁", 429),
