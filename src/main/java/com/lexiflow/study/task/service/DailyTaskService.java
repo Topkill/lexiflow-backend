@@ -43,8 +43,10 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
@@ -54,6 +56,8 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 @RequiredArgsConstructor
 public class DailyTaskService {
+
+    private static final int REVIEW_SEQUENCE_BASE = -100_000;
 
     private final DailyTaskMapper dailyTaskMapper;
     private final DailyTaskItemMapper dailyTaskItemMapper;
@@ -74,6 +78,8 @@ public class DailyTaskService {
         DailyTask task = findTodayTask(userId, plan.getId(), today);
         if (task == null) {
             task = generateTodayTask(userId, plan, today);
+        } else if (task.getStatus() != DailyTaskStatus.DONE) {
+            task = syncDueReviewItems(userId, plan, task, today);
         }
         return toResponse(task, plan);
     }
@@ -122,6 +128,7 @@ public class DailyTaskService {
     }
 
     private DailyTask generateTodayTask(Long userId, StudyPlan plan, LocalDate today) {
+        List<UserWordState> dueReviewStates = selectDueReviewStates(userId, plan, today, Set.of());
         List<WordbookWordPickRow> newWords = wordbookWordMapper.selectNewWordCandidates(
                 plan.getWordbookId(),
                 plan.getCurrentSequenceNo(),
@@ -134,13 +141,15 @@ public class DailyTaskService {
         task.setTaskDate(today);
         task.setStatus(DailyTaskStatus.PENDING);
         task.setNewCount(newWords.size());
-        task.setReviewCount(0);
+        task.setReviewCount(dueReviewStates.size());
         task.setExtraCount(0);
         task.setDoneCount(0);
         task.setSkippedCount(0);
         task.setDeleted(0);
         task.setVersion(0);
         dailyTaskMapper.insert(task);
+
+        insertReviewItems(task, dueReviewStates, 0);
 
         for (WordbookWordPickRow row : newWords) {
             DailyTaskItem item = new DailyTaskItem();
@@ -167,6 +176,60 @@ public class DailyTaskService {
             studyPlanMapper.updateById(plan);
         }
         return task;
+    }
+
+    private DailyTask syncDueReviewItems(Long userId, StudyPlan plan, DailyTask task, LocalDate today) {
+        Set<Long> existingWordIds = dailyTaskItemMapper.selectList(new LambdaQueryWrapper<DailyTaskItem>()
+                        .eq(DailyTaskItem::getDailyTaskId, task.getId()))
+                .stream()
+                .map(DailyTaskItem::getWordId)
+                .collect(Collectors.toCollection(HashSet::new));
+        List<UserWordState> dueReviewStates = selectDueReviewStates(userId, plan, today, existingWordIds);
+        if (!dueReviewStates.isEmpty()) {
+            insertReviewItems(task, dueReviewStates, countTaskItems(task.getId(), DailyTaskItemType.REVIEW));
+        }
+        task.setReviewCount(countTaskItems(task.getId(), DailyTaskItemType.REVIEW));
+        task.setNewCount(countTaskItems(task.getId(), DailyTaskItemType.NEW));
+        task.setExtraCount(countTaskItems(task.getId(), DailyTaskItemType.EXTRA));
+        task.setDoneCount(countTaskItems(task.getId(), DailyTaskItemStatus.DONE));
+        task.setStatus(task.getDoneCount() >= totalCount(task) && totalCount(task) > 0 ? DailyTaskStatus.DONE : DailyTaskStatus.PENDING);
+        if (task.getStatus() == DailyTaskStatus.PENDING) {
+            task.setCompletedAt(null);
+        }
+        dailyTaskMapper.updateById(task);
+        return task;
+    }
+
+    private List<UserWordState> selectDueReviewStates(Long userId, StudyPlan plan, LocalDate today, Set<Long> excludedWordIds) {
+        return userWordStateMapper.selectList(new LambdaQueryWrapper<UserWordState>()
+                .eq(UserWordState::getUserId, userId)
+                .eq(UserWordState::getWordbookId, plan.getWordbookId())
+                .eq(UserWordState::getLearned, true)
+                .isNotNull(UserWordState::getNextReviewDate)
+                .le(UserWordState::getNextReviewDate, today)
+                .notIn(excludedWordIds != null && !excludedWordIds.isEmpty(), UserWordState::getWordId, excludedWordIds)
+                .orderByAsc(UserWordState::getNextReviewDate)
+                .orderByDesc(UserWordState::getWrongCount)
+                .orderByAsc(UserWordState::getUpdatedAt)
+                .orderByAsc(UserWordState::getId));
+    }
+
+    private void insertReviewItems(DailyTask task, List<UserWordState> dueReviewStates, int startIndex) {
+        int index = startIndex;
+        for (UserWordState state : dueReviewStates) {
+            DailyTaskItem item = new DailyTaskItem();
+            item.setDailyTaskId(task.getId());
+            item.setUserId(task.getUserId());
+            item.setPlanId(task.getPlanId());
+            item.setWordbookId(state.getWordbookId());
+            item.setWordId(state.getWordId());
+            item.setItemType(DailyTaskItemType.REVIEW);
+            item.setStatus(DailyTaskItemStatus.PENDING);
+            item.setSequenceNo(REVIEW_SEQUENCE_BASE + index++);
+            item.setDeleted(0);
+            item.setVersion(0);
+            dailyTaskItemMapper.insert(item);
+        }
     }
 
     private DailyTaskResponse toResponse(DailyTask task, StudyPlan plan) {
@@ -385,16 +448,31 @@ public class DailyTaskService {
         if (task == null) {
             throw new BizException(ErrorCode.TODAY_TASK_NOT_FOUND);
         }
-        Long doneCount = dailyTaskItemMapper.selectCount(new LambdaQueryWrapper<DailyTaskItem>()
-                .eq(DailyTaskItem::getDailyTaskId, dailyTaskId)
-                .eq(DailyTaskItem::getStatus, DailyTaskItemStatus.DONE));
-        task.setDoneCount(doneCount.intValue());
+        task.setNewCount(countTaskItems(dailyTaskId, DailyTaskItemType.NEW));
+        task.setReviewCount(countTaskItems(dailyTaskId, DailyTaskItemType.REVIEW));
+        task.setExtraCount(countTaskItems(dailyTaskId, DailyTaskItemType.EXTRA));
+        task.setDoneCount(countTaskItems(dailyTaskId, DailyTaskItemStatus.DONE));
         if (task.getDoneCount() >= totalCount(task) && totalCount(task) > 0) {
             task.setStatus(DailyTaskStatus.DONE);
             task.setCompletedAt(LocalDateTime.now());
+        } else {
+            task.setStatus(DailyTaskStatus.PENDING);
+            task.setCompletedAt(null);
         }
         dailyTaskMapper.updateById(task);
         return task;
+    }
+
+    private int countTaskItems(Long dailyTaskId, DailyTaskItemType itemType) {
+        return dailyTaskItemMapper.selectCount(new LambdaQueryWrapper<DailyTaskItem>()
+                .eq(DailyTaskItem::getDailyTaskId, dailyTaskId)
+                .eq(DailyTaskItem::getItemType, itemType)).intValue();
+    }
+
+    private int countTaskItems(Long dailyTaskId, DailyTaskItemStatus status) {
+        return dailyTaskItemMapper.selectCount(new LambdaQueryWrapper<DailyTaskItem>()
+                .eq(DailyTaskItem::getDailyTaskId, dailyTaskId)
+                .eq(DailyTaskItem::getStatus, status)).intValue();
     }
 
     private void updateStudyPlanProgress(DailyTaskItem item, StudyScene scene, Sm2Result sm2Result, boolean completed) {
