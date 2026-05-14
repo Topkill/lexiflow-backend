@@ -100,11 +100,12 @@ public class DailyTaskService {
         if (request.feedback() == StudyFeedback.UNKNOWN) {
             upsertWrongWord(userId, item, event.getId(), scene);
         }
-        updateStudyPlanProgress(item, scene, sm2Result);
+        boolean completed = request.feedback() == StudyFeedback.KNOWN;
+        updateStudyPlanProgress(item, scene, sm2Result, completed);
 
-        item.setStatus(DailyTaskItemStatus.DONE);
+        item.setStatus(completed ? DailyTaskItemStatus.DONE : DailyTaskItemStatus.PENDING);
         item.setFeedback(request.feedback().name());
-        item.setDoneAt(LocalDateTime.now());
+        item.setDoneAt(completed ? LocalDateTime.now() : null);
         dailyTaskItemMapper.updateById(item);
 
         DailyTask task = updateDailyTaskProgress(item.getDailyTaskId());
@@ -396,12 +397,12 @@ public class DailyTaskService {
         return task;
     }
 
-    private void updateStudyPlanProgress(DailyTaskItem item, StudyScene scene, Sm2Result sm2Result) {
+    private void updateStudyPlanProgress(DailyTaskItem item, StudyScene scene, Sm2Result sm2Result, boolean completed) {
         StudyPlan plan = studyPlanMapper.selectById(item.getPlanId());
         if (plan == null) {
             throw new BizException(ErrorCode.STUDY_PLAN_NOT_FOUND);
         }
-        if (scene == StudyScene.REVIEW) {
+        if (completed && scene == StudyScene.REVIEW) {
             plan.setReviewedCount(plan.getReviewedCount() + 1);
         }
         if (sm2Result.oldMasteryStatus() != MasteryStatus.MASTERED && sm2Result.newMasteryStatus() == MasteryStatus.MASTERED) {
