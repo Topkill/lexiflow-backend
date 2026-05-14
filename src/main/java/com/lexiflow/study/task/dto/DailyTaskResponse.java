@@ -15,10 +15,13 @@ public record DailyTaskResponse(
         @Schema(description = "额外学习数量", example = "0") Integer extraCount,
         @Schema(description = "已完成数量", example = "0") Integer doneCount,
         @Schema(description = "跳过数量", example = "0") Integer skippedCount,
+        @Schema(description = "完成率百分比", example = "50") Integer completionRate,
+        @Schema(description = "任务进度") TaskProgressResponse progress,
         @Schema(description = "计划摘要") DailyTaskPlanResponse plan,
         @Schema(description = "任务明细") List<DailyTaskItemResponse> items
 ) {
     public static DailyTaskResponse from(DailyTask task, DailyTaskPlanResponse plan, List<DailyTaskItemResponse> items) {
+        TaskProgressResponse progress = TaskProgressResponse.from(task.getDoneCount(), totalCount(task));
         return new DailyTaskResponse(
                 String.valueOf(task.getId()),
                 task.getTaskDate(),
@@ -28,8 +31,18 @@ public record DailyTaskResponse(
                 task.getExtraCount(),
                 task.getDoneCount(),
                 task.getSkippedCount(),
+                progress.completionRate(),
+                progress,
                 plan,
                 items
         );
+    }
+
+    private static int totalCount(DailyTask task) {
+        return safeCount(task.getNewCount()) + safeCount(task.getReviewCount()) + safeCount(task.getExtraCount());
+    }
+
+    private static int safeCount(Integer count) {
+        return count == null ? 0 : count;
     }
 }

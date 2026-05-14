@@ -108,7 +108,7 @@ public class DailyTaskService {
         dailyTaskItemMapper.updateById(item);
 
         DailyTask task = updateDailyTaskProgress(item.getDailyTaskId());
-        TaskProgressResponse progress = new TaskProgressResponse(task.getDoneCount(), totalCount(task));
+        TaskProgressResponse progress = TaskProgressResponse.from(task.getDoneCount(), totalCount(task));
         return SubmitFeedbackResponse.from(item, request.feedback(), sm2Result.nextReviewDate(), task.getStatus() == DailyTaskStatus.DONE, progress);
     }
 
