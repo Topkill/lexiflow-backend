@@ -33,6 +33,12 @@ public enum ErrorCode {
     AI_PUBLIC_QUOTA_EXHAUSTED(40002, "公共 AI 调用配额不足", 429),
     AI_CALL_FAILED(40003, "AI 调用失败", 500),
 
+    CLOZE_QUIZ_NOT_FOUND(41001, "完形填空题目不存在", 404),
+    CLOZE_ATTEMPT_SUBMITTED(41002, "完形填空已提交", 409),
+
+    ASYNC_TASK_NOT_FOUND(50001, "异步任务不存在", 404),
+    ASYNC_TASK_FAILED(50002, "异步任务执行失败", 500),
+
     NOT_FOUND(90004, "资源不存在", 404),
     CONFLICT(90009, "资源状态冲突", 409),
     TOO_MANY_REQUESTS(90029, "请求过于频繁", 429),

@@ -1,0 +1,24 @@
+package com.lexiflow.quiz.cloze.dto;
+
+import com.lexiflow.quiz.cloze.domain.ClozeAttemptAnswer;
+import com.lexiflow.quiz.cloze.domain.ClozeQuizBlank;
+import io.swagger.v3.oas.annotations.media.Schema;
+
+@Schema(description = "完形填空作答明细响应")
+public record ClozeAttemptAnswerResponse(
+        @Schema(description = "空格 ID") String blankId,
+        @Schema(description = "用户答案") String userAnswer,
+        @Schema(description = "正确答案") String correctAnswer,
+        @Schema(description = "是否正确") Boolean correct,
+        @Schema(description = "解析") String explanation
+) {
+    public static ClozeAttemptAnswerResponse of(ClozeAttemptAnswer answer, ClozeQuizBlank blank) {
+        return new ClozeAttemptAnswerResponse(
+                String.valueOf(answer.getBlankId()),
+                answer.getUserAnswer(),
+                answer.getCorrectAnswer(),
+                answer.getCorrect(),
+                blank.getExplanation()
+        );
+    }
+}
