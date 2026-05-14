@@ -20,13 +20,14 @@ public record TaskItemCardResponse(
         @Schema(description = "默认英文例句") String exampleSentence,
         @Schema(description = "默认例句翻译") String exampleTranslation,
         @Schema(description = "标签") String tags,
+        @Schema(description = "收藏 ID，未收藏时为空") String favoriteWordId,
         @Schema(description = "是否已收藏", example = "false") Boolean favorite,
         @Schema(description = "掌握状态", example = "NEW") String masteryStatus
 ) {
     public static TaskItemCardResponse from(
             com.lexiflow.study.task.domain.DailyTaskItem item,
             Word word,
-            boolean favorite,
+            Long favoriteWordId,
             MasteryStatus masteryStatus
     ) {
         return new TaskItemCardResponse(
@@ -44,7 +45,8 @@ public record TaskItemCardResponse(
                 word.getExampleSentence(),
                 word.getExampleTranslation(),
                 word.getTags(),
-                favorite,
+                favoriteWordId == null ? null : String.valueOf(favoriteWordId),
+                favoriteWordId != null,
                 masteryStatus.name()
         );
     }

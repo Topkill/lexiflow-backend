@@ -88,9 +88,9 @@ public class DailyTaskService {
         DailyTaskItem item = getOwnedTaskItem(userId, itemId);
         Word word = getWord(item.getWordId());
         UserWordState state = findUserWordState(userId, item.getWordbookId(), item.getWordId());
-        boolean favorite = isFavorite(userId, item.getWordbookId(), item.getWordId());
+        FavoriteWord favorite = findFavoriteWord(userId, item.getWordbookId(), item.getWordId());
         MasteryStatus masteryStatus = state == null ? MasteryStatus.NEW : state.getMasteryStatus();
-        return TaskItemCardResponse.from(item, word, favorite, masteryStatus);
+        return TaskItemCardResponse.from(item, word, favorite == null ? null : favorite.getId(), masteryStatus);
     }
 
     @Transactional
@@ -289,11 +289,12 @@ public class DailyTaskService {
                 .last("LIMIT 1"));
     }
 
-    private boolean isFavorite(Long userId, Long wordbookId, Long wordId) {
-        return favoriteWordMapper.selectCount(new LambdaQueryWrapper<FavoriteWord>()
+    private FavoriteWord findFavoriteWord(Long userId, Long wordbookId, Long wordId) {
+        return favoriteWordMapper.selectOne(new LambdaQueryWrapper<FavoriteWord>()
                 .eq(FavoriteWord::getUserId, userId)
                 .eq(FavoriteWord::getWordbookId, wordbookId)
-                .eq(FavoriteWord::getWordId, wordId)) > 0;
+                .eq(FavoriteWord::getWordId, wordId)
+                .last("LIMIT 1"));
     }
 
     private Sm2Result updateWordState(Long userId, DailyTaskItem item, StudyFeedback feedback, StudyScene scene) {
