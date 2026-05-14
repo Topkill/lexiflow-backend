@@ -36,6 +36,8 @@ public enum ErrorCode {
     CLOZE_QUIZ_NOT_FOUND(41001, "完形填空题目不存在", 404),
     CLOZE_ATTEMPT_SUBMITTED(41002, "完形填空已提交", 409),
 
+    STUDY_REPORT_NOT_FOUND(42001, "学习报告不存在", 404),
+
     ASYNC_TASK_NOT_FOUND(50001, "异步任务不存在", 404),
     ASYNC_TASK_FAILED(50002, "异步任务执行失败", 500),
 
