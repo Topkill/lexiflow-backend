@@ -32,6 +32,65 @@
         ORDER BY ww.sequence_no ASC, w.id ASC
     </select>
 
+
+
+    <select id="selectAdminWord" resultType="com.lexiflow.wordbook.dto.WordbookWordAdminRow">
+        SELECT
+            w.id AS id,
+            ww.id AS relationId,
+            w.word_text AS wordText,
+            w.display_text AS displayText,
+            w.phonetic_us AS phoneticUs,
+            w.phonetic_uk AS phoneticUk,
+            w.primary_pos AS primaryPos,
+            w.primary_definition AS primaryDefinition,
+            w.example_sentence AS exampleSentence,
+            w.example_translation AS exampleTranslation,
+            w.tags AS tags,
+            ww.sequence_no AS sequenceNo,
+            ww.difficulty_level AS difficultyLevel,
+            ww.exam_frequency AS examFrequency,
+            ww.enabled AS enabled
+        FROM wordbook_word ww
+        INNER JOIN word w ON w.id = ww.word_id AND w.deleted = 0
+        WHERE ww.deleted = 0
+          AND ww.wordbook_id = #{wordbookId}
+          AND ww.word_id = #{wordId}
+        LIMIT 1
+    </select>
+    <select id="selectAdminWordPage" resultType="com.lexiflow.wordbook.dto.WordbookWordAdminRow">
+        SELECT
+            w.id AS id,
+            ww.id AS relationId,
+            w.word_text AS wordText,
+            w.display_text AS displayText,
+            w.phonetic_us AS phoneticUs,
+            w.phonetic_uk AS phoneticUk,
+            w.primary_pos AS primaryPos,
+            w.primary_definition AS primaryDefinition,
+            w.example_sentence AS exampleSentence,
+            w.example_translation AS exampleTranslation,
+            w.tags AS tags,
+            ww.sequence_no AS sequenceNo,
+            ww.difficulty_level AS difficultyLevel,
+            ww.exam_frequency AS examFrequency,
+            ww.enabled AS enabled
+        FROM wordbook_word ww
+        INNER JOIN word w ON w.id = ww.word_id AND w.deleted = 0
+        WHERE ww.deleted = 0
+          AND ww.wordbook_id = #{wordbookId}
+        <if test="enabled != null">
+          AND ww.enabled = #{enabled}
+        </if>
+        <if test="keyword != null and keyword != ''">
+          AND (
+            w.word_text LIKE CONCAT('%', #{keyword}, '%')
+            OR w.display_text LIKE CONCAT('%', #{keyword}, '%')
+            OR w.primary_definition LIKE CONCAT('%', #{keyword}, '%')
+          )
+        </if>
+        ORDER BY ww.sequence_no ASC, w.id ASC
+    </select>
     <select id="selectNewWordCandidates" resultType="com.lexiflow.wordbook.dto.WordbookWordPickRow">
         SELECT
             ww.word_id AS wordId,
