@@ -3,7 +3,9 @@ package com.lexiflow.quiz.cloze.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.lexiflow.ai.content.domain.AiContentCache;
 import com.lexiflow.ai.content.domain.AiContentType;
+import com.lexiflow.ai.content.mapper.AiContentCacheMapper;
 import com.lexiflow.ai.core.dto.AiChatCompletionResult;
 import com.lexiflow.ai.core.dto.AiPrompt;
 import com.lexiflow.ai.core.service.AiGatewayService;
@@ -57,6 +59,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Random;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.regex.Pattern;
@@ -76,6 +79,7 @@ public class ClozeQuizService {
 
     private final AsyncTaskService asyncTaskService;
     private final AiGatewayService aiGatewayService;
+    private final AiContentCacheMapper aiContentCacheMapper;
     private final DailyTaskMapper dailyTaskMapper;
     private final DailyTaskItemMapper dailyTaskItemMapper;
     private final WordMapper wordMapper;
@@ -217,6 +221,12 @@ public class ClozeQuizService {
         if (selection.targetWords().isEmpty() || selection.blankWords().isEmpty()) {
             throw new BizException(ErrorCode.BAD_REQUEST, "今日任务暂无可用于生成完形填空的目标词");
         }
+        String sourceHash = buildClozeSourceHash(userId, dailyTask, wordbookId, sourceType, selection);
+        ClozeQuiz cachedQuiz = tryCreateQuizFromCache(userId, dailyTask, wordbookId, asyncTaskId, sourceType, selection, sourceHash);
+        if (cachedQuiz != null) {
+            return cachedQuiz;
+        }
+
         BizException lastValidationError = null;
         for (int attempt = 1; attempt <= MAX_GENERATE_ATTEMPTS; attempt++) {
             AiPrompt prompt = buildPrompt(dailyTask, wordbookId, sourceType, selection, attempt, lastValidationError == null ? null : lastValidationError.getCustomMessage());
@@ -224,6 +234,7 @@ public class ClozeQuizService {
             JsonNode content = parseJson(result.content());
             try {
                 validateGeneratedContent(content, selection);
+                upsertClozeCache(userId, wordbookId, sourceHash, content);
                 return saveQuiz(userId, dailyTask, wordbookId, asyncTaskId, sourceType, selection, content);
             } catch (BizException ex) {
                 lastValidationError = ex;
@@ -289,7 +300,7 @@ public class ClozeQuizService {
             throw new BizException(ErrorCode.BAD_REQUEST, "本组已完成单词不足 10 个，暂不能生成 10 空完形填空");
         }
         Map<Long, FeedbackPriority> priorityMap = selectFeedbackPriorities(userId, dailyTask.getId(), itemMap);
-        List<Word> blankWords = selectBlankWords(targetWords, priorityMap, COMPLETED_GROUP_BLANK_COUNT);
+        List<Word> blankWords = selectBlankWords(targetWords, priorityMap, COMPLETED_GROUP_BLANK_COUNT, dailyTask.getId());
         return new ClozeWordSelection(targetWords, blankWords);
     }
 
@@ -311,10 +322,10 @@ public class ClozeQuizService {
         return priorityMap;
     }
 
-    private List<Word> selectBlankWords(List<Word> targetWords, Map<Long, FeedbackPriority> priorityMap, int blankCount) {
-        List<Word> unknownWords = shuffleByPriority(targetWords, priorityMap, FeedbackPriority.UNKNOWN);
-        List<Word> vagueWords = shuffleByPriority(targetWords, priorityMap, FeedbackPriority.VAGUE);
-        List<Word> knownWords = shuffleByPriority(targetWords, priorityMap, FeedbackPriority.KNOWN);
+    private List<Word> selectBlankWords(List<Word> targetWords, Map<Long, FeedbackPriority> priorityMap, int blankCount, Long dailyTaskId) {
+        List<Word> unknownWords = shuffleByPriority(targetWords, priorityMap, FeedbackPriority.UNKNOWN, dailyTaskId);
+        List<Word> vagueWords = shuffleByPriority(targetWords, priorityMap, FeedbackPriority.VAGUE, dailyTaskId);
+        List<Word> knownWords = shuffleByPriority(targetWords, priorityMap, FeedbackPriority.KNOWN, dailyTaskId);
         List<Word> selected = new ArrayList<>();
         appendUntilLimit(selected, unknownWords, blankCount);
         appendUntilLimit(selected, vagueWords, blankCount);
@@ -322,11 +333,11 @@ public class ClozeQuizService {
         return selected;
     }
 
-    private List<Word> shuffleByPriority(List<Word> targetWords, Map<Long, FeedbackPriority> priorityMap, FeedbackPriority priority) {
+    private List<Word> shuffleByPriority(List<Word> targetWords, Map<Long, FeedbackPriority> priorityMap, FeedbackPriority priority, Long dailyTaskId) {
         List<Word> words = targetWords.stream()
                 .filter(word -> priorityMap.getOrDefault(word.getId(), FeedbackPriority.KNOWN) == priority)
                 .collect(Collectors.toCollection(ArrayList::new));
-        Collections.shuffle(words);
+        Collections.shuffle(words, new Random(Objects.hash(dailyTaskId, priority.name())));
         return words;
     }
 
@@ -346,6 +357,77 @@ public class ClozeQuizService {
         Map<Long, Word> wordMap = wordMapper.selectBatchIds(wordIds).stream()
                 .collect(Collectors.toMap(Word::getId, Function.identity()));
         return wordIds.stream().map(wordMap::get).filter(Objects::nonNull).toList();
+    }
+
+    private ClozeQuiz tryCreateQuizFromCache(
+            Long userId,
+            DailyTask dailyTask,
+            Long wordbookId,
+            Long asyncTaskId,
+            ClozeSourceType sourceType,
+            ClozeWordSelection selection,
+            String sourceHash
+    ) {
+        AiContentCache cache = aiContentCacheMapper.selectOne(new LambdaQueryWrapper<AiContentCache>()
+                .eq(AiContentCache::getContentType, AiContentType.CLOZE)
+                .eq(AiContentCache::getCacheKey, clozeCacheKey(sourceHash))
+                .eq(AiContentCache::getUserId, userId)
+                .last("LIMIT 1"));
+        if (cache == null) {
+            return null;
+        }
+        try {
+            JsonNode content = parseJson(cache.getContentJson());
+            validateGeneratedContent(content, selection);
+            cache.setHitCount((cache.getHitCount() == null ? 0 : cache.getHitCount()) + 1);
+            aiContentCacheMapper.updateById(cache);
+            return saveQuiz(userId, dailyTask, wordbookId, asyncTaskId, sourceType, selection, content);
+        } catch (BizException ex) {
+            return null;
+        }
+    }
+
+    private void upsertClozeCache(Long userId, Long wordbookId, String sourceHash, JsonNode content) {
+        String cacheKey = clozeCacheKey(sourceHash);
+        AiContentCache cache = aiContentCacheMapper.selectOne(new LambdaQueryWrapper<AiContentCache>()
+                .eq(AiContentCache::getContentType, AiContentType.CLOZE)
+                .eq(AiContentCache::getCacheKey, cacheKey)
+                .last("LIMIT 1"));
+        if (cache == null) {
+            cache = new AiContentCache();
+            cache.setContentType(AiContentType.CLOZE);
+            cache.setCacheKey(cacheKey);
+            cache.setUserId(userId);
+            cache.setWordbookId(wordbookId);
+            cache.setSourceHash(sourceHash);
+            cache.setHitCount(0);
+            cache.setDeleted(0);
+            cache.setVersion(0);
+        }
+        cache.setContentJson(toJson(content));
+        cache.setMarkdownContent(null);
+        cache.setModelName(null);
+        cache.setExpiresAt(null);
+        if (cache.getId() == null) {
+            aiContentCacheMapper.insert(cache);
+        } else {
+            aiContentCacheMapper.updateById(cache);
+        }
+    }
+
+    private String buildClozeSourceHash(Long userId, DailyTask dailyTask, Long wordbookId, ClozeSourceType sourceType, ClozeWordSelection selection) {
+        Map<String, Object> source = new LinkedHashMap<>();
+        source.put("userId", String.valueOf(userId));
+        source.put("dailyTaskId", String.valueOf(dailyTask.getId()));
+        source.put("wordbookId", String.valueOf(wordbookId));
+        source.put("sourceType", sourceType.name());
+        source.put("targetWordIds", selection.targetWords().stream().map(Word::getId).map(String::valueOf).toList());
+        source.put("blankWordIds", selection.blankWords().stream().map(Word::getId).map(String::valueOf).toList());
+        return sha256(toJson(source));
+    }
+
+    private String clozeCacheKey(String sourceHash) {
+        return "cloze:" + sourceHash;
     }
 
     private ClozeQuiz saveQuiz(Long userId, DailyTask dailyTask, Long wordbookId, Long asyncTaskId, ClozeSourceType sourceType, ClozeWordSelection selection, JsonNode content) {
