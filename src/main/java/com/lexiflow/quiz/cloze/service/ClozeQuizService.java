@@ -7,6 +7,7 @@ import com.lexiflow.ai.content.domain.AiContentType;
 import com.lexiflow.ai.core.dto.AiChatCompletionResult;
 import com.lexiflow.ai.core.dto.AiPrompt;
 import com.lexiflow.ai.core.service.AiGatewayService;
+import com.lexiflow.ai.core.util.AiJsonUtils;
 import com.lexiflow.async.domain.AsyncTask;
 import com.lexiflow.async.domain.AsyncTaskType;
 import com.lexiflow.async.service.AsyncTaskService;
@@ -220,7 +221,7 @@ public class ClozeQuizService {
         for (int attempt = 1; attempt <= MAX_GENERATE_ATTEMPTS; attempt++) {
             AiPrompt prompt = buildPrompt(dailyTask, wordbookId, sourceType, selection, attempt, lastValidationError == null ? null : lastValidationError.getCustomMessage());
             AiChatCompletionResult result = aiGatewayService.generateJson(userId, AiContentType.CLOZE, prompt);
-            JsonNode content = parseJson(cleanJson(result.content()));
+            JsonNode content = parseJson(result.content());
             try {
                 validateGeneratedContent(content, selection);
                 return saveQuiz(userId, dailyTask, wordbookId, asyncTaskId, sourceType, selection, content);
@@ -584,34 +585,7 @@ public class ClozeQuizService {
         }
     }
     private JsonNode parseJson(String json) {
-        try {
-            JsonNode node = objectMapper.readTree(json);
-            if (!node.isObject()) {
-                throw new BizException(ErrorCode.AI_CALL_FAILED, "AI 返回内容不是 JSON 对象");
-            }
-            return node;
-        } catch (BizException ex) {
-            throw ex;
-        } catch (Exception ex) {
-            throw new BizException(ErrorCode.AI_CALL_FAILED, "AI 返回内容解析失败");
-        }
-    }
-
-    private String cleanJson(String content) {
-        String text = content == null ? "" : content.trim();
-        if (text.startsWith("```")) {
-            int firstLineBreak = text.indexOf('\n');
-            int lastFence = text.lastIndexOf("```");
-            if (firstLineBreak >= 0 && lastFence > firstLineBreak) {
-                text = text.substring(firstLineBreak + 1, lastFence).trim();
-            }
-        }
-        int firstBrace = text.indexOf('{');
-        int lastBrace = text.lastIndexOf('}');
-        if (firstBrace >= 0 && lastBrace > firstBrace) {
-            return text.substring(firstBrace, lastBrace + 1);
-        }
-        return text;
+        return AiJsonUtils.parseObject(objectMapper, json);
     }
 
     private String toJson(Object value) {
