@@ -52,14 +52,12 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Random;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.regex.Pattern;
@@ -80,6 +78,7 @@ public class ClozeQuizService {
     private final AsyncTaskService asyncTaskService;
     private final AiGatewayService aiGatewayService;
     private final AiContentCacheMapper aiContentCacheMapper;
+    private final ClozeBlankWordSelector clozeBlankWordSelector;
     private final DailyTaskMapper dailyTaskMapper;
     private final DailyTaskItemMapper dailyTaskItemMapper;
     private final WordMapper wordMapper;
@@ -299,17 +298,17 @@ public class ClozeQuizService {
         if (targetWords.size() < COMPLETED_GROUP_BLANK_COUNT) {
             throw new BizException(ErrorCode.BAD_REQUEST, "本组已完成单词不足 10 个，暂不能生成 10 空完形填空");
         }
-        Map<Long, FeedbackPriority> priorityMap = selectFeedbackPriorities(userId, dailyTask.getId(), itemMap);
-        List<Word> blankWords = selectBlankWords(targetWords, priorityMap, COMPLETED_GROUP_BLANK_COUNT, dailyTask.getId());
+        Map<Long, StudyFeedback> feedbackMap = selectFeedbackMap(userId, dailyTask.getId(), itemMap);
+        List<Word> blankWords = clozeBlankWordSelector.selectBlankWords(targetWords, feedbackMap, COMPLETED_GROUP_BLANK_COUNT, dailyTask.getId());
         return new ClozeWordSelection(targetWords, blankWords);
     }
 
-    private Map<Long, FeedbackPriority> selectFeedbackPriorities(Long userId, Long dailyTaskId, Map<Long, DailyTaskItem> itemMap) {
+    private Map<Long, StudyFeedback> selectFeedbackMap(Long userId, Long dailyTaskId, Map<Long, DailyTaskItem> itemMap) {
         if (itemMap.isEmpty()) {
             return Map.of();
         }
         Set<Long> taskItemIds = itemMap.values().stream().map(DailyTaskItem::getId).collect(Collectors.toSet());
-        Map<Long, FeedbackPriority> priorityMap = new LinkedHashMap<>();
+        Map<Long, StudyFeedback> feedbackMap = new LinkedHashMap<>();
         studyEventMapper.selectList(new LambdaQueryWrapper<StudyEvent>()
                         .eq(StudyEvent::getUserId, userId)
                         .eq(StudyEvent::getDailyTaskId, dailyTaskId)
@@ -317,37 +316,9 @@ public class ClozeQuizService {
                         .isNotNull(StudyEvent::getFeedback)
                         .orderByAsc(StudyEvent::getCreatedAt)
                         .orderByAsc(StudyEvent::getId))
-                .forEach(event -> priorityMap.merge(event.getWordId(), FeedbackPriority.from(event.getFeedback()), FeedbackPriority::higher));
-        itemMap.forEach((wordId, item) -> priorityMap.putIfAbsent(wordId, FeedbackPriority.from(item.getFeedback())));
-        return priorityMap;
-    }
-
-    private List<Word> selectBlankWords(List<Word> targetWords, Map<Long, FeedbackPriority> priorityMap, int blankCount, Long dailyTaskId) {
-        List<Word> unknownWords = shuffleByPriority(targetWords, priorityMap, FeedbackPriority.UNKNOWN, dailyTaskId);
-        List<Word> vagueWords = shuffleByPriority(targetWords, priorityMap, FeedbackPriority.VAGUE, dailyTaskId);
-        List<Word> knownWords = shuffleByPriority(targetWords, priorityMap, FeedbackPriority.KNOWN, dailyTaskId);
-        List<Word> selected = new ArrayList<>();
-        appendUntilLimit(selected, unknownWords, blankCount);
-        appendUntilLimit(selected, vagueWords, blankCount);
-        appendUntilLimit(selected, knownWords, blankCount);
-        return selected;
-    }
-
-    private List<Word> shuffleByPriority(List<Word> targetWords, Map<Long, FeedbackPriority> priorityMap, FeedbackPriority priority, Long dailyTaskId) {
-        List<Word> words = targetWords.stream()
-                .filter(word -> priorityMap.getOrDefault(word.getId(), FeedbackPriority.KNOWN) == priority)
-                .collect(Collectors.toCollection(ArrayList::new));
-        Collections.shuffle(words, new Random(Objects.hash(dailyTaskId, priority.name())));
-        return words;
-    }
-
-    private void appendUntilLimit(List<Word> selected, List<Word> candidates, int limit) {
-        for (Word candidate : candidates) {
-            if (selected.size() >= limit) {
-                return;
-            }
-            selected.add(candidate);
-        }
+                .forEach(event -> feedbackMap.merge(event.getWordId(), event.getFeedback(), ClozeBlankWordSelector::higherFeedback));
+        itemMap.forEach((wordId, item) -> feedbackMap.putIfAbsent(wordId, ClozeBlankWordSelector.parseFeedback(item.getFeedback())));
+        return feedbackMap;
     }
 
     private List<Word> findWordsKeepingOrder(List<Long> wordIds) {
@@ -706,41 +677,4 @@ public class ClozeQuizService {
         }
     }
 
-    private enum FeedbackPriority {
-        UNKNOWN(3),
-        VAGUE(2),
-        KNOWN(1);
-
-        private final int weight;
-
-        FeedbackPriority(int weight) {
-            this.weight = weight;
-        }
-
-        private static FeedbackPriority from(StudyFeedback feedback) {
-            if (feedback == null) {
-                return KNOWN;
-            }
-            return switch (feedback) {
-                case UNKNOWN -> UNKNOWN;
-                case VAGUE -> VAGUE;
-                case KNOWN -> KNOWN;
-            };
-        }
-
-        private static FeedbackPriority from(String feedback) {
-            if (!StringUtils.hasText(feedback)) {
-                return KNOWN;
-            }
-            try {
-                return from(StudyFeedback.valueOf(feedback));
-            } catch (IllegalArgumentException ex) {
-                return KNOWN;
-            }
-        }
-
-        private static FeedbackPriority higher(FeedbackPriority left, FeedbackPriority right) {
-            return left.weight >= right.weight ? left : right;
-        }
-    }
 }
