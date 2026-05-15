@@ -29,13 +29,16 @@ import com.lexiflow.quiz.cloze.mapper.ClozeAttemptMapper;
 import com.lexiflow.quiz.cloze.mapper.ClozeQuizBlankMapper;
 import com.lexiflow.quiz.cloze.mapper.ClozeQuizMapper;
 import com.lexiflow.study.progress.domain.StudyEvent;
+import com.lexiflow.study.progress.domain.StudyFeedback;
 import com.lexiflow.study.progress.domain.StudyScene;
 import com.lexiflow.study.progress.domain.WrongWord;
 import com.lexiflow.study.progress.mapper.StudyEventMapper;
 import com.lexiflow.study.progress.mapper.WrongWordMapper;
 import com.lexiflow.study.task.domain.DailyTask;
 import com.lexiflow.study.task.domain.DailyTaskItem;
+import com.lexiflow.study.task.domain.DailyTaskItemStatus;
 import com.lexiflow.study.task.domain.DailyTaskItemType;
+import com.lexiflow.study.task.domain.DailyTaskStatus;
 import com.lexiflow.study.task.mapper.DailyTaskItemMapper;
 import com.lexiflow.study.task.mapper.DailyTaskMapper;
 import com.lexiflow.wordbook.domain.Word;
@@ -46,13 +49,16 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Function;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -64,6 +70,8 @@ import org.springframework.util.StringUtils;
 public class ClozeQuizService {
 
     private static final String SYSTEM_PROMPT = "你是 LexiFlow 的 AI 英语测验出题助手。请只输出合法 JSON，不要输出 Markdown、解释性前后缀或代码块。题目面向备考大学生，短文自然连贯，所有空格答案必须来自候选词。";
+    private static final int COMPLETED_GROUP_BLANK_COUNT = 10;
+    private static final int MAX_GENERATE_ATTEMPTS = 2;
 
     private final AsyncTaskService asyncTaskService;
     private final AiGatewayService aiGatewayService;
@@ -81,15 +89,16 @@ public class ClozeQuizService {
     public CreateClozeTaskResponse createClozeTask(Long userId, CreateClozeTaskRequest request) {
         DailyTask dailyTask = getOwnedDailyTask(userId, request.dailyTaskId());
         Long wordbookId = dailyTaskWordbookId(dailyTask);
+        ClozeSourceType sourceType = request.safeSourceType();
         String requestJson = toJson(Map.of(
                 "dailyTaskId", String.valueOf(request.dailyTaskId()),
-                "sourceType", request.safeSourceType().name(),
-                "targetWordCount", request.targetWordCount()
+                "sourceType", sourceType.name(),
+                "targetWordCount", request.safeTargetWordCount()
         ));
         AsyncTask task = asyncTaskService.createTask(userId, AsyncTaskType.AI_CLOZE, requestJson);
         try {
             asyncTaskService.markRunning(task.getId(), "正在生成完形填空", 20);
-            ClozeQuiz quiz = generateQuiz(userId, dailyTask, wordbookId, task.getId(), request.safeSourceType(), request.targetWordCount());
+            ClozeQuiz quiz = generateQuiz(userId, dailyTask, wordbookId, task.getId(), sourceType, request.safeTargetWordCount());
             asyncTaskService.markSuccess(task.getId(), quiz.getId(), "完形填空生成完成");
             return CreateClozeTaskResponse.from(asyncTaskService.getOwnedTaskEntity(userId, task.getId()));
         } catch (BizException ex) {
@@ -203,17 +212,29 @@ public class ClozeQuizService {
 
     @Transactional
     protected ClozeQuiz generateQuiz(Long userId, DailyTask dailyTask, Long wordbookId, Long asyncTaskId, ClozeSourceType sourceType, int targetWordCount) {
-        List<Word> targetWords = selectTargetWords(userId, dailyTask, wordbookId, sourceType, targetWordCount);
-        if (targetWords.isEmpty()) {
+        ClozeWordSelection selection = selectClozeWords(userId, dailyTask, wordbookId, sourceType, targetWordCount);
+        if (selection.targetWords().isEmpty() || selection.blankWords().isEmpty()) {
             throw new BizException(ErrorCode.BAD_REQUEST, "今日任务暂无可用于生成完形填空的目标词");
         }
-        AiPrompt prompt = buildPrompt(dailyTask, wordbookId, sourceType, targetWords);
-        AiChatCompletionResult result = aiGatewayService.generateJson(userId, AiContentType.CLOZE, prompt);
-        JsonNode content = parseJson(cleanJson(result.content()));
-        return saveQuiz(userId, dailyTask, wordbookId, asyncTaskId, sourceType, targetWords, content);
+        BizException lastValidationError = null;
+        for (int attempt = 1; attempt <= MAX_GENERATE_ATTEMPTS; attempt++) {
+            AiPrompt prompt = buildPrompt(dailyTask, wordbookId, sourceType, selection, attempt, lastValidationError == null ? null : lastValidationError.getCustomMessage());
+            AiChatCompletionResult result = aiGatewayService.generateJson(userId, AiContentType.CLOZE, prompt);
+            JsonNode content = parseJson(cleanJson(result.content()));
+            try {
+                validateGeneratedContent(content, selection);
+                return saveQuiz(userId, dailyTask, wordbookId, asyncTaskId, sourceType, selection, content);
+            } catch (BizException ex) {
+                lastValidationError = ex;
+            }
+        }
+        throw lastValidationError == null ? new BizException(ErrorCode.AI_CALL_FAILED, "AI 完形填空生成结果未通过文本检测") : lastValidationError;
     }
 
-    private List<Word> selectTargetWords(Long userId, DailyTask dailyTask, Long wordbookId, ClozeSourceType sourceType, int targetWordCount) {
+    private ClozeWordSelection selectClozeWords(Long userId, DailyTask dailyTask, Long wordbookId, ClozeSourceType sourceType, int targetWordCount) {
+        if (sourceType == ClozeSourceType.COMPLETED_GROUP) {
+            return selectCompletedGroupWords(userId, dailyTask);
+        }
         LinkedHashSet<Long> wordIds = new LinkedHashSet<>();
         if (sourceType == ClozeSourceType.TODAY_NEW || sourceType == ClozeSourceType.MIXED) {
             dailyTaskItemMapper.selectList(new LambdaQueryWrapper<DailyTaskItem>()
@@ -238,22 +259,100 @@ public class ClozeQuizService {
         }
         List<Long> limitedIds = wordIds.stream().limit(targetWordCount).toList();
         if (limitedIds.isEmpty()) {
-            return List.of();
+            return new ClozeWordSelection(List.of(), List.of());
         }
-        Map<Long, Word> wordMap = wordMapper.selectBatchIds(limitedIds).stream()
-                .collect(Collectors.toMap(Word::getId, Function.identity()));
-        return limitedIds.stream()
-                .map(wordMap::get)
-                .filter(Objects::nonNull)
-                .toList();
+        List<Word> words = findWordsKeepingOrder(limitedIds);
+        return new ClozeWordSelection(words, words);
     }
 
-    private ClozeQuiz saveQuiz(Long userId, DailyTask dailyTask, Long wordbookId, Long asyncTaskId, ClozeSourceType sourceType, List<Word> targetWords, JsonNode content) {
+    private ClozeWordSelection selectCompletedGroupWords(Long userId, DailyTask dailyTask) {
+        if (dailyTask.getStatus() != DailyTaskStatus.DONE) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "完成本组单词后才能生成本组完形填空");
+        }
+        List<DailyTaskItem> items = dailyTaskItemMapper.selectList(new LambdaQueryWrapper<DailyTaskItem>()
+                .eq(DailyTaskItem::getDailyTaskId, dailyTask.getId())
+                .eq(DailyTaskItem::getUserId, userId)
+                .eq(DailyTaskItem::getStatus, DailyTaskItemStatus.DONE)
+                .orderByAsc(DailyTaskItem::getSequenceNo)
+                .orderByAsc(DailyTaskItem::getId));
+        if (items.isEmpty()) {
+            return new ClozeWordSelection(List.of(), List.of());
+        }
+        List<Long> targetWordIds = items.stream().map(DailyTaskItem::getWordId).distinct().toList();
+        Map<Long, DailyTaskItem> itemMap = items.stream()
+                .collect(Collectors.toMap(DailyTaskItem::getWordId, Function.identity(), (left, right) -> left, LinkedHashMap::new));
+        Map<Long, Word> wordMap = wordMapper.selectBatchIds(targetWordIds).stream()
+                .collect(Collectors.toMap(Word::getId, Function.identity()));
+        List<Word> targetWords = targetWordIds.stream().map(wordMap::get).filter(Objects::nonNull).toList();
+        if (targetWords.size() < COMPLETED_GROUP_BLANK_COUNT) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "本组已完成单词不足 10 个，暂不能生成 10 空完形填空");
+        }
+        Map<Long, FeedbackPriority> priorityMap = selectFeedbackPriorities(userId, dailyTask.getId(), itemMap);
+        List<Word> blankWords = selectBlankWords(targetWords, priorityMap, COMPLETED_GROUP_BLANK_COUNT);
+        return new ClozeWordSelection(targetWords, blankWords);
+    }
+
+    private Map<Long, FeedbackPriority> selectFeedbackPriorities(Long userId, Long dailyTaskId, Map<Long, DailyTaskItem> itemMap) {
+        if (itemMap.isEmpty()) {
+            return Map.of();
+        }
+        Set<Long> taskItemIds = itemMap.values().stream().map(DailyTaskItem::getId).collect(Collectors.toSet());
+        Map<Long, FeedbackPriority> priorityMap = new LinkedHashMap<>();
+        studyEventMapper.selectList(new LambdaQueryWrapper<StudyEvent>()
+                        .eq(StudyEvent::getUserId, userId)
+                        .eq(StudyEvent::getDailyTaskId, dailyTaskId)
+                        .in(StudyEvent::getDailyTaskItemId, taskItemIds)
+                        .isNotNull(StudyEvent::getFeedback)
+                        .orderByAsc(StudyEvent::getCreatedAt)
+                        .orderByAsc(StudyEvent::getId))
+                .forEach(event -> priorityMap.merge(event.getWordId(), FeedbackPriority.from(event.getFeedback()), FeedbackPriority::higher));
+        itemMap.forEach((wordId, item) -> priorityMap.putIfAbsent(wordId, FeedbackPriority.from(item.getFeedback())));
+        return priorityMap;
+    }
+
+    private List<Word> selectBlankWords(List<Word> targetWords, Map<Long, FeedbackPriority> priorityMap, int blankCount) {
+        List<Word> unknownWords = shuffleByPriority(targetWords, priorityMap, FeedbackPriority.UNKNOWN);
+        List<Word> vagueWords = shuffleByPriority(targetWords, priorityMap, FeedbackPriority.VAGUE);
+        List<Word> knownWords = shuffleByPriority(targetWords, priorityMap, FeedbackPriority.KNOWN);
+        List<Word> selected = new ArrayList<>();
+        appendUntilLimit(selected, unknownWords, blankCount);
+        appendUntilLimit(selected, vagueWords, blankCount);
+        appendUntilLimit(selected, knownWords, blankCount);
+        return selected;
+    }
+
+    private List<Word> shuffleByPriority(List<Word> targetWords, Map<Long, FeedbackPriority> priorityMap, FeedbackPriority priority) {
+        List<Word> words = targetWords.stream()
+                .filter(word -> priorityMap.getOrDefault(word.getId(), FeedbackPriority.KNOWN) == priority)
+                .collect(Collectors.toCollection(ArrayList::new));
+        Collections.shuffle(words);
+        return words;
+    }
+
+    private void appendUntilLimit(List<Word> selected, List<Word> candidates, int limit) {
+        for (Word candidate : candidates) {
+            if (selected.size() >= limit) {
+                return;
+            }
+            selected.add(candidate);
+        }
+    }
+
+    private List<Word> findWordsKeepingOrder(List<Long> wordIds) {
+        if (wordIds.isEmpty()) {
+            return List.of();
+        }
+        Map<Long, Word> wordMap = wordMapper.selectBatchIds(wordIds).stream()
+                .collect(Collectors.toMap(Word::getId, Function.identity()));
+        return wordIds.stream().map(wordMap::get).filter(Objects::nonNull).toList();
+    }
+
+    private ClozeQuiz saveQuiz(Long userId, DailyTask dailyTask, Long wordbookId, Long asyncTaskId, ClozeSourceType sourceType, ClozeWordSelection selection, JsonNode content) {
         JsonNode blanksNode = content.path("blanks");
         if (!blanksNode.isArray() || blanksNode.isEmpty()) {
             throw new BizException(ErrorCode.AI_CALL_FAILED, "AI 完形填空缺少空格数据");
         }
-        Map<String, Word> wordMap = targetWords.stream()
+        Map<String, Word> wordMap = selection.blankWords().stream()
                 .collect(Collectors.toMap(word -> normalizeAnswer(word.getDisplayText()), Function.identity(), (left, right) -> left));
         List<ClozeQuizBlank> blankDrafts = new ArrayList<>();
         int blankNo = 1;
@@ -274,7 +373,7 @@ public class ClozeQuizService {
             blankDrafts.add(blank);
             blankNo++;
         }
-        if (blankDrafts.isEmpty()) {
+        if (blankDrafts.size() != selection.blankWords().size()) {
             throw new BizException(ErrorCode.AI_CALL_FAILED, "AI 完形填空答案未匹配目标词");
         }
 
@@ -286,8 +385,8 @@ public class ClozeQuizService {
         quiz.setSourceType(sourceType);
         quiz.setTitle(content.path("title").asText("LexiFlow Cloze Practice"));
         quiz.setPassage(content.path("passage").asText());
-        quiz.setCandidateWords(toJson(normalizeCandidateWords(content.path("candidateWords"), targetWords)));
-        quiz.setTargetWordIds(toJson(targetWords.stream().map(word -> String.valueOf(word.getId())).toList()));
+        quiz.setCandidateWords(toJson(normalizeCandidateWords(content.path("candidateWords"), selection.blankWords())));
+        quiz.setTargetWordIds(toJson(selection.targetWords().stream().map(word -> String.valueOf(word.getId())).toList()));
         quiz.setExplanation(content.path("explanation").asText(null));
         quiz.setDeleted(0);
         quiz.setVersion(0);
@@ -299,8 +398,27 @@ public class ClozeQuizService {
         return quiz;
     }
 
-    private AiPrompt buildPrompt(DailyTask dailyTask, Long wordbookId, ClozeSourceType sourceType, List<Word> targetWords) {
-        List<Map<String, Object>> words = targetWords.stream()
+    private AiPrompt buildPrompt(DailyTask dailyTask, Long wordbookId, ClozeSourceType sourceType, ClozeWordSelection selection, int attempt, String previousError) {
+        Map<String, Object> context = new LinkedHashMap<>();
+        context.put("dailyTaskId", String.valueOf(dailyTask.getId()));
+        context.put("sourceType", sourceType.name());
+        context.put("wordbookId", String.valueOf(wordbookId));
+        context.put("blankWords", toPromptWords(selection.blankWords()));
+        context.put("backgroundWords", toPromptWords(selection.backgroundWords()));
+        context.put("blankCount", selection.blankWords().size());
+        context.put("attempt", attempt);
+        if (StringUtils.hasText(previousError)) {
+            context.put("previousValidationError", previousError);
+        }
+        String sourceJson = toJson(context);
+        String schema = "输出 JSON 对象：title 字符串；passage 字符串，必须使用 ___1___、___2___ 这样的占位符；candidateWords 字符串数组；blanks 数组，每项包含 blankNo、answer、hint、explanation；explanation 字符串。";
+        String rules = "严格规则：1. blanks 数量必须等于 blankCount；2. blankWords 中每个单词必须且只能作为一个空格答案出现；3. backgroundWords 中每个单词必须完整出现在 passage 文本中，不能被挖空；4. candidateWords 必须包含所有 blankWords，可加入少量干扰词；5. passage 要是一篇自然连贯的 100-180 词英文短文。";
+        String userPrompt = schema + "\n" + rules + "\n" + sourceJson;
+        return new AiPrompt(SYSTEM_PROMPT, userPrompt, sha256(sourceJson));
+    }
+
+    private List<Map<String, Object>> toPromptWords(List<Word> words) {
+        return words.stream()
                 .map(word -> {
                     Map<String, Object> item = new LinkedHashMap<>();
                     item.put("wordId", String.valueOf(word.getId()));
@@ -311,15 +429,41 @@ public class ClozeQuizService {
                     return item;
                 })
                 .toList();
-        Map<String, Object> context = new LinkedHashMap<>();
-        context.put("dailyTaskId", String.valueOf(dailyTask.getId()));
-        context.put("sourceType", sourceType.name());
-        context.put("wordbookId", String.valueOf(wordbookId));
-        context.put("targetWords", words);
-        String sourceJson = toJson(context);
-        String schema = "输出 JSON 对象：title 字符串；passage 字符串，使用 ___1___、___2___ 这样的占位符；candidateWords 字符串数组，包含所有目标词和少量干扰词；blanks 数组，每项包含 blankNo、answer、hint、explanation；explanation 字符串。";
-        String userPrompt = schema + "\n请围绕同一校园或备考主题生成一段 80-140 词英文短文，空格数量与目标词数量尽量一致。\n" + sourceJson;
-        return new AiPrompt(SYSTEM_PROMPT, userPrompt, sha256(sourceJson));
+    }
+
+    private void validateGeneratedContent(JsonNode content, ClozeWordSelection selection) {
+        JsonNode blanksNode = content.path("blanks");
+        if (!blanksNode.isArray() || blanksNode.size() != selection.blankWords().size()) {
+            throw new BizException(ErrorCode.AI_CALL_FAILED, "AI 完形填空空格数量不符合要求");
+        }
+        Set<String> expectedBlankWords = selection.blankWords().stream()
+                .map(word -> normalizeAnswer(word.getDisplayText()))
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        Set<String> actualBlankWords = new LinkedHashSet<>();
+        for (JsonNode blankNode : blanksNode) {
+            actualBlankWords.add(normalizeAnswer(blankNode.path("answer").asText()));
+        }
+        if (!actualBlankWords.equals(expectedBlankWords)) {
+            throw new BizException(ErrorCode.AI_CALL_FAILED, "AI 完形填空挖空词未按学习反馈规则命中");
+        }
+        String passage = content.path("passage").asText("");
+        if (!StringUtils.hasText(passage)) {
+            throw new BizException(ErrorCode.AI_CALL_FAILED, "AI 完形填空缺少文章内容");
+        }
+        List<String> missingWords = selection.backgroundWords().stream()
+                .map(Word::getDisplayText)
+                .filter(word -> !containsWord(passage, word))
+                .toList();
+        if (!missingWords.isEmpty()) {
+            throw new BizException(ErrorCode.AI_CALL_FAILED, "AI 完形填空文章未覆盖全部背景词：" + String.join(", ", missingWords));
+        }
+    }
+
+    private boolean containsWord(String text, String word) {
+        if (!StringUtils.hasText(text) || !StringUtils.hasText(word)) {
+            return false;
+        }
+        return Pattern.compile("(?i)(?<![A-Za-z])" + Pattern.quote(word.trim()) + "(?![A-Za-z])").matcher(text).find();
     }
 
     private List<String> normalizeCandidateWords(JsonNode candidateWords, List<Word> targetWords) {
@@ -497,5 +641,50 @@ public class ClozeQuizService {
 
     private String safe(String value) {
         return value == null ? "" : value;
+    }
+
+    private record ClozeWordSelection(List<Word> targetWords, List<Word> blankWords) {
+        private List<Word> backgroundWords() {
+            Set<Long> blankWordIds = blankWords.stream().map(Word::getId).collect(Collectors.toSet());
+            return targetWords.stream().filter(word -> !blankWordIds.contains(word.getId())).toList();
+        }
+    }
+
+    private enum FeedbackPriority {
+        UNKNOWN(3),
+        VAGUE(2),
+        KNOWN(1);
+
+        private final int weight;
+
+        FeedbackPriority(int weight) {
+            this.weight = weight;
+        }
+
+        private static FeedbackPriority from(StudyFeedback feedback) {
+            if (feedback == null) {
+                return KNOWN;
+            }
+            return switch (feedback) {
+                case UNKNOWN -> UNKNOWN;
+                case VAGUE -> VAGUE;
+                case KNOWN -> KNOWN;
+            };
+        }
+
+        private static FeedbackPriority from(String feedback) {
+            if (!StringUtils.hasText(feedback)) {
+                return KNOWN;
+            }
+            try {
+                return from(StudyFeedback.valueOf(feedback));
+            } catch (IllegalArgumentException ex) {
+                return KNOWN;
+            }
+        }
+
+        private static FeedbackPriority higher(FeedbackPriority left, FeedbackPriority right) {
+            return left.weight >= right.weight ? left : right;
+        }
     }
 }
