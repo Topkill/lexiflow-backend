@@ -2,6 +2,7 @@ package com.lexiflow.admin.wordbook.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lexiflow.admin.wordbook.dto.AdminWordQueryRequest;
 import com.lexiflow.admin.wordbook.dto.AdminWordRequest;
 import com.lexiflow.admin.wordbook.dto.AdminWordResponse;
@@ -18,7 +19,10 @@ import com.lexiflow.wordbook.domain.WordbookWord;
 import com.lexiflow.wordbook.mapper.WordMapper;
 import com.lexiflow.wordbook.mapper.WordbookMapper;
 import com.lexiflow.wordbook.mapper.WordbookWordMapper;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,6 +35,7 @@ public class AdminWordbookService {
     private final WordbookMapper wordbookMapper;
     private final WordMapper wordMapper;
     private final WordbookWordMapper wordbookWordMapper;
+    private final ObjectMapper objectMapper;
 
     public PageResponse<AdminWordbookResponse> pageWordbooks(AdminWordbookQueryRequest request) {
         AdminWordbookQueryRequest safeRequest = request == null ? new AdminWordbookQueryRequest(null, null, null, null, null) : request;
@@ -222,7 +227,7 @@ public class AdminWordbookService {
         word.setDisplayText(StringUtils.hasText(request.displayText()) ? request.displayText().trim() : request.wordText().trim());
         word.setPhoneticUs(trimToNull(request.phoneticUs()));
         word.setPhoneticUk(trimToNull(request.phoneticUk()));
-        word.setMeanings(request.meanings().trim());
+        word.setMeanings(normalizeMeanings(request));
         word.setPrimaryPos(trimToNull(request.primaryPos()));
         word.setPrimaryDefinition(trimToNull(request.primaryDefinition()));
         word.setExampleSentence(trimToNull(request.exampleSentence()));
@@ -320,5 +325,26 @@ public class AdminWordbookService {
 
     private String trimToNull(String value) {
         return StringUtils.hasText(value) ? value.trim() : null;
+    }
+
+    private String normalizeMeanings(AdminWordRequest request) {
+        String meanings = request.meanings().trim();
+        try {
+            objectMapper.readTree(meanings);
+            return meanings;
+        } catch (Exception ignored) {
+            Map<String, Object> meaning = new LinkedHashMap<>();
+            meaning.put("pos", trimToNull(request.primaryPos()));
+            meaning.put("definition", meanings);
+            return toJson(List.of(meaning));
+        }
+    }
+
+    private String toJson(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (Exception ex) {
+            throw new BizException(ErrorCode.INTERNAL_ERROR);
+        }
     }
 }
