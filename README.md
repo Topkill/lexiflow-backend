@@ -67,6 +67,15 @@ $env:Path="$env:JAVA_HOME\bin;$env:Path"
 mvn spring-boot:run -Dspring-boot.run.profiles=local
 ```
 
+如果在 Windows 中文路径下遇到 `spring-boot:run` 找不到主类，可以使用更接近部署环境的 jar 启动方式：
+
+```powershell
+$env:JAVA_HOME='D:\jdk-17.0.12'
+$env:Path="$env:JAVA_HOME\bin;$env:Path"
+mvn -DskipTests package
+java -jar target\lexiflow-backend-0.0.1-SNAPSHOT.jar --spring.profiles.active=local
+```
+
 服务默认地址：`http://localhost:8080`。
 
 健康检查：
