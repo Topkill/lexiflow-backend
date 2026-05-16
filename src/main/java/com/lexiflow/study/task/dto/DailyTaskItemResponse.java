@@ -10,9 +10,9 @@ public record DailyTaskItemResponse(
         @Schema(description = "单词 ID", example = "1900000000000002001") String wordId,
         @Schema(description = "任务项类型", example = "NEW") String itemType,
         @Schema(description = "任务项状态", example = "PENDING") String status,
-        @Schema(description = "规范单词", example = "ability") String wordText,
-        @Schema(description = "展示单词", example = "ability") String displayText,
-        @Schema(description = "美式音标", example = "əˈbɪləti") String phoneticUs,
+        @Schema(description = "单词", example = "ability") String word,
+        @Schema(description = "英式音标", example = "əˈbɪləti") String phonetic0,
+        @Schema(description = "美式音标", example = "əˈbɪləti") String phonetic1,
         @Schema(description = "主释义", example = "能力；才能") String primaryDefinition
 ) {
     public static DailyTaskItemResponse from(DailyTaskItem item, Word word) {
@@ -21,9 +21,9 @@ public record DailyTaskItemResponse(
                 String.valueOf(item.getWordId()),
                 item.getItemType().name(),
                 item.getStatus().name(),
-                word.getWordText(),
-                word.getDisplayText(),
-                word.getPhoneticUs(),
+                word.getWord(),
+                word.getPhonetic0(),
+                word.getPhonetic1(),
                 word.getPrimaryDefinition()
         );
     }

@@ -10,8 +10,9 @@ public record FavoriteWordResponse(
         @Schema(description = "收藏 ID") String favoriteWordId,
         @Schema(description = "词库 ID") String wordbookId,
         @Schema(description = "单词 ID") String wordId,
-        @Schema(description = "展示单词") String displayText,
-        @Schema(description = "美式音标") String phoneticUs,
+        @Schema(description = "单词") String word,
+        @Schema(description = "英式音标") String phonetic0,
+        @Schema(description = "美式音标") String phonetic1,
         @Schema(description = "主释义") String primaryDefinition,
         @Schema(description = "备注") String note,
         @Schema(description = "收藏时间") LocalDateTime createdAt
@@ -21,8 +22,9 @@ public record FavoriteWordResponse(
                 String.valueOf(favoriteWord.getId()),
                 String.valueOf(favoriteWord.getWordbookId()),
                 String.valueOf(favoriteWord.getWordId()),
-                word.getDisplayText(),
-                word.getPhoneticUs(),
+                word.getWord(),
+                word.getPhonetic0(),
+                word.getPhonetic1(),
                 word.getPrimaryDefinition(),
                 favoriteWord.getNote(),
                 favoriteWord.getCreatedAt()

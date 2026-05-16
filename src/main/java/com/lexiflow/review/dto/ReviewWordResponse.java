@@ -10,8 +10,9 @@ public record ReviewWordResponse(
         @Schema(description = "单词状态 ID") String stateId,
         @Schema(description = "词库 ID") String wordbookId,
         @Schema(description = "单词 ID") String wordId,
-        @Schema(description = "展示单词") String displayText,
-        @Schema(description = "美式音标") String phoneticUs,
+        @Schema(description = "单词") String word,
+        @Schema(description = "英式音标") String phonetic0,
+        @Schema(description = "美式音标") String phonetic1,
         @Schema(description = "主释义") String primaryDefinition,
         @Schema(description = "掌握状态") String masteryStatus,
         @Schema(description = "下次复习日期") LocalDate nextReviewDate
@@ -21,8 +22,9 @@ public record ReviewWordResponse(
                 String.valueOf(state.getId()),
                 String.valueOf(state.getWordbookId()),
                 String.valueOf(state.getWordId()),
-                word.getDisplayText(),
-                word.getPhoneticUs(),
+                word.getWord(),
+                word.getPhonetic0(),
+                word.getPhonetic1(),
                 word.getPrimaryDefinition(),
                 state.getMasteryStatus().name(),
                 state.getNextReviewDate()

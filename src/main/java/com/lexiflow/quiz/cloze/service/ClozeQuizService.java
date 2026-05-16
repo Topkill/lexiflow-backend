@@ -407,7 +407,7 @@ public class ClozeQuizService {
             throw new BizException(ErrorCode.AI_CALL_FAILED, "AI 完形填空缺少空格数据");
         }
         Map<String, Word> wordMap = selection.blankWords().stream()
-                .collect(Collectors.toMap(word -> normalizeAnswer(word.getDisplayText()), Function.identity(), (left, right) -> left));
+                .collect(Collectors.toMap(word -> normalizeAnswer(word.getWord()), Function.identity(), (left, right) -> left));
         List<ClozeQuizBlank> blankDrafts = new ArrayList<>();
         int blankNo = 1;
         for (JsonNode blankNode : blanksNode) {
@@ -419,7 +419,7 @@ public class ClozeQuizService {
             ClozeQuizBlank blank = new ClozeQuizBlank();
             blank.setBlankNo(blankNode.path("blankNo").asInt(blankNo));
             blank.setWordId(word.getId());
-            blank.setAnswerWord(word.getDisplayText());
+            blank.setAnswerWord(word.getWord());
             blank.setHint(blankNode.path("hint").asText(word.getPrimaryDefinition()));
             blank.setExplanation(blankNode.path("explanation").asText(null));
             blank.setDeleted(0);
@@ -476,10 +476,10 @@ public class ClozeQuizService {
                 .map(word -> {
                     Map<String, Object> item = new LinkedHashMap<>();
                     item.put("wordId", String.valueOf(word.getId()));
-                    item.put("word", word.getDisplayText());
+                    item.put("word", word.getWord());
                     item.put("pos", safe(word.getPrimaryPos()));
                     item.put("definition", safe(word.getPrimaryDefinition()));
-                    item.put("example", safe(word.getExampleSentence()));
+                    item.put("sentences", safe(word.getSentences()));
                     return item;
                 })
                 .toList();
@@ -491,7 +491,7 @@ public class ClozeQuizService {
             throw new BizException(ErrorCode.AI_CALL_FAILED, "AI 完形填空空格数量不符合要求");
         }
         Set<String> expectedBlankWords = selection.blankWords().stream()
-                .map(word -> normalizeAnswer(word.getDisplayText()))
+                .map(word -> normalizeAnswer(word.getWord()))
                 .collect(Collectors.toCollection(LinkedHashSet::new));
         Set<String> actualBlankWords = new LinkedHashSet<>();
         for (JsonNode blankNode : blanksNode) {
@@ -505,7 +505,7 @@ public class ClozeQuizService {
             throw new BizException(ErrorCode.AI_CALL_FAILED, "AI 完形填空缺少文章内容");
         }
         List<String> missingWords = selection.backgroundWords().stream()
-                .map(Word::getDisplayText)
+                .map(Word::getWord)
                 .filter(word -> !containsWord(passage, word))
                 .toList();
         if (!missingWords.isEmpty()) {
@@ -529,7 +529,7 @@ public class ClozeQuizService {
                 }
             });
         }
-        targetWords.stream().map(Word::getDisplayText).filter(StringUtils::hasText).forEach(words::add);
+        targetWords.stream().map(Word::getWord).filter(StringUtils::hasText).forEach(words::add);
         return words.stream().toList();
     }
 

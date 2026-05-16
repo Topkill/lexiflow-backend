@@ -70,7 +70,7 @@ class ClozeBlankWordSelectorTest {
     private Word word(long id) {
         Word word = new Word();
         word.setId(id);
-        word.setDisplayText("word" + id);
+        word.setWord("word" + id);
         return word;
     }
 }

@@ -8,6 +8,7 @@ import com.lexiflow.wordbook.domain.WordbookWord;
 import com.lexiflow.wordbook.dto.WordbookWordPickRow;
 import com.lexiflow.wordbook.dto.WordbookWordRow;
 import java.util.List;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Param;
 
 public interface WordbookWordMapper extends BaseMapper<WordbookWord> {
@@ -35,4 +36,7 @@ public interface WordbookWordMapper extends BaseMapper<WordbookWord> {
             @Param("startSequenceNo") Integer startSequenceNo,
             @Param("limit") Integer limit
     );
+
+    @Delete("DELETE FROM wordbook_word WHERE wordbook_id = #{wordbookId}")
+    int physicalDeleteByWordbookId(@Param("wordbookId") Long wordbookId);
 }

@@ -2,7 +2,6 @@ package com.lexiflow.admin.wordbook.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lexiflow.admin.wordbook.dto.AdminWordQueryRequest;
 import com.lexiflow.admin.wordbook.dto.AdminWordRequest;
 import com.lexiflow.admin.wordbook.dto.AdminWordResponse;
@@ -19,14 +18,12 @@ import com.lexiflow.wordbook.domain.WordbookWord;
 import com.lexiflow.wordbook.mapper.WordMapper;
 import com.lexiflow.wordbook.mapper.WordbookMapper;
 import com.lexiflow.wordbook.mapper.WordbookWordMapper;
-import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
+import com.lexiflow.wordbook.service.WordDictionaryJsonService;
 
 @Service
 @RequiredArgsConstructor
@@ -35,7 +32,7 @@ public class AdminWordbookService {
     private final WordbookMapper wordbookMapper;
     private final WordMapper wordMapper;
     private final WordbookWordMapper wordbookWordMapper;
-    private final ObjectMapper objectMapper;
+    private final WordDictionaryJsonService wordDictionaryJsonService;
 
     public PageResponse<AdminWordbookResponse> pageWordbooks(AdminWordbookQueryRequest request) {
         AdminWordbookQueryRequest safeRequest = request == null ? new AdminWordbookQueryRequest(null, null, null, null, null) : request;
@@ -146,9 +143,9 @@ public class AdminWordbookService {
         getWordbookEntity(wordbookId);
         WordbookWord relation = requireRelation(wordbookId, wordId);
         Word word = requireWord(wordId);
-        String normalizedWordText = normalizeWordText(request.wordText());
-        ensureWordTextAvailable(normalizedWordText, wordId);
-        applyWordRequest(word, request, normalizedWordText, adminUserId);
+        String normalizedWord = wordDictionaryJsonService.normalizeWord(request.word());
+        ensureNormalizedWordAvailable(normalizedWord, wordId);
+        applyWordRequest(word, request, normalizedWord, adminUserId);
         wordMapper.updateById(word);
         ensureSequenceAvailable(wordbookId, request.sequenceNo(), relation.getId());
         applyRelationRequest(relation, request);
@@ -166,20 +163,20 @@ public class AdminWordbookService {
     }
 
     private Word findOrCreateWord(Long adminUserId, AdminWordRequest request) {
-        String normalizedWordText = normalizeWordText(request.wordText());
+        String normalizedWord = wordDictionaryJsonService.normalizeWord(request.word());
         Word word = wordMapper.selectOne(new LambdaQueryWrapper<Word>()
-                .eq(Word::getWordText, normalizedWordText)
+                .eq(Word::getNormalizedWord, normalizedWord)
                 .last("LIMIT 1"));
         if (word == null) {
             word = new Word();
-            applyWordRequest(word, request, normalizedWordText, adminUserId);
+            applyWordRequest(word, request, normalizedWord, adminUserId);
             word.setCreatedBy(adminUserId);
             word.setDeleted(0);
             word.setVersion(0);
             wordMapper.insert(word);
             return word;
         }
-        applyWordRequest(word, request, normalizedWordText, adminUserId);
+        applyWordRequest(word, request, normalizedWord, adminUserId);
         wordMapper.updateById(word);
         return word;
     }
@@ -196,14 +193,18 @@ public class AdminWordbookService {
         return new AdminWordResponse(
                 String.valueOf(row.id()),
                 String.valueOf(row.relationId()),
-                row.wordText(),
-                row.displayText(),
-                row.phoneticUs(),
-                row.phoneticUk(),
+                row.word(),
+                row.normalizedWord(),
+                row.phonetic0(),
+                row.phonetic1(),
+                row.trans(),
+                row.sentences(),
+                row.phrases(),
+                row.synos(),
+                row.relWords(),
+                row.etymology(),
                 row.primaryPos(),
                 row.primaryDefinition(),
-                row.exampleSentence(),
-                row.exampleTranslation(),
                 row.tags(),
                 row.sequenceNo(),
                 row.difficultyLevel(),
@@ -222,16 +223,21 @@ public class AdminWordbookService {
         wordbook.setSortOrder(request.sortOrder());
     }
 
-    private void applyWordRequest(Word word, AdminWordRequest request, String normalizedWordText, Long adminUserId) {
-        word.setWordText(normalizedWordText);
-        word.setDisplayText(StringUtils.hasText(request.displayText()) ? request.displayText().trim() : request.wordText().trim());
-        word.setPhoneticUs(trimToNull(request.phoneticUs()));
-        word.setPhoneticUk(trimToNull(request.phoneticUk()));
-        word.setMeanings(normalizeMeanings(request));
-        word.setPrimaryPos(trimToNull(request.primaryPos()));
-        word.setPrimaryDefinition(trimToNull(request.primaryDefinition()));
-        word.setExampleSentence(trimToNull(request.exampleSentence()));
-        word.setExampleTranslation(trimToNull(request.exampleTranslation()));
+    private void applyWordRequest(Word word, AdminWordRequest request, String normalizedWord, Long adminUserId) {
+        String trans = wordDictionaryJsonService.normalizeRequiredJson(request.trans(), "释义 JSON");
+        WordDictionaryJsonService.WordSummary summary = wordDictionaryJsonService.deriveSummary(trans, request.primaryPos(), request.primaryDefinition());
+        word.setWord(request.word().trim());
+        word.setNormalizedWord(normalizedWord);
+        word.setPhonetic0(trimToNull(request.phonetic0()));
+        word.setPhonetic1(trimToNull(request.phonetic1()));
+        word.setTrans(trans);
+        word.setSentences(wordDictionaryJsonService.normalizeOptionalJson(request.sentences(), "例句 JSON"));
+        word.setPhrases(wordDictionaryJsonService.normalizeOptionalJson(request.phrases(), "短语 JSON"));
+        word.setSynos(wordDictionaryJsonService.normalizeOptionalJson(request.synos(), "同近义词 JSON"));
+        word.setRelWords(wordDictionaryJsonService.normalizeOptionalJson(request.relWords(), "相关词 JSON"));
+        word.setEtymology(wordDictionaryJsonService.normalizeOptionalJson(request.etymology(), "词源 JSON"));
+        word.setPrimaryPos(summary.primaryPos());
+        word.setPrimaryDefinition(summary.primaryDefinition());
         word.setTags(trimToNull(request.tags()));
         word.setUpdatedBy(adminUserId);
     }
@@ -284,8 +290,8 @@ public class AdminWordbookService {
         }
     }
 
-    private void ensureWordTextAvailable(String wordText, Long excludedId) {
-        LambdaQueryWrapper<Word> wrapper = new LambdaQueryWrapper<Word>().eq(Word::getWordText, wordText);
+    private void ensureNormalizedWordAvailable(String normalizedWord, Long excludedId) {
+        LambdaQueryWrapper<Word> wrapper = new LambdaQueryWrapper<Word>().eq(Word::getNormalizedWord, normalizedWord);
         if (excludedId != null) {
             wrapper.ne(Word::getId, excludedId);
         }
@@ -319,32 +325,7 @@ public class AdminWordbookService {
         return code.trim().toUpperCase(Locale.ROOT);
     }
 
-    private String normalizeWordText(String wordText) {
-        return wordText.trim().toLowerCase(Locale.ROOT);
-    }
-
     private String trimToNull(String value) {
         return StringUtils.hasText(value) ? value.trim() : null;
-    }
-
-    private String normalizeMeanings(AdminWordRequest request) {
-        String meanings = request.meanings().trim();
-        try {
-            objectMapper.readTree(meanings);
-            return meanings;
-        } catch (Exception ignored) {
-            Map<String, Object> meaning = new LinkedHashMap<>();
-            meaning.put("pos", trimToNull(request.primaryPos()));
-            meaning.put("definition", meanings);
-            return toJson(List.of(meaning));
-        }
-    }
-
-    private String toJson(Object value) {
-        try {
-            return objectMapper.writeValueAsString(value);
-        } catch (Exception ex) {
-            throw new BizException(ErrorCode.INTERNAL_ERROR);
-        }
     }
 }

@@ -19,15 +19,18 @@ public class Word {
     @TableId(type = IdType.ASSIGN_ID)
     private Long id;
 
-    private String wordText;
-    private String displayText;
-    private String phoneticUs;
-    private String phoneticUk;
-    private String meanings;
+    private String word;
+    private String normalizedWord;
+    private String phonetic0;
+    private String phonetic1;
+    private String trans;
+    private String sentences;
+    private String phrases;
+    private String synos;
+    private String relWords;
+    private String etymology;
     private String primaryPos;
     private String primaryDefinition;
-    private String exampleSentence;
-    private String exampleTranslation;
     private String tags;
     private Long createdBy;
     private Long updatedBy;

@@ -2,6 +2,7 @@ package com.lexiflow.wordbook.importing.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lexiflow.common.api.PageResponse;
 import com.lexiflow.common.error.ErrorCode;
@@ -14,6 +15,7 @@ import com.lexiflow.wordbook.importing.domain.WordImportError;
 import com.lexiflow.wordbook.importing.domain.WordImportStatus;
 import com.lexiflow.wordbook.importing.domain.WordImportTask;
 import com.lexiflow.wordbook.importing.dto.WordImportErrorQueryRequest;
+import com.lexiflow.wordbook.importing.dto.WordImportJsonUrlRequest;
 import com.lexiflow.wordbook.importing.dto.WordImportErrorResponse;
 import com.lexiflow.wordbook.importing.dto.WordImportTaskResponse;
 import com.lexiflow.wordbook.importing.dto.WordImportTemplateResponse;
@@ -24,6 +26,10 @@ import com.lexiflow.wordbook.mapper.WordbookMapper;
 import com.lexiflow.wordbook.mapper.WordbookWordMapper;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -31,7 +37,6 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.apache.poi.ss.usermodel.Cell;
@@ -44,6 +49,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
+import com.lexiflow.wordbook.service.WordDictionaryJsonService;
 
 @Service
 @RequiredArgsConstructor
@@ -53,6 +59,8 @@ public class WordImportService {
     private static final int MAX_ROWS = 5000;
     private static final String[] HEADERS = {"单词", "音标", "词性", "中文释义", "英文例句", "例句翻译", "难度", "标签"};
     private static final DataFormatter DATA_FORMATTER = new DataFormatter();
+    private static final int JSON_URL_TIMEOUT_SECONDS = 60;
+    private static final int MAX_JSON_WORDS = 20000;
 
     private final WordbookMapper wordbookMapper;
     private final WordMapper wordMapper;
@@ -60,6 +68,8 @@ public class WordImportService {
     private final WordImportTaskMapper wordImportTaskMapper;
     private final WordImportErrorMapper wordImportErrorMapper;
     private final ObjectMapper objectMapper;
+    private final WordDictionaryJsonService wordDictionaryJsonService;
+    private final HttpClient httpClient = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NORMAL).build();
 
     public WordImportTemplateResponse buildTemplate() {
         try (Workbook workbook = new XSSFWorkbook(); ByteArrayOutputStream outputStream = new ByteArrayOutputStream()) {
@@ -111,6 +121,44 @@ public class WordImportService {
         } catch (Exception ex) {
             markFailed(task, ex.getMessage());
             throw new BizException(ErrorCode.EXCEL_TEMPLATE_INVALID, "Excel 导入失败");
+        }
+    }
+
+    @Transactional
+    public WordImportTaskResponse importWordsFromJsonUrl(Long adminUserId, Long wordbookId, WordImportJsonUrlRequest request) {
+        Wordbook wordbook = getWordbook(wordbookId);
+        URI sourceUri = validateJsonUrl(request.sourceUrl());
+        WordImportDuplicateStrategy duplicateStrategy = request.safeDuplicateStrategy();
+        WordImportTask task = createJsonUrlTask(adminUserId, wordbookId, duplicateStrategy, sourceUri);
+        try {
+            task.setStatus(WordImportStatus.RUNNING);
+            task.setStartedAt(LocalDateTime.now());
+            wordImportTaskMapper.updateById(task);
+            if (request.shouldReplaceWordbook()) {
+                clearWordbookRelations(wordbookId);
+            }
+            JsonNode root = fetchJson(sourceUri);
+            if (!root.isArray()) {
+                throw new BizException(ErrorCode.BAD_REQUEST, "远程 JSON 必须是单词数组");
+            }
+            if (root.size() > MAX_JSON_WORDS) {
+                throw new BizException(ErrorCode.BAD_REQUEST, "JSON 单词数量不能超过 " + MAX_JSON_WORDS);
+            }
+            ImportResult result = importJsonWords(task, adminUserId, wordbook, duplicateStrategy, root);
+            task.setTotalRows(result.totalRows());
+            task.setSuccessRows(result.successRows());
+            task.setFailedRows(result.failedRows());
+            task.setStatus(result.failedRows() == 0 ? WordImportStatus.SUCCESS : WordImportStatus.PARTIAL_SUCCESS);
+            task.setFinishedAt(LocalDateTime.now());
+            wordImportTaskMapper.updateById(task);
+            refreshWordbookCount(wordbookId);
+            return WordImportTaskResponse.from(task);
+        } catch (BizException ex) {
+            markFailed(task, ex.getCustomMessage());
+            throw ex;
+        } catch (Exception ex) {
+            markFailed(task, ex.getMessage());
+            throw new BizException(ErrorCode.BAD_REQUEST, "JSON URL 导入失败");
         }
     }
 
@@ -179,6 +227,21 @@ public class WordImportService {
         return task;
     }
 
+    private WordImportTask createJsonUrlTask(Long adminUserId, Long wordbookId, WordImportDuplicateStrategy duplicateStrategy, URI sourceUri) {
+        WordImportTask task = new WordImportTask();
+        task.setWordbookId(wordbookId);
+        task.setFileName(sourceUri.toString());
+        task.setFilePath(sourceUri.toString());
+        task.setDuplicateStrategy(duplicateStrategy == null ? WordImportDuplicateStrategy.SKIP : duplicateStrategy);
+        task.setStatus(WordImportStatus.PENDING);
+        task.setTotalRows(0);
+        task.setSuccessRows(0);
+        task.setFailedRows(0);
+        task.setCreatedBy(adminUserId);
+        wordImportTaskMapper.insert(task);
+        return task;
+    }
+
     private ImportResult parseAndImport(WordImportTask task, Long adminUserId, Wordbook wordbook, WordImportDuplicateStrategy duplicateStrategy, MultipartFile file) {
         try (InputStream inputStream = file.getInputStream(); Workbook workbook = new XSSFWorkbook(inputStream)) {
             Sheet sheet = workbook.getSheetAt(0);
@@ -222,14 +285,15 @@ public class WordImportService {
             throw new BizException(ErrorCode.BAD_REQUEST, "中文释义不能为空");
         }
         int difficulty = parseDifficulty(row.difficulty());
-        String normalizedWordText = row.wordText().trim().toLowerCase(Locale.ROOT);
+        String normalizedWord = wordDictionaryJsonService.normalizeWord(row.wordText());
         Word word = wordMapper.selectOne(new LambdaQueryWrapper<Word>()
-                .eq(Word::getWordText, normalizedWordText)
+                .eq(Word::getNormalizedWord, normalizedWord)
                 .last("LIMIT 1"));
         boolean newWord = word == null;
         if (newWord) {
             word = new Word();
-            word.setWordText(normalizedWordText);
+            word.setWord(row.wordText().trim());
+            word.setNormalizedWord(normalizedWord);
             word.setCreatedBy(adminUserId);
             word.setDeleted(0);
             word.setVersion(0);
@@ -273,16 +337,112 @@ public class WordImportService {
     }
 
     private void fillWord(Word word, ImportRow row, int difficulty, Long adminUserId, boolean overwrite) {
-        setString(word::setDisplayText, word.getDisplayText(), row.wordText(), overwrite);
-        setString(word::setPhoneticUs, word.getPhoneticUs(), row.phonetic(), overwrite);
-        setString(word::setPhoneticUk, word.getPhoneticUk(), row.phonetic(), overwrite);
-        setString(word::setPrimaryPos, word.getPrimaryPos(), row.pos(), overwrite);
-        setString(word::setPrimaryDefinition, word.getPrimaryDefinition(), row.definition(), overwrite);
-        setString(word::setExampleSentence, word.getExampleSentence(), row.exampleSentence(), overwrite);
-        setString(word::setExampleTranslation, word.getExampleTranslation(), row.exampleTranslation(), overwrite);
+        setString(word::setWord, word.getWord(), row.wordText(), overwrite);
+        setString(word::setPhonetic0, word.getPhonetic0(), row.phonetic(), overwrite);
+        setString(word::setPhonetic1, word.getPhonetic1(), row.phonetic(), overwrite);
+        String trans = wordDictionaryJsonService.buildTransJson(row.pos(), row.definition());
+        setString(word::setTrans, word.getTrans(), trans, overwrite);
+        String sentences = wordDictionaryJsonService.buildSentencesJson(row.exampleSentence(), row.exampleTranslation());
+        setString(word::setSentences, word.getSentences(), sentences, overwrite);
+        WordDictionaryJsonService.WordSummary summary = wordDictionaryJsonService.deriveSummary(trans, row.pos(), row.definition());
+        setString(word::setPrimaryPos, word.getPrimaryPos(), summary.primaryPos(), overwrite);
+        setString(word::setPrimaryDefinition, word.getPrimaryDefinition(), summary.primaryDefinition(), overwrite);
         setString(word::setTags, word.getTags(), row.tags(), overwrite);
-        String meanings = toMeaningsJson(row.pos(), row.definition());
-        setString(word::setMeanings, word.getMeanings(), meanings, overwrite);
+        word.setUpdatedBy(adminUserId);
+    }
+
+    private ImportResult importJsonWords(WordImportTask task, Long adminUserId, Wordbook wordbook, WordImportDuplicateStrategy duplicateStrategy, JsonNode root) {
+        int successRows = 0;
+        int failedRows = 0;
+        int sequenceNo = 1;
+        for (int i = 0; i < root.size(); i++) {
+            JsonNode node = root.get(i);
+            try {
+                importOneJsonWord(adminUserId, wordbook, duplicateStrategy, node, sequenceNo++);
+                successRows++;
+            } catch (BizException ex) {
+                failedRows++;
+                saveError(task.getId(), i + 1, node.path("word").asText(null), "ROW_INVALID", ex.getCustomMessage(), wordDictionaryJsonService.toJson(node));
+            } catch (Exception ex) {
+                failedRows++;
+                saveError(task.getId(), i + 1, node.path("word").asText(null), "ROW_ERROR", "JSON 行数据导入失败", wordDictionaryJsonService.toJson(node));
+            }
+        }
+        return new ImportResult(successRows + failedRows, successRows, failedRows);
+    }
+
+    private void importOneJsonWord(Long adminUserId, Wordbook wordbook, WordImportDuplicateStrategy duplicateStrategy, JsonNode node, int sequenceNo) {
+        String wordText = node.path("word").asText(null);
+        if (!StringUtils.hasText(wordText)) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "word 不能为空");
+        }
+        JsonNode transNode = node.path("trans");
+        if (!transNode.isArray() || transNode.isEmpty()) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "trans 不能为空");
+        }
+        String normalizedWord = wordDictionaryJsonService.normalizeWord(wordText);
+        Word word = wordMapper.selectOne(new LambdaQueryWrapper<Word>()
+                .eq(Word::getNormalizedWord, normalizedWord)
+                .last("LIMIT 1"));
+        boolean newWord = word == null;
+        if (newWord) {
+            word = new Word();
+            word.setWord(wordText.trim());
+            word.setNormalizedWord(normalizedWord);
+            word.setCreatedBy(adminUserId);
+            word.setDeleted(0);
+            word.setVersion(0);
+        }
+        if (newWord || duplicateStrategy == WordImportDuplicateStrategy.OVERWRITE) {
+            fillWordFromJson(word, node, adminUserId, true);
+        } else if (duplicateStrategy == WordImportDuplicateStrategy.FILL_EMPTY) {
+            fillWordFromJson(word, node, adminUserId, false);
+        }
+        if (newWord) {
+            wordMapper.insert(word);
+        } else if (duplicateStrategy != WordImportDuplicateStrategy.SKIP) {
+            wordMapper.updateById(word);
+        }
+
+        WordbookWord relation = wordbookWordMapper.selectOne(new LambdaQueryWrapper<WordbookWord>()
+                .eq(WordbookWord::getWordbookId, wordbook.getId())
+                .eq(WordbookWord::getWordId, word.getId())
+                .last("LIMIT 1"));
+        if (relation != null && duplicateStrategy == WordImportDuplicateStrategy.SKIP) {
+            throw new BizException(ErrorCode.CONFLICT, "单词已存在，已按策略跳过");
+        }
+        if (relation == null) {
+            relation = new WordbookWord();
+            relation.setWordbookId(wordbook.getId());
+            relation.setWordId(word.getId());
+            relation.setDeleted(0);
+            relation.setVersion(0);
+        }
+        relation.setSequenceNo(sequenceNo);
+        relation.setDifficultyLevel(relation.getDifficultyLevel() == null ? 1 : relation.getDifficultyLevel());
+        relation.setExamFrequency(relation.getExamFrequency() == null ? 0 : relation.getExamFrequency());
+        relation.setEnabled(true);
+        if (relation.getId() == null) {
+            wordbookWordMapper.insert(relation);
+        } else {
+            wordbookWordMapper.updateById(relation);
+        }
+    }
+
+    private void fillWordFromJson(Word word, JsonNode node, Long adminUserId, boolean overwrite) {
+        String trans = wordDictionaryJsonService.toJson(node.path("trans"));
+        setString(word::setWord, word.getWord(), node.path("word").asText(), overwrite);
+        setString(word::setPhonetic0, word.getPhonetic0(), textOrNull(node, "phonetic0"), overwrite);
+        setString(word::setPhonetic1, word.getPhonetic1(), textOrNull(node, "phonetic1"), overwrite);
+        setString(word::setTrans, word.getTrans(), trans, overwrite);
+        setString(word::setSentences, word.getSentences(), optionalJson(node, "sentences"), overwrite);
+        setString(word::setPhrases, word.getPhrases(), optionalJson(node, "phrases"), overwrite);
+        setString(word::setSynos, word.getSynos(), optionalJson(node, "synos"), overwrite);
+        setString(word::setRelWords, word.getRelWords(), optionalJson(node, "relWords"), overwrite);
+        setString(word::setEtymology, word.getEtymology(), optionalJson(node, "etymology"), overwrite);
+        WordDictionaryJsonService.WordSummary summary = wordDictionaryJsonService.deriveSummary(trans, null, null);
+        setString(word::setPrimaryPos, word.getPrimaryPos(), summary.primaryPos(), overwrite);
+        setString(word::setPrimaryDefinition, word.getPrimaryDefinition(), summary.primaryDefinition(), overwrite);
         word.setUpdatedBy(adminUserId);
     }
 
@@ -303,7 +463,7 @@ public class WordImportService {
             throw new BizException(ErrorCode.FILE_TOO_LARGE);
         }
         String filename = file.getOriginalFilename();
-        if (filename == null || !filename.toLowerCase(Locale.ROOT).endsWith(".xlsx")) {
+        if (filename == null || !filename.toLowerCase(java.util.Locale.ROOT).endsWith(".xlsx")) {
             throw new BizException(ErrorCode.EXCEL_TEMPLATE_INVALID, "仅支持 .xlsx 文件");
         }
     }
@@ -426,25 +586,60 @@ public class WordImportService {
         wordImportErrorMapper.insert(error);
     }
 
-    private String toMeaningsJson(String pos, String definition) {
-        List<String> definitions = new ArrayList<>();
-        for (String item : definition.split("[;；,，]")) {
-            if (StringUtils.hasText(item)) {
-                definitions.add(item.trim());
-            }
-        }
-        Map<String, Object> meaning = new LinkedHashMap<>();
-        meaning.put("pos", StringUtils.hasText(pos) ? pos.trim() : "");
-        meaning.put("definitions", definitions.isEmpty() ? List.of(definition.trim()) : definitions);
-        return toJson(List.of(meaning));
-    }
-
     private String toJson(Object value) {
         try {
             return objectMapper.writeValueAsString(value);
         } catch (Exception ex) {
             throw new BizException(ErrorCode.INTERNAL_ERROR);
         }
+    }
+
+    private URI validateJsonUrl(String sourceUrl) {
+        if (!StringUtils.hasText(sourceUrl)) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "JSON URL 不能为空");
+        }
+        try {
+            URI uri = URI.create(sourceUrl.trim());
+            String scheme = uri.getScheme();
+            if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) {
+                throw new BizException(ErrorCode.BAD_REQUEST, "JSON URL 仅支持 http 或 https");
+            }
+            return uri;
+        } catch (IllegalArgumentException ex) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "JSON URL 格式不正确");
+        }
+    }
+
+    private JsonNode fetchJson(URI sourceUri) {
+        try {
+            HttpRequest request = HttpRequest.newBuilder(sourceUri)
+                    .timeout(java.time.Duration.ofSeconds(JSON_URL_TIMEOUT_SECONDS))
+                    .GET()
+                    .build();
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(java.nio.charset.StandardCharsets.UTF_8));
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                throw new BizException(ErrorCode.BAD_REQUEST, "远程 JSON 下载失败，状态码：" + response.statusCode());
+            }
+            return objectMapper.readTree(response.body());
+        } catch (BizException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "远程 JSON 下载或解析失败");
+        }
+    }
+
+    private void clearWordbookRelations(Long wordbookId) {
+        wordbookWordMapper.physicalDeleteByWordbookId(wordbookId);
+    }
+
+    private String optionalJson(JsonNode node, String fieldName) {
+        JsonNode value = node.path(fieldName);
+        return value.isMissingNode() || value.isNull() ? null : wordDictionaryJsonService.toJson(value);
+    }
+
+    private String textOrNull(JsonNode node, String fieldName) {
+        JsonNode value = node.path(fieldName);
+        return value.isMissingNode() || value.isNull() || !StringUtils.hasText(value.asText()) ? null : value.asText().trim();
     }
 
     private record ImportRow(

@@ -6,6 +6,7 @@ import com.lexiflow.common.api.PageResponse;
 import com.lexiflow.wordbook.importing.domain.WordImportDuplicateStrategy;
 import com.lexiflow.wordbook.importing.dto.WordImportErrorQueryRequest;
 import com.lexiflow.wordbook.importing.dto.WordImportErrorResponse;
+import com.lexiflow.wordbook.importing.dto.WordImportJsonUrlRequest;
 import com.lexiflow.wordbook.importing.dto.WordImportTaskResponse;
 import com.lexiflow.wordbook.importing.dto.WordImportTemplateResponse;
 import com.lexiflow.wordbook.importing.service.WordImportService;
@@ -25,6 +26,7 @@ import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
@@ -53,6 +55,15 @@ public class AdminWordImportController {
             @RequestParam("file") MultipartFile file
     ) {
         return ApiResponse.success(wordImportService.importWords(AuthContext.currentUserId(), wordbookId, duplicateStrategy, file));
+    }
+
+    @Operation(summary = "通过远程 JSON URL 导入单词")
+    @PostMapping("/wordbooks/{wordbookId}/imports/json-url")
+    public ApiResponse<WordImportTaskResponse> importWordsFromJsonUrl(
+            @PathVariable @Positive Long wordbookId,
+            @Valid @RequestBody WordImportJsonUrlRequest request
+    ) {
+        return ApiResponse.success(wordImportService.importWordsFromJsonUrl(AuthContext.currentUserId(), wordbookId, request));
     }
 
     @Operation(summary = "查询导入任务详情")

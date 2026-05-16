@@ -5,14 +5,18 @@
     <select id="selectWordPage" resultType="com.lexiflow.wordbook.dto.WordbookWordRow">
         SELECT
             w.id AS id,
-            w.word_text AS wordText,
-            w.display_text AS displayText,
-            w.phonetic_us AS phoneticUs,
-            w.phonetic_uk AS phoneticUk,
+            w.word AS word,
+            w.normalized_word AS normalizedWord,
+            w.phonetic0 AS phonetic0,
+            w.phonetic1 AS phonetic1,
+            w.trans AS trans,
+            w.sentences AS sentences,
+            w.phrases AS phrases,
+            w.synos AS synos,
+            w.rel_words AS relWords,
+            w.etymology AS etymology,
             w.primary_pos AS primaryPos,
             w.primary_definition AS primaryDefinition,
-            w.example_sentence AS exampleSentence,
-            w.example_translation AS exampleTranslation,
             w.tags AS tags,
             ww.sequence_no AS sequenceNo,
             ww.difficulty_level AS difficultyLevel,
@@ -24,8 +28,8 @@
           AND ww.wordbook_id = #{wordbookId}
         <if test="keyword != null and keyword != ''">
           AND (
-            w.word_text LIKE CONCAT('%', #{keyword}, '%')
-            OR w.display_text LIKE CONCAT('%', #{keyword}, '%')
+            w.word LIKE CONCAT('%', #{keyword}, '%')
+            OR w.normalized_word LIKE CONCAT('%', #{keyword}, '%')
             OR w.primary_definition LIKE CONCAT('%', #{keyword}, '%')
           )
         </if>
@@ -38,14 +42,18 @@
         SELECT
             w.id AS id,
             ww.id AS relationId,
-            w.word_text AS wordText,
-            w.display_text AS displayText,
-            w.phonetic_us AS phoneticUs,
-            w.phonetic_uk AS phoneticUk,
+            w.word AS word,
+            w.normalized_word AS normalizedWord,
+            w.phonetic0 AS phonetic0,
+            w.phonetic1 AS phonetic1,
+            w.trans AS trans,
+            w.sentences AS sentences,
+            w.phrases AS phrases,
+            w.synos AS synos,
+            w.rel_words AS relWords,
+            w.etymology AS etymology,
             w.primary_pos AS primaryPos,
             w.primary_definition AS primaryDefinition,
-            w.example_sentence AS exampleSentence,
-            w.example_translation AS exampleTranslation,
             w.tags AS tags,
             ww.sequence_no AS sequenceNo,
             ww.difficulty_level AS difficultyLevel,
@@ -62,14 +70,18 @@
         SELECT
             w.id AS id,
             ww.id AS relationId,
-            w.word_text AS wordText,
-            w.display_text AS displayText,
-            w.phonetic_us AS phoneticUs,
-            w.phonetic_uk AS phoneticUk,
+            w.word AS word,
+            w.normalized_word AS normalizedWord,
+            w.phonetic0 AS phonetic0,
+            w.phonetic1 AS phonetic1,
+            w.trans AS trans,
+            w.sentences AS sentences,
+            w.phrases AS phrases,
+            w.synos AS synos,
+            w.rel_words AS relWords,
+            w.etymology AS etymology,
             w.primary_pos AS primaryPos,
             w.primary_definition AS primaryDefinition,
-            w.example_sentence AS exampleSentence,
-            w.example_translation AS exampleTranslation,
             w.tags AS tags,
             ww.sequence_no AS sequenceNo,
             ww.difficulty_level AS difficultyLevel,
@@ -84,8 +96,8 @@
         </if>
         <if test="keyword != null and keyword != ''">
           AND (
-            w.word_text LIKE CONCAT('%', #{keyword}, '%')
-            OR w.display_text LIKE CONCAT('%', #{keyword}, '%')
+            w.word LIKE CONCAT('%', #{keyword}, '%')
+            OR w.normalized_word LIKE CONCAT('%', #{keyword}, '%')
             OR w.primary_definition LIKE CONCAT('%', #{keyword}, '%')
           )
         </if>

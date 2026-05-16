@@ -25,6 +25,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.LocalDateTime;
 import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
@@ -141,33 +142,36 @@ public class WordAiContentService {
     }
 
     private String buildSourceJson(AiContentType contentType, Wordbook wordbook, WordbookWord relation, Word word, UserSettings settings) {
-        Map<String, Object> source = Map.of(
-                "contentType", contentType.name(),
-                "targetExam", settings.getTargetExam() == null ? "UNKNOWN" : settings.getTargetExam().name(),
-                "wordbook", Map.of(
-                        "id", wordbook.getId(),
-                        "name", wordbook.getName(),
-                        "type", wordbook.getType().name(),
-                        "difficultyLevel", wordbook.getDifficultyLevel()
-                ),
-                "wordbookWord", Map.of(
-                        "sequenceNo", relation.getSequenceNo(),
-                        "difficultyLevel", relation.getDifficultyLevel(),
-                        "examFrequency", relation.getExamFrequency()
-                ),
-                "word", Map.of(
-                        "wordText", safe(word.getWordText()),
-                        "displayText", safe(word.getDisplayText()),
-                        "phoneticUs", safe(word.getPhoneticUs()),
-                        "phoneticUk", safe(word.getPhoneticUk()),
-                        "primaryPos", safe(word.getPrimaryPos()),
-                        "primaryDefinition", safe(word.getPrimaryDefinition()),
-                        "meanings", safe(word.getMeanings()),
-                        "exampleSentence", safe(word.getExampleSentence()),
-                        "exampleTranslation", safe(word.getExampleTranslation()),
-                        "tags", safe(word.getTags())
-                )
-        );
+        Map<String, Object> wordContext = new LinkedHashMap<>();
+        wordContext.put("word", safe(word.getWord()));
+        wordContext.put("normalizedWord", safe(word.getNormalizedWord()));
+        wordContext.put("phonetic0", safe(word.getPhonetic0()));
+        wordContext.put("phonetic1", safe(word.getPhonetic1()));
+        wordContext.put("trans", safe(word.getTrans()));
+        wordContext.put("sentences", safe(word.getSentences()));
+        wordContext.put("phrases", safe(word.getPhrases()));
+        wordContext.put("synos", safe(word.getSynos()));
+        wordContext.put("relWords", safe(word.getRelWords()));
+        wordContext.put("etymology", safe(word.getEtymology()));
+        wordContext.put("primaryPos", safe(word.getPrimaryPos()));
+        wordContext.put("primaryDefinition", safe(word.getPrimaryDefinition()));
+        wordContext.put("tags", safe(word.getTags()));
+
+        Map<String, Object> source = new LinkedHashMap<>();
+        source.put("contentType", contentType.name());
+        source.put("targetExam", settings.getTargetExam() == null ? "UNKNOWN" : settings.getTargetExam().name());
+        source.put("wordbook", Map.of(
+                "id", wordbook.getId(),
+                "name", wordbook.getName(),
+                "type", wordbook.getType().name(),
+                "difficultyLevel", wordbook.getDifficultyLevel()
+        ));
+        source.put("wordbookWord", Map.of(
+                "sequenceNo", relation.getSequenceNo(),
+                "difficultyLevel", relation.getDifficultyLevel(),
+                "examFrequency", relation.getExamFrequency()
+        ));
+        source.put("word", wordContext);
         return toJson(source);
     }
 
