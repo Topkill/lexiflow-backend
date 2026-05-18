@@ -48,11 +48,23 @@ public class WordAiContentService {
 
     @Transactional
     public WordAiContentResponse generateWordContent(Long userId, Long wordbookId, Long wordId, AiContentType contentType, boolean regenerate) {
+        return generateWordContent(userId, wordbookId, wordId, contentType, null, regenerate);
+    }
+
+    @Transactional
+    public WordAiContentResponse generateWordQuestion(Long userId, Long wordbookId, Long wordId, String question, boolean regenerate) {
+        if (question == null || question.isBlank()) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "问题不能为空");
+        }
+        return generateWordContent(userId, wordbookId, wordId, AiContentType.WORD_QA, question.trim(), regenerate);
+    }
+
+    private WordAiContentResponse generateWordContent(Long userId, Long wordbookId, Long wordId, AiContentType contentType, String question, boolean regenerate) {
         Wordbook wordbook = wordbookService.getEnabledWordbook(wordbookId);
         WordbookWord relation = getEnabledRelation(wordbookId, wordId);
         Word word = getWord(wordId);
         UserSettings settings = userService.getOrCreateSettings(userId);
-        String sourceJson = buildSourceJson(contentType, wordbook, relation, word, settings);
+        String sourceJson = buildSourceJson(contentType, wordbook, relation, word, settings, question);
         String sourceHash = sha256(sourceJson);
         String cacheKey = buildCacheKey(contentType, wordbookId, wordId, sourceHash);
 
@@ -135,13 +147,14 @@ public class WordAiContentService {
             case EXPLANATION -> "输出 JSON 字段：brief 字符串；usage 字符串数组；confusingWords 字符串数组；scenes 字符串数组。";
             case EXAMPLES -> "输出 JSON 字段：simple、medium、examStyle 三个对象；每个对象包含 sentence 英文例句和 translation 中文翻译。";
             case MNEMONIC -> "输出 JSON 字段：association 字符串；rootsAffixes 字符串；pitfalls 字符串数组。";
+            case WORD_QA -> "输出 JSON 字段：answer 字符串；keyPoints 字符串数组；relatedWords 字符串数组；followUps 字符串数组。回答必须直接回应用户问题，不能编造未给出的固定知识；如果问题超出单词学习范围，请简短说明并拉回该单词。";
             default -> throw new BizException(ErrorCode.BAD_REQUEST, "不支持的 AI 单词内容类型");
         };
         String userPrompt = schema + "\n请基于以下单词上下文生成内容，避免编造不存在的固定搭配。\n" + sourceJson;
         return new AiPrompt(SYSTEM_PROMPT, userPrompt, sourceHash);
     }
 
-    private String buildSourceJson(AiContentType contentType, Wordbook wordbook, WordbookWord relation, Word word, UserSettings settings) {
+    private String buildSourceJson(AiContentType contentType, Wordbook wordbook, WordbookWord relation, Word word, UserSettings settings, String question) {
         Map<String, Object> wordContext = new LinkedHashMap<>();
         wordContext.put("word", safe(word.getWord()));
         wordContext.put("normalizedWord", safe(word.getNormalizedWord()));
@@ -159,6 +172,9 @@ public class WordAiContentService {
 
         Map<String, Object> source = new LinkedHashMap<>();
         source.put("contentType", contentType.name());
+        if (question != null && !question.isBlank()) {
+            source.put("question", question.trim());
+        }
         source.put("targetExam", settings.getTargetExam() == null ? "UNKNOWN" : settings.getTargetExam().name());
         source.put("wordbook", Map.of(
                 "id", wordbook.getId(),

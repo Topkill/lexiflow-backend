@@ -4,6 +4,7 @@ public enum AiContentType {
     EXPLANATION,
     EXAMPLES,
     MNEMONIC,
+    WORD_QA,
     CLOZE,
     REPORT
 }
