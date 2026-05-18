@@ -17,9 +17,7 @@ import com.lexiflow.user.domain.UserSettings;
 import com.lexiflow.user.service.UserService;
 import com.lexiflow.wordbook.domain.Word;
 import com.lexiflow.wordbook.domain.Wordbook;
-import com.lexiflow.wordbook.domain.WordbookWord;
 import com.lexiflow.wordbook.mapper.WordMapper;
-import com.lexiflow.wordbook.mapper.WordbookWordMapper;
 import com.lexiflow.wordbook.service.WordbookService;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -41,7 +39,6 @@ public class WordAiContentService {
     private final AiContentCacheMapper aiContentCacheMapper;
     private final AiGatewayService aiGatewayService;
     private final WordbookService wordbookService;
-    private final WordbookWordMapper wordbookWordMapper;
     private final WordMapper wordMapper;
     private final UserService userService;
     private final ObjectMapper objectMapper;
@@ -61,10 +58,9 @@ public class WordAiContentService {
 
     private WordAiContentResponse generateWordContent(Long userId, Long wordbookId, Long wordId, AiContentType contentType, String question, boolean regenerate) {
         Wordbook wordbook = wordbookService.getEnabledWordbook(wordbookId);
-        WordbookWord relation = getEnabledRelation(wordbookId, wordId);
-        Word word = getWord(wordId);
+        Word word = getEnabledWord(wordbookId, wordId);
         UserSettings settings = userService.getOrCreateSettings(userId);
-        String sourceJson = buildSourceJson(contentType, wordbook, relation, word, settings, question);
+        String sourceJson = buildSourceJson(contentType, wordbook, word, settings, question);
         String sourceHash = sha256(sourceJson);
         String cacheKey = buildCacheKey(contentType, wordbookId, wordId, sourceHash);
 
@@ -84,20 +80,12 @@ public class WordAiContentService {
         return WordAiContentResponse.of(false, contentType, wordId, wordbookId, content);
     }
 
-    private WordbookWord getEnabledRelation(Long wordbookId, Long wordId) {
-        WordbookWord relation = wordbookWordMapper.selectOne(new LambdaQueryWrapper<WordbookWord>()
-                .eq(WordbookWord::getWordbookId, wordbookId)
-                .eq(WordbookWord::getWordId, wordId)
-                .eq(WordbookWord::getEnabled, true)
+    private Word getEnabledWord(Long wordbookId, Long wordId) {
+        Word word = wordMapper.selectOne(new LambdaQueryWrapper<Word>()
+                .eq(Word::getId, wordId)
+                .eq(Word::getWordbookId, wordbookId)
+                .eq(Word::getEnabled, true)
                 .last("LIMIT 1"));
-        if (relation == null) {
-            throw new BizException(ErrorCode.WORD_NOT_FOUND);
-        }
-        return relation;
-    }
-
-    private Word getWord(Long wordId) {
-        Word word = wordMapper.selectById(wordId);
         if (word == null) {
             throw new BizException(ErrorCode.WORD_NOT_FOUND);
         }
@@ -154,7 +142,7 @@ public class WordAiContentService {
         return new AiPrompt(SYSTEM_PROMPT, userPrompt, sourceHash);
     }
 
-    private String buildSourceJson(AiContentType contentType, Wordbook wordbook, WordbookWord relation, Word word, UserSettings settings, String question) {
+    private String buildSourceJson(AiContentType contentType, Wordbook wordbook, Word word, UserSettings settings, String question) {
         Map<String, Object> wordContext = new LinkedHashMap<>();
         wordContext.put("word", safe(word.getWord()));
         wordContext.put("normalizedWord", safe(word.getNormalizedWord()));
@@ -182,10 +170,10 @@ public class WordAiContentService {
                 "type", wordbook.getType().name(),
                 "difficultyLevel", wordbook.getDifficultyLevel()
         ));
-        source.put("wordbookWord", Map.of(
-                "sequenceNo", relation.getSequenceNo(),
-                "difficultyLevel", relation.getDifficultyLevel(),
-                "examFrequency", relation.getExamFrequency()
+        source.put("wordbookScope", Map.of(
+                "sequenceNo", word.getSequenceNo(),
+                "difficultyLevel", word.getDifficultyLevel(),
+                "examFrequency", word.getExamFrequency()
         ));
         source.put("word", wordContext);
         return toJson(source);

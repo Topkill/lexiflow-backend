@@ -16,7 +16,7 @@ import lombok.Setter;
 @TableName("user_settings")
 public class UserSettings {
 
-    @TableId(type = IdType.ASSIGN_ID)
+    @TableId(type = IdType.AUTO)
     private Long id;
 
     private Long userId;

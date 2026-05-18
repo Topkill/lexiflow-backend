@@ -17,7 +17,7 @@ import lombok.Setter;
 @TableName("ai_public_config")
 public class AiPublicConfig {
 
-    @TableId(type = IdType.ASSIGN_ID)
+    @TableId(type = IdType.AUTO)
     private Long id;
 
     private String name;

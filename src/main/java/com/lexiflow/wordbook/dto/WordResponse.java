@@ -22,7 +22,7 @@ public record WordResponse(
         @Schema(description = "词库内难度", example = "2") Integer difficultyLevel,
         @Schema(description = "考频或权重", example = "95") Integer examFrequency
 ) {
-    public static WordResponse from(WordbookWordRow row) {
+    public static WordResponse from(WordRow row) {
         return new WordResponse(
                 String.valueOf(row.id()),
                 row.word(),

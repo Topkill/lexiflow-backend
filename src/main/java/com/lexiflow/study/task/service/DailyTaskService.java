@@ -34,9 +34,8 @@ import com.lexiflow.study.task.mapper.DailyTaskItemMapper;
 import com.lexiflow.study.task.mapper.DailyTaskMapper;
 import com.lexiflow.wordbook.domain.Word;
 import com.lexiflow.wordbook.domain.Wordbook;
-import com.lexiflow.wordbook.dto.WordbookWordPickRow;
+import com.lexiflow.wordbook.dto.WordPickRow;
 import com.lexiflow.wordbook.mapper.WordMapper;
-import com.lexiflow.wordbook.mapper.WordbookWordMapper;
 import com.lexiflow.wordbook.service.WordbookService;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -66,7 +65,6 @@ public class DailyTaskService {
     private final StudyPlanMapper studyPlanMapper;
     private final StudyPlanService studyPlanService;
     private final WordbookService wordbookService;
-    private final WordbookWordMapper wordbookWordMapper;
     private final WordMapper wordMapper;
     private final UserWordStateMapper userWordStateMapper;
     private final StudyEventMapper studyEventMapper;
@@ -169,7 +167,7 @@ public class DailyTaskService {
 
     private DailyTask generateTodayTask(Long userId, StudyPlan plan, LocalDate today) {
         List<UserWordState> dueReviewStates = selectDueReviewStates(userId, plan, today, Set.of());
-        List<WordbookWordPickRow> newWords = wordbookWordMapper.selectNewWordCandidates(
+        List<WordPickRow> newWords = wordMapper.selectNewWordCandidates(
                 plan.getWordbookId(),
                 plan.getCurrentSequenceNo(),
                 plan.getDailyNewWords()
@@ -191,7 +189,7 @@ public class DailyTaskService {
 
         insertReviewItems(task, dueReviewStates, 0);
 
-        for (WordbookWordPickRow row : newWords) {
+        for (WordPickRow row : newWords) {
             DailyTaskItem item = new DailyTaskItem();
             item.setDailyTaskId(task.getId());
             item.setUserId(userId);
@@ -208,7 +206,7 @@ public class DailyTaskService {
 
         if (!newWords.isEmpty()) {
             int maxSequenceNo = newWords.stream()
-                    .map(WordbookWordPickRow::sequenceNo)
+                    .map(WordPickRow::sequenceNo)
                     .max(Integer::compareTo)
                     .orElse(plan.getCurrentSequenceNo());
             plan.setCurrentSequenceNo(maxSequenceNo);

@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.lexiflow.wordbook.mapper.WordMapper">
+
+    <sql id="WordColumns">
+        w.id AS id,
+        w.word AS word,
+        w.normalized_word AS normalizedWord,
+        w.phonetic0 AS phonetic0,
+        w.phonetic1 AS phonetic1,
+        w.trans AS trans,
+        w.sentences AS sentences,
+        w.phrases AS phrases,
+        w.synos AS synos,
+        w.rel_words AS relWords,
+        w.etymology AS etymology,
+        w.primary_pos AS primaryPos,
+        w.primary_definition AS primaryDefinition,
+        w.tags AS tags,
+        w.sequence_no AS sequenceNo,
+        w.difficulty_level AS difficultyLevel,
+        w.exam_frequency AS examFrequency
+    </sql>
+
+    <select id="selectWordPage" resultType="com.lexiflow.wordbook.dto.WordRow">
+        SELECT
+        <include refid="WordColumns"/>
+        FROM word w
+        WHERE w.deleted = 0
+          AND w.enabled = 1
+          AND w.wordbook_id = #{wordbookId}
+        <if test="keyword != null and keyword != ''">
+          AND (
+            w.word LIKE CONCAT('%', #{keyword}, '%')
+            OR w.normalized_word LIKE CONCAT('%', #{keyword}, '%')
+            OR w.primary_definition LIKE CONCAT('%', #{keyword}, '%')
+          )
+        </if>
+        ORDER BY w.sequence_no ASC, w.id ASC
+    </select>
+
+    <select id="selectAdminWord" resultType="com.lexiflow.wordbook.dto.AdminWordRow">
+        SELECT
+        <include refid="WordColumns"/>,
+        w.enabled AS enabled
+        FROM word w
+        WHERE w.deleted = 0
+          AND w.wordbook_id = #{wordbookId}
+          AND w.id = #{wordId}
+        LIMIT 1
+    </select>
+
+    <select id="selectAdminWordPage" resultType="com.lexiflow.wordbook.dto.AdminWordRow">
+        SELECT
+        <include refid="WordColumns"/>,
+        w.enabled AS enabled
+        FROM word w
+        WHERE w.deleted = 0
+          AND w.wordbook_id = #{wordbookId}
+        <if test="enabled != null">
+          AND w.enabled = #{enabled}
+        </if>
+        <if test="keyword != null and keyword != ''">
+          AND (
+            w.word LIKE CONCAT('%', #{keyword}, '%')
+            OR w.normalized_word LIKE CONCAT('%', #{keyword}, '%')
+            OR w.primary_definition LIKE CONCAT('%', #{keyword}, '%')
+          )
+        </if>
+        ORDER BY w.sequence_no ASC, w.id ASC
+    </select>
+
+    <select id="selectNewWordCandidates" resultType="com.lexiflow.wordbook.dto.WordPickRow">
+        SELECT
+            w.id AS wordId,
+            w.sequence_no AS sequenceNo
+        FROM word w
+        WHERE w.deleted = 0
+          AND w.enabled = 1
+          AND w.wordbook_id = #{wordbookId}
+          AND w.sequence_no &gt; #{startSequenceNo}
+        ORDER BY w.sequence_no ASC, w.id ASC
+        LIMIT #{limit}
+    </select>
+
+</mapper>

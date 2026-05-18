@@ -16,9 +16,10 @@ import lombok.Setter;
 @TableName("word")
 public class Word {
 
-    @TableId(type = IdType.ASSIGN_ID)
+    @TableId(type = IdType.AUTO)
     private Long id;
 
+    private Long wordbookId;
     private String word;
     private String normalizedWord;
     private String phonetic0;
@@ -32,6 +33,10 @@ public class Word {
     private String primaryPos;
     private String primaryDefinition;
     private String tags;
+    private Integer sequenceNo;
+    private Integer difficultyLevel;
+    private Integer examFrequency;
+    private Boolean enabled;
     private Long createdBy;
     private Long updatedBy;
     @TableField(fill = FieldFill.INSERT)

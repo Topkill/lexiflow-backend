@@ -9,11 +9,11 @@ import com.lexiflow.common.exception.BizException;
 import com.lexiflow.wordbook.domain.Wordbook;
 import com.lexiflow.wordbook.dto.WordQueryRequest;
 import com.lexiflow.wordbook.dto.WordResponse;
+import com.lexiflow.wordbook.dto.WordRow;
 import com.lexiflow.wordbook.dto.WordbookQueryRequest;
 import com.lexiflow.wordbook.dto.WordbookResponse;
-import com.lexiflow.wordbook.dto.WordbookWordRow;
+import com.lexiflow.wordbook.mapper.WordMapper;
 import com.lexiflow.wordbook.mapper.WordbookMapper;
-import com.lexiflow.wordbook.mapper.WordbookWordMapper;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -24,7 +24,7 @@ import org.springframework.util.StringUtils;
 public class WordbookService {
 
     private final WordbookMapper wordbookMapper;
-    private final WordbookWordMapper wordbookWordMapper;
+    private final WordMapper wordMapper;
 
     public List<WordbookResponse> listWordbooks(WordbookQueryRequest request) {
         LambdaQueryWrapper<Wordbook> wrapper = new LambdaQueryWrapper<Wordbook>()
@@ -49,9 +49,9 @@ public class WordbookService {
     public PageResponse<WordResponse> pageWords(Long wordbookId, WordQueryRequest request) {
         getEnabledWordbook(wordbookId);
         WordQueryRequest safeRequest = request == null ? new WordQueryRequest(null, null, null) : request;
-        Page<WordbookWordRow> page = Page.of(safeRequest.safePage(), safeRequest.safeSize());
+        Page<WordRow> page = Page.of(safeRequest.safePage(), safeRequest.safeSize());
         String keyword = StringUtils.hasText(safeRequest.keyword()) ? safeRequest.keyword().trim() : null;
-        IPage<WordbookWordRow> result = wordbookWordMapper.selectWordPage(page, wordbookId, keyword);
+        IPage<WordRow> result = wordMapper.selectWordPage(page, wordbookId, keyword);
         List<WordResponse> records = result.getRecords().stream()
                 .map(WordResponse::from)
                 .toList();

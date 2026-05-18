@@ -8,16 +8,14 @@ import com.lexiflow.admin.wordbook.dto.AdminWordResponse;
 import com.lexiflow.admin.wordbook.dto.AdminWordbookQueryRequest;
 import com.lexiflow.admin.wordbook.dto.AdminWordbookRequest;
 import com.lexiflow.admin.wordbook.dto.AdminWordbookResponse;
-import com.lexiflow.wordbook.dto.WordbookWordAdminRow;
+import com.lexiflow.wordbook.dto.AdminWordRow;
 import com.lexiflow.common.api.PageResponse;
 import com.lexiflow.common.error.ErrorCode;
 import com.lexiflow.common.exception.BizException;
 import com.lexiflow.wordbook.domain.Word;
 import com.lexiflow.wordbook.domain.Wordbook;
-import com.lexiflow.wordbook.domain.WordbookWord;
 import com.lexiflow.wordbook.mapper.WordMapper;
 import com.lexiflow.wordbook.mapper.WordbookMapper;
-import com.lexiflow.wordbook.mapper.WordbookWordMapper;
 import java.util.Locale;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -31,7 +29,6 @@ public class AdminWordbookService {
 
     private final WordbookMapper wordbookMapper;
     private final WordMapper wordMapper;
-    private final WordbookWordMapper wordbookWordMapper;
     private final WordDictionaryJsonService wordDictionaryJsonService;
 
     public PageResponse<AdminWordbookResponse> pageWordbooks(AdminWordbookQueryRequest request) {
@@ -109,8 +106,8 @@ public class AdminWordbookService {
         getWordbookEntity(wordbookId);
         AdminWordQueryRequest safeRequest = request == null ? new AdminWordQueryRequest(null, null, null, null) : request;
         String keyword = StringUtils.hasText(safeRequest.keyword()) ? safeRequest.keyword().trim() : null;
-        Page<WordbookWordAdminRow> page = Page.of(safeRequest.safePage(), safeRequest.safeSize());
-        var result = wordbookWordMapper.selectAdminWordPage(page, wordbookId, keyword, safeRequest.enabled());
+        Page<AdminWordRow> page = Page.of(safeRequest.safePage(), safeRequest.safeSize());
+        var result = wordMapper.selectAdminWordPage(page, wordbookId, keyword, safeRequest.enabled());
         return PageResponse.of(
                 result.getRecords().stream().map(this::toWordResponse).toList(),
                 result.getTotal(),
@@ -122,18 +119,17 @@ public class AdminWordbookService {
     @Transactional
     public AdminWordResponse createWord(Long adminUserId, Long wordbookId, AdminWordRequest request) {
         getWordbookEntity(wordbookId);
-        Word word = findOrCreateWord(adminUserId, request);
-        if (findRelation(wordbookId, word.getId()) != null) {
-            throw new BizException(ErrorCode.CONFLICT, "单词已存在于当前词库");
-        }
+        String normalizedWord = wordDictionaryJsonService.normalizeWord(request.word());
+        ensureNormalizedWordAvailable(wordbookId, normalizedWord, null);
         ensureSequenceAvailable(wordbookId, request.sequenceNo(), null);
-        WordbookWord relation = new WordbookWord();
-        relation.setWordbookId(wordbookId);
-        relation.setWordId(word.getId());
-        applyRelationRequest(relation, request);
-        relation.setDeleted(0);
-        relation.setVersion(0);
-        wordbookWordMapper.insert(relation);
+        Word word = new Word();
+        word.setWordbookId(wordbookId);
+        applyWordRequest(word, request, normalizedWord, adminUserId);
+        applyWordScopeRequest(word, request);
+        word.setCreatedBy(adminUserId);
+        word.setDeleted(0);
+        word.setVersion(0);
+        wordMapper.insert(word);
         refreshWordbookCount(wordbookId);
         return getWordResponse(wordbookId, word.getId());
     }
@@ -141,15 +137,13 @@ public class AdminWordbookService {
     @Transactional
     public AdminWordResponse updateWord(Long adminUserId, Long wordbookId, Long wordId, AdminWordRequest request) {
         getWordbookEntity(wordbookId);
-        WordbookWord relation = requireRelation(wordbookId, wordId);
-        Word word = requireWord(wordId);
+        Word word = requireWord(wordbookId, wordId);
         String normalizedWord = wordDictionaryJsonService.normalizeWord(request.word());
-        ensureNormalizedWordAvailable(normalizedWord, wordId);
+        ensureNormalizedWordAvailable(wordbookId, normalizedWord, wordId);
+        ensureSequenceAvailable(wordbookId, request.sequenceNo(), wordId);
         applyWordRequest(word, request, normalizedWord, adminUserId);
+        applyWordScopeRequest(word, request);
         wordMapper.updateById(word);
-        ensureSequenceAvailable(wordbookId, request.sequenceNo(), relation.getId());
-        applyRelationRequest(relation, request);
-        wordbookWordMapper.updateById(relation);
         refreshWordbookCount(wordbookId);
         return getWordResponse(wordbookId, wordId);
     }
@@ -157,42 +151,22 @@ public class AdminWordbookService {
     @Transactional
     public void removeWord(Long wordbookId, Long wordId) {
         getWordbookEntity(wordbookId);
-        WordbookWord relation = requireRelation(wordbookId, wordId);
-        wordbookWordMapper.deleteById(relation.getId());
+        Word word = requireWord(wordbookId, wordId);
+        wordMapper.deleteById(word.getId());
         refreshWordbookCount(wordbookId);
     }
 
-    private Word findOrCreateWord(Long adminUserId, AdminWordRequest request) {
-        String normalizedWord = wordDictionaryJsonService.normalizeWord(request.word());
-        Word word = wordMapper.selectOne(new LambdaQueryWrapper<Word>()
-                .eq(Word::getNormalizedWord, normalizedWord)
-                .last("LIMIT 1"));
-        if (word == null) {
-            word = new Word();
-            applyWordRequest(word, request, normalizedWord, adminUserId);
-            word.setCreatedBy(adminUserId);
-            word.setDeleted(0);
-            word.setVersion(0);
-            wordMapper.insert(word);
-            return word;
-        }
-        applyWordRequest(word, request, normalizedWord, adminUserId);
-        wordMapper.updateById(word);
-        return word;
-    }
-
     private AdminWordResponse getWordResponse(Long wordbookId, Long wordId) {
-        WordbookWordAdminRow row = wordbookWordMapper.selectAdminWord(wordbookId, wordId);
+        AdminWordRow row = wordMapper.selectAdminWord(wordbookId, wordId);
         if (row == null) {
             throw new BizException(ErrorCode.WORD_NOT_FOUND);
         }
         return toWordResponse(row);
     }
 
-    private AdminWordResponse toWordResponse(WordbookWordAdminRow row) {
+    private AdminWordResponse toWordResponse(AdminWordRow row) {
         return new AdminWordResponse(
                 String.valueOf(row.id()),
-                String.valueOf(row.relationId()),
                 row.word(),
                 row.normalizedWord(),
                 row.phonetic0(),
@@ -212,6 +186,7 @@ public class AdminWordbookService {
                 row.enabled()
         );
     }
+
     private void applyWordbookRequest(Wordbook wordbook, AdminWordbookRequest request, String code) {
         wordbook.setName(request.name().trim());
         wordbook.setCode(code);
@@ -242,11 +217,11 @@ public class AdminWordbookService {
         word.setUpdatedBy(adminUserId);
     }
 
-    private void applyRelationRequest(WordbookWord relation, AdminWordRequest request) {
-        relation.setSequenceNo(request.sequenceNo());
-        relation.setDifficultyLevel(request.difficultyLevel());
-        relation.setExamFrequency(request.examFrequency());
-        relation.setEnabled(request.enabled());
+    private void applyWordScopeRequest(Word word, AdminWordRequest request) {
+        word.setSequenceNo(request.sequenceNo());
+        word.setDifficultyLevel(request.difficultyLevel());
+        word.setExamFrequency(request.examFrequency());
+        word.setEnabled(request.enabled());
     }
 
     private Wordbook getWordbookEntity(Long wordbookId) {
@@ -257,27 +232,15 @@ public class AdminWordbookService {
         return wordbook;
     }
 
-    private Word requireWord(Long wordId) {
-        Word word = wordMapper.selectById(wordId);
+    private Word requireWord(Long wordbookId, Long wordId) {
+        Word word = wordMapper.selectOne(new LambdaQueryWrapper<Word>()
+                .eq(Word::getId, wordId)
+                .eq(Word::getWordbookId, wordbookId)
+                .last("LIMIT 1"));
         if (word == null) {
             throw new BizException(ErrorCode.WORD_NOT_FOUND);
         }
         return word;
-    }
-
-    private WordbookWord requireRelation(Long wordbookId, Long wordId) {
-        WordbookWord relation = findRelation(wordbookId, wordId);
-        if (relation == null) {
-            throw new BizException(ErrorCode.WORD_NOT_FOUND);
-        }
-        return relation;
-    }
-
-    private WordbookWord findRelation(Long wordbookId, Long wordId) {
-        return wordbookWordMapper.selectOne(new LambdaQueryWrapper<WordbookWord>()
-                .eq(WordbookWord::getWordbookId, wordbookId)
-                .eq(WordbookWord::getWordId, wordId)
-                .last("LIMIT 1"));
     }
 
     private void ensureWordbookCodeAvailable(String code, Long excludedId) {
@@ -290,32 +253,34 @@ public class AdminWordbookService {
         }
     }
 
-    private void ensureNormalizedWordAvailable(String normalizedWord, Long excludedId) {
-        LambdaQueryWrapper<Word> wrapper = new LambdaQueryWrapper<Word>().eq(Word::getNormalizedWord, normalizedWord);
+    private void ensureNormalizedWordAvailable(Long wordbookId, String normalizedWord, Long excludedId) {
+        LambdaQueryWrapper<Word> wrapper = new LambdaQueryWrapper<Word>()
+                .eq(Word::getWordbookId, wordbookId)
+                .eq(Word::getNormalizedWord, normalizedWord);
         if (excludedId != null) {
             wrapper.ne(Word::getId, excludedId);
         }
         if (wordMapper.selectCount(wrapper) > 0) {
-            throw new BizException(ErrorCode.CONFLICT, "单词已存在");
+            throw new BizException(ErrorCode.CONFLICT, "当前词库内单词已存在");
         }
     }
 
-    private void ensureSequenceAvailable(Long wordbookId, Integer sequenceNo, Long excludedRelationId) {
-        LambdaQueryWrapper<WordbookWord> wrapper = new LambdaQueryWrapper<WordbookWord>()
-                .eq(WordbookWord::getWordbookId, wordbookId)
-                .eq(WordbookWord::getSequenceNo, sequenceNo);
-        if (excludedRelationId != null) {
-            wrapper.ne(WordbookWord::getId, excludedRelationId);
+    private void ensureSequenceAvailable(Long wordbookId, Integer sequenceNo, Long excludedWordId) {
+        LambdaQueryWrapper<Word> wrapper = new LambdaQueryWrapper<Word>()
+                .eq(Word::getWordbookId, wordbookId)
+                .eq(Word::getSequenceNo, sequenceNo);
+        if (excludedWordId != null) {
+            wrapper.ne(Word::getId, excludedWordId);
         }
-        if (wordbookWordMapper.selectCount(wrapper) > 0) {
+        if (wordMapper.selectCount(wrapper) > 0) {
             throw new BizException(ErrorCode.CONFLICT, "词库内顺序号已存在");
         }
     }
 
     private void refreshWordbookCount(Long wordbookId) {
-        Long count = wordbookWordMapper.selectCount(new LambdaQueryWrapper<WordbookWord>()
-                .eq(WordbookWord::getWordbookId, wordbookId)
-                .eq(WordbookWord::getEnabled, true));
+        Long count = wordMapper.selectCount(new LambdaQueryWrapper<Word>()
+                .eq(Word::getWordbookId, wordbookId)
+                .eq(Word::getEnabled, true));
         Wordbook wordbook = getWordbookEntity(wordbookId);
         wordbook.setWordCount(count.intValue());
         wordbookMapper.updateById(wordbook);

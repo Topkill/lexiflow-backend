@@ -16,7 +16,7 @@ import lombok.Setter;
 @TableName("wordbook")
 public class Wordbook {
 
-    @TableId(type = IdType.ASSIGN_ID)
+    @TableId(type = IdType.AUTO)
     private Long id;
 
     private String name;

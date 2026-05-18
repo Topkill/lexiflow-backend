@@ -5,7 +5,6 @@ import io.swagger.v3.oas.annotations.media.Schema;
 @Schema(description = "后台词库单词响应")
 public record AdminWordResponse(
         @Schema(description = "单词 ID") String id,
-        @Schema(description = "词库关联 ID") String relationId,
         @Schema(description = "单词展示值") String word,
         @Schema(description = "规范化单词") String normalizedWord,
         @Schema(description = "英式音标 phonetic0") String phonetic0,

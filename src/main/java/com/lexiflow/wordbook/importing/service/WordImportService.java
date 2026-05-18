@@ -9,7 +9,6 @@ import com.lexiflow.common.error.ErrorCode;
 import com.lexiflow.common.exception.BizException;
 import com.lexiflow.wordbook.domain.Word;
 import com.lexiflow.wordbook.domain.Wordbook;
-import com.lexiflow.wordbook.domain.WordbookWord;
 import com.lexiflow.wordbook.importing.domain.WordImportDuplicateStrategy;
 import com.lexiflow.wordbook.importing.domain.WordImportError;
 import com.lexiflow.wordbook.importing.domain.WordImportStatus;
@@ -23,7 +22,6 @@ import com.lexiflow.wordbook.importing.mapper.WordImportErrorMapper;
 import com.lexiflow.wordbook.importing.mapper.WordImportTaskMapper;
 import com.lexiflow.wordbook.mapper.WordMapper;
 import com.lexiflow.wordbook.mapper.WordbookMapper;
-import com.lexiflow.wordbook.mapper.WordbookWordMapper;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.net.URI;
@@ -64,7 +62,6 @@ public class WordImportService {
 
     private final WordbookMapper wordbookMapper;
     private final WordMapper wordMapper;
-    private final WordbookWordMapper wordbookWordMapper;
     private final WordImportTaskMapper wordImportTaskMapper;
     private final WordImportErrorMapper wordImportErrorMapper;
     private final ObjectMapper objectMapper;
@@ -286,14 +283,17 @@ public class WordImportService {
         }
         int difficulty = parseDifficulty(row.difficulty());
         String normalizedWord = wordDictionaryJsonService.normalizeWord(row.wordText());
-        Word word = wordMapper.selectOne(new LambdaQueryWrapper<Word>()
-                .eq(Word::getNormalizedWord, normalizedWord)
-                .last("LIMIT 1"));
+        Word word = findWordInWordbook(wordbook.getId(), normalizedWord);
+        if (word != null && duplicateStrategy == WordImportDuplicateStrategy.SKIP) {
+            throw new BizException(ErrorCode.CONFLICT, "当前词库内单词已存在，已按策略跳过");
+        }
         boolean newWord = word == null;
         if (newWord) {
             word = new Word();
+            word.setWordbookId(wordbook.getId());
             word.setWord(row.wordText().trim());
             word.setNormalizedWord(normalizedWord);
+            word.setSequenceNo(nextSequenceNo(wordbook.getId()));
             word.setCreatedBy(adminUserId);
             word.setDeleted(0);
             word.setVersion(0);
@@ -303,36 +303,15 @@ public class WordImportService {
         } else if (duplicateStrategy == WordImportDuplicateStrategy.FILL_EMPTY) {
             fillWord(word, row, difficulty, adminUserId, false);
         }
+        if (duplicateStrategy != WordImportDuplicateStrategy.FILL_EMPTY || word.getDifficultyLevel() == null) {
+            word.setDifficultyLevel(difficulty);
+        }
+        word.setExamFrequency(word.getExamFrequency() == null ? 0 : word.getExamFrequency());
+        word.setEnabled(true);
         if (newWord) {
             wordMapper.insert(word);
-        } else if (duplicateStrategy != WordImportDuplicateStrategy.SKIP) {
-            wordMapper.updateById(word);
-        }
-
-        WordbookWord relation = wordbookWordMapper.selectOne(new LambdaQueryWrapper<WordbookWord>()
-                .eq(WordbookWord::getWordbookId, wordbook.getId())
-                .eq(WordbookWord::getWordId, word.getId())
-                .last("LIMIT 1"));
-        if (relation != null && duplicateStrategy == WordImportDuplicateStrategy.SKIP) {
-            throw new BizException(ErrorCode.CONFLICT, "单词已存在，已按策略跳过");
-        }
-        if (relation == null) {
-            relation = new WordbookWord();
-            relation.setWordbookId(wordbook.getId());
-            relation.setWordId(word.getId());
-            relation.setSequenceNo(nextSequenceNo(wordbook.getId()));
-            relation.setDeleted(0);
-            relation.setVersion(0);
-        }
-        if (duplicateStrategy != WordImportDuplicateStrategy.FILL_EMPTY || relation.getDifficultyLevel() == null) {
-            relation.setDifficultyLevel(difficulty);
-        }
-        relation.setExamFrequency(relation.getExamFrequency() == null ? 0 : relation.getExamFrequency());
-        relation.setEnabled(true);
-        if (relation.getId() == null) {
-            wordbookWordMapper.insert(relation);
         } else {
-            wordbookWordMapper.updateById(relation);
+            wordMapper.updateById(word);
         }
     }
 
@@ -381,12 +360,14 @@ public class WordImportService {
             throw new BizException(ErrorCode.BAD_REQUEST, "trans 不能为空");
         }
         String normalizedWord = wordDictionaryJsonService.normalizeWord(wordText);
-        Word word = wordMapper.selectOne(new LambdaQueryWrapper<Word>()
-                .eq(Word::getNormalizedWord, normalizedWord)
-                .last("LIMIT 1"));
+        Word word = findWordInWordbook(wordbook.getId(), normalizedWord);
+        if (word != null && duplicateStrategy == WordImportDuplicateStrategy.SKIP) {
+            throw new BizException(ErrorCode.CONFLICT, "当前词库内单词已存在，已按策略跳过");
+        }
         boolean newWord = word == null;
         if (newWord) {
             word = new Word();
+            word.setWordbookId(wordbook.getId());
             word.setWord(wordText.trim());
             word.setNormalizedWord(normalizedWord);
             word.setCreatedBy(adminUserId);
@@ -398,34 +379,14 @@ public class WordImportService {
         } else if (duplicateStrategy == WordImportDuplicateStrategy.FILL_EMPTY) {
             fillWordFromJson(word, node, adminUserId, false);
         }
+        word.setSequenceNo(sequenceNo);
+        word.setDifficultyLevel(word.getDifficultyLevel() == null ? 1 : word.getDifficultyLevel());
+        word.setExamFrequency(word.getExamFrequency() == null ? 0 : word.getExamFrequency());
+        word.setEnabled(true);
         if (newWord) {
             wordMapper.insert(word);
-        } else if (duplicateStrategy != WordImportDuplicateStrategy.SKIP) {
-            wordMapper.updateById(word);
-        }
-
-        WordbookWord relation = wordbookWordMapper.selectOne(new LambdaQueryWrapper<WordbookWord>()
-                .eq(WordbookWord::getWordbookId, wordbook.getId())
-                .eq(WordbookWord::getWordId, word.getId())
-                .last("LIMIT 1"));
-        if (relation != null && duplicateStrategy == WordImportDuplicateStrategy.SKIP) {
-            throw new BizException(ErrorCode.CONFLICT, "单词已存在，已按策略跳过");
-        }
-        if (relation == null) {
-            relation = new WordbookWord();
-            relation.setWordbookId(wordbook.getId());
-            relation.setWordId(word.getId());
-            relation.setDeleted(0);
-            relation.setVersion(0);
-        }
-        relation.setSequenceNo(sequenceNo);
-        relation.setDifficultyLevel(relation.getDifficultyLevel() == null ? 1 : relation.getDifficultyLevel());
-        relation.setExamFrequency(relation.getExamFrequency() == null ? 0 : relation.getExamFrequency());
-        relation.setEnabled(true);
-        if (relation.getId() == null) {
-            wordbookWordMapper.insert(relation);
         } else {
-            wordbookWordMapper.updateById(relation);
+            wordMapper.updateById(word);
         }
     }
 
@@ -545,17 +506,17 @@ public class WordImportService {
     }
 
     private int nextSequenceNo(Long wordbookId) {
-        WordbookWord latest = wordbookWordMapper.selectOne(new LambdaQueryWrapper<WordbookWord>()
-                .eq(WordbookWord::getWordbookId, wordbookId)
-                .orderByDesc(WordbookWord::getSequenceNo)
+        Word latest = wordMapper.selectOne(new LambdaQueryWrapper<Word>()
+                .eq(Word::getWordbookId, wordbookId)
+                .orderByDesc(Word::getSequenceNo)
                 .last("LIMIT 1"));
         return latest == null ? 1 : latest.getSequenceNo() + 1;
     }
 
     private void refreshWordbookCount(Long wordbookId) {
-        Long count = wordbookWordMapper.selectCount(new LambdaQueryWrapper<WordbookWord>()
-                .eq(WordbookWord::getWordbookId, wordbookId)
-                .eq(WordbookWord::getEnabled, true));
+        Long count = wordMapper.selectCount(new LambdaQueryWrapper<Word>()
+                .eq(Word::getWordbookId, wordbookId)
+                .eq(Word::getEnabled, true));
         Wordbook wordbook = getWordbook(wordbookId);
         wordbook.setWordCount(count.intValue());
         wordbookMapper.updateById(wordbook);
@@ -629,7 +590,14 @@ public class WordImportService {
     }
 
     private void clearWordbookRelations(Long wordbookId) {
-        wordbookWordMapper.physicalDeleteByWordbookId(wordbookId);
+        wordMapper.physicalDeleteByWordbookId(wordbookId);
+    }
+
+    private Word findWordInWordbook(Long wordbookId, String normalizedWord) {
+        return wordMapper.selectOne(new LambdaQueryWrapper<Word>()
+                .eq(Word::getWordbookId, wordbookId)
+                .eq(Word::getNormalizedWord, normalizedWord)
+                .last("LIMIT 1"));
     }
 
     private String optionalJson(JsonNode node, String fieldName) {

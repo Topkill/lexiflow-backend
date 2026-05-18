@@ -2,8 +2,8 @@ package com.lexiflow.wordbook.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 
-@Schema(description = "词库单词查询行")
-public record WordbookWordRow(
+@Schema(description = "词库内单词查询行")
+public record WordRow(
         Long id,
         String word,
         String normalizedWord,

@@ -16,7 +16,7 @@ import lombok.Setter;
 @TableName("system_config")
 public class SystemConfig {
 
-    @TableId(type = IdType.ASSIGN_ID)
+    @TableId(type = IdType.AUTO)
     private Long id;
 
     private String configKey;

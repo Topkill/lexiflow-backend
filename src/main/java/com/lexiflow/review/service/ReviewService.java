@@ -116,7 +116,11 @@ public class ReviewService {
     @Transactional
     public FavoriteWordResponse favoriteWord(Long userId, FavoriteWordRequest request) {
         wordbookService.getEnabledWordbook(request.wordbookId());
-        Word word = requireWord(wordMapper.selectById(request.wordId()));
+        Word word = requireWord(wordMapper.selectOne(new LambdaQueryWrapper<Word>()
+                .eq(Word::getId, request.wordId())
+                .eq(Word::getWordbookId, request.wordbookId())
+                .eq(Word::getEnabled, true)
+                .last("LIMIT 1")));
         FavoriteWord favoriteWord = favoriteWordMapper.selectOne(new LambdaQueryWrapper<FavoriteWord>()
                 .eq(FavoriteWord::getUserId, userId)
                 .eq(FavoriteWord::getWordbookId, request.wordbookId())

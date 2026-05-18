@@ -1,8 +1,7 @@
 package com.lexiflow.wordbook.dto;
 
-public record WordbookWordAdminRow(
+public record AdminWordRow(
         Long id,
-        Long relationId,
         String word,
         String normalizedWord,
         String phonetic0,
