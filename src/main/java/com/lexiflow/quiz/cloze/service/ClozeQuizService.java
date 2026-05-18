@@ -3,6 +3,8 @@ package com.lexiflow.quiz.cloze.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.lexiflow.ai.content.domain.AiContentCache;
 import com.lexiflow.ai.content.domain.AiContentType;
 import com.lexiflow.ai.content.mapper.AiContentCacheMapper;
@@ -229,17 +231,22 @@ public class ClozeQuizService {
         BizException lastValidationError = null;
         for (int attempt = 1; attempt <= MAX_GENERATE_ATTEMPTS; attempt++) {
             AiPrompt prompt = buildPrompt(dailyTask, wordbookId, sourceType, selection, attempt, lastValidationError == null ? null : lastValidationError.getCustomMessage());
-            AiChatCompletionResult result = aiGatewayService.generateJson(userId, AiContentType.CLOZE, prompt);
-            JsonNode content = parseJson(result.content());
             try {
+                AiChatCompletionResult result = aiGatewayService.generateJson(userId, AiContentType.CLOZE, prompt);
+                JsonNode content = parseJson(result.content());
                 validateGeneratedContent(content, selection);
                 upsertClozeCache(userId, wordbookId, sourceHash, content);
                 return saveQuiz(userId, dailyTask, wordbookId, asyncTaskId, sourceType, selection, content);
             } catch (BizException ex) {
+                if (ex.getErrorCode() != ErrorCode.AI_CALL_FAILED) {
+                    throw ex;
+                }
                 lastValidationError = ex;
             }
         }
-        throw lastValidationError == null ? new BizException(ErrorCode.AI_CALL_FAILED, "AI 完形填空生成结果未通过文本检测") : lastValidationError;
+        JsonNode fallbackContent = buildFallbackContent(selection, lastValidationError);
+        validateGeneratedContent(fallbackContent, selection);
+        return saveQuiz(userId, dailyTask, wordbookId, asyncTaskId, sourceType, selection, fallbackContent);
     }
 
     private ClozeWordSelection selectClozeWords(Long userId, DailyTask dailyTask, Long wordbookId, ClozeSourceType sourceType, int targetWordCount) {
@@ -531,6 +538,75 @@ public class ClozeQuizService {
         }
         targetWords.stream().map(Word::getWord).filter(StringUtils::hasText).forEach(words::add);
         return words.stream().toList();
+    }
+
+    private JsonNode buildFallbackContent(ClozeWordSelection selection, BizException lastError) {
+        ObjectNode root = objectMapper.createObjectNode();
+        root.put("title", "LexiFlow 本组单词完形练习");
+        root.put("passage", buildFallbackPassage(selection));
+        root.put("explanation", "AI 返回内容暂未通过解析或文本检测，系统已根据本组单词生成可继续练习的兜底题。"
+                + (lastError == null || !StringUtils.hasText(lastError.getCustomMessage()) ? "" : "最近一次原因：" + lastError.getCustomMessage()));
+
+        ArrayNode candidateWords = root.putArray("candidateWords");
+        selection.blankWords().stream()
+                .map(Word::getWord)
+                .filter(StringUtils::hasText)
+                .forEach(candidateWords::add);
+
+        ArrayNode blanks = root.putArray("blanks");
+        int blankNo = 1;
+        for (Word word : selection.blankWords()) {
+            ObjectNode blank = blanks.addObject();
+            blank.put("blankNo", blankNo);
+            blank.put("answer", word.getWord());
+            blank.put("hint", safe(word.getPrimaryDefinition()));
+            blank.put("explanation", fallbackExplanation(word));
+            blankNo++;
+        }
+        return root;
+    }
+
+    private String buildFallbackPassage(ClozeWordSelection selection) {
+        StringBuilder passage = new StringBuilder();
+        passage.append("During a focused English study session, the learner reviewed a connected set of ideas. ");
+        int blankNo = 1;
+        for (Word word : selection.blankWords()) {
+            passage.append("For idea ")
+                    .append(blankNo)
+                    .append(", the best word is ___")
+                    .append(blankNo)
+                    .append("___ because it relates to ")
+                    .append(simpleDefinition(word))
+                    .append(". ");
+            blankNo++;
+        }
+        List<Word> backgroundWords = selection.backgroundWords();
+        if (!backgroundWords.isEmpty()) {
+            passage.append("The same review also kept these background words visible in context: ");
+            passage.append(backgroundWords.stream()
+                    .map(Word::getWord)
+                    .filter(StringUtils::hasText)
+                    .collect(Collectors.joining(", ")));
+            passage.append(".");
+        }
+        return passage.toString();
+    }
+
+    private String fallbackExplanation(Word word) {
+        String definition = safe(word.getPrimaryDefinition());
+        if (!StringUtils.hasText(definition)) {
+            return "该空对应本组目标词 " + word.getWord() + "。";
+        }
+        return "该空对应 " + word.getWord() + "，核心含义是：" + definition;
+    }
+
+    private String simpleDefinition(Word word) {
+        String definition = safe(word.getPrimaryDefinition());
+        if (!StringUtils.hasText(definition)) {
+            return "the review context";
+        }
+        String cleaned = definition.replaceAll("[\\r\\n]+", " ").trim();
+        return cleaned.length() > 60 ? cleaned.substring(0, 60) : cleaned;
     }
 
     private DailyTask getOwnedDailyTask(Long userId, Long dailyTaskId) {
