@@ -77,7 +77,10 @@ public class DailyTaskService {
         LocalDate today = LocalDate.now();
         DailyTask task = findTodayTask(userId, plan.getId(), today);
         if (task == null) {
-            task = generateTodayTask(userId, plan, today);
+            task = findLatestPendingTask(userId, plan.getId());
+            if (task == null) {
+                task = generateTodayTask(userId, plan, today);
+            }
         } else if (task.getStatus() != DailyTaskStatus.DONE) {
             task = syncDueReviewItems(userId, plan, task, today);
         }
@@ -162,6 +165,16 @@ public class DailyTaskService {
                 .eq(DailyTask::getUserId, userId)
                 .eq(DailyTask::getPlanId, planId)
                 .eq(DailyTask::getTaskDate, today)
+                .last("LIMIT 1"));
+    }
+
+    private DailyTask findLatestPendingTask(Long userId, Long planId) {
+        return dailyTaskMapper.selectOne(new LambdaQueryWrapper<DailyTask>()
+                .eq(DailyTask::getUserId, userId)
+                .eq(DailyTask::getPlanId, planId)
+                .eq(DailyTask::getStatus, DailyTaskStatus.PENDING)
+                .orderByDesc(DailyTask::getTaskDate)
+                .orderByDesc(DailyTask::getId)
                 .last("LIMIT 1"));
     }
 
