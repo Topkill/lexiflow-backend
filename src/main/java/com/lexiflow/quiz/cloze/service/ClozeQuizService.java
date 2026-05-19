@@ -74,7 +74,7 @@ import org.springframework.util.StringUtils;
 public class ClozeQuizService {
 
     private static final String SYSTEM_PROMPT = "你是 LexiFlow 的 AI 英语测验出题助手。请只输出合法 JSON，不要输出 Markdown、解释性前后缀或代码块。题目面向备考大学生，短文自然连贯，所有空格答案必须来自候选词。";
-    private static final int COMPLETED_GROUP_BLANK_COUNT = 10;
+    private static final int COMPLETED_GROUP_MAX_BLANK_COUNT = 10;
     private static final int MAX_GENERATE_ATTEMPTS = 2;
 
     private final AsyncTaskService asyncTaskService;
@@ -300,11 +300,12 @@ public class ClozeQuizService {
         Map<Long, Word> wordMap = wordMapper.selectBatchIds(targetWordIds).stream()
                 .collect(Collectors.toMap(Word::getId, Function.identity()));
         List<Word> targetWords = targetWordIds.stream().map(wordMap::get).filter(Objects::nonNull).toList();
-        if (targetWords.size() < COMPLETED_GROUP_BLANK_COUNT) {
-            throw new BizException(ErrorCode.BAD_REQUEST, "本组已完成单词不足 10 个，暂不能生成 10 空完形填空");
+        int blankCount = Math.min(COMPLETED_GROUP_MAX_BLANK_COUNT, targetWords.size());
+        if (blankCount <= 0) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "本组暂无可用于生成完形填空的单词");
         }
         Map<Long, StudyFeedback> feedbackMap = selectFeedbackMap(userId, dailyTask.getId(), itemMap);
-        List<Word> blankWords = clozeBlankWordSelector.selectBlankWords(targetWords, feedbackMap, COMPLETED_GROUP_BLANK_COUNT, dailyTask.getId());
+        List<Word> blankWords = clozeBlankWordSelector.selectBlankWords(targetWords, feedbackMap, blankCount, dailyTask.getId());
         return new ClozeWordSelection(targetWords, blankWords);
     }
 

@@ -23,7 +23,8 @@ public class StudyPlan {
     private Long userId;
     private Long wordbookId;
     private String name;
-    private Integer dailyNewWords;
+    private Integer newWordsPerGroup;
+    private Integer reviewWordsPerGroup;
     private LocalDate startDate;
     private LocalDate expectedFinishDate;
     private LocalDate actualFinishDate;

@@ -3,6 +3,10 @@ package com.lexiflow.study.task.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.lexiflow.common.error.ErrorCode;
 import com.lexiflow.common.exception.BizException;
+import com.lexiflow.quiz.cloze.domain.ClozeAttempt;
+import com.lexiflow.quiz.cloze.domain.ClozeQuiz;
+import com.lexiflow.quiz.cloze.mapper.ClozeAttemptMapper;
+import com.lexiflow.quiz.cloze.mapper.ClozeQuizMapper;
 import com.lexiflow.study.domain.StudyPlan;
 import com.lexiflow.study.mapper.StudyPlanMapper;
 import com.lexiflow.study.progress.domain.FavoriteWord;
@@ -70,18 +74,22 @@ public class DailyTaskService {
     private final StudyEventMapper studyEventMapper;
     private final WrongWordMapper wrongWordMapper;
     private final FavoriteWordMapper favoriteWordMapper;
+    private final ClozeQuizMapper clozeQuizMapper;
+    private final ClozeAttemptMapper clozeAttemptMapper;
 
     @Transactional
     public DailyTaskResponse getTodayTask(Long userId) {
         StudyPlan plan = studyPlanService.getPrimaryActivePlanEntity(userId);
         LocalDate today = LocalDate.now();
-        DailyTask task = findTodayTask(userId, plan.getId(), today);
+        DailyTask task = findLatestDoneTaskAwaitingClozeAttempt(userId, plan.getId(), today);
+        if (task != null) {
+            return toResponse(task, plan);
+        }
+
+        task = findLatestPendingTask(userId, plan.getId());
         if (task == null) {
-            task = findLatestPendingTask(userId, plan.getId());
-            if (task == null) {
-                task = generateTodayTask(userId, plan, today);
-            }
-        } else if (task.getStatus() != DailyTaskStatus.DONE) {
+            task = generateTodayTask(userId, plan, today);
+        } else {
             task = syncDueReviewItems(userId, plan, task, today);
         }
         return toResponse(task, plan);
@@ -104,7 +112,12 @@ public class DailyTaskService {
             throw new BizException(ErrorCode.WORDBOOK_NOT_FOUND);
         }
         LocalDate today = LocalDate.now();
-        DailyTask task = findTodayTask(userId, plan.getId(), today);
+        DailyTask task = findLatestDoneTaskAwaitingClozeAttempt(userId, plan.getId(), today);
+        if (task != null) {
+            return toResponse(task, plan);
+        }
+
+        task = findLatestPendingTask(userId, plan.getId());
         if (task == null) {
             task = generateTodayTask(userId, plan, today);
         } else if (task.getStatus() != DailyTaskStatus.DONE) {
@@ -172,36 +185,58 @@ public class DailyTaskService {
         return SubmitFeedbackResponse.from(item, request.feedback(), sm2Result.nextReviewDate(), task.getStatus() == DailyTaskStatus.DONE, progress);
     }
 
-    private DailyTask findTodayTask(Long userId, Long planId, LocalDate today) {
-        return dailyTaskMapper.selectOne(new LambdaQueryWrapper<DailyTask>()
-                .eq(DailyTask::getUserId, userId)
-                .eq(DailyTask::getPlanId, planId)
-                .eq(DailyTask::getTaskDate, today)
-                .last("LIMIT 1"));
-    }
-
     private DailyTask findLatestPendingTask(Long userId, Long planId) {
         return dailyTaskMapper.selectOne(new LambdaQueryWrapper<DailyTask>()
                 .eq(DailyTask::getUserId, userId)
                 .eq(DailyTask::getPlanId, planId)
                 .eq(DailyTask::getStatus, DailyTaskStatus.PENDING)
                 .orderByDesc(DailyTask::getTaskDate)
+                .orderByDesc(DailyTask::getGroupNo)
                 .orderByDesc(DailyTask::getId)
                 .last("LIMIT 1"));
     }
 
+    private DailyTask findLatestDoneTaskAwaitingClozeAttempt(Long userId, Long planId, LocalDate today) {
+        List<DailyTask> doneTasks = dailyTaskMapper.selectList(new LambdaQueryWrapper<DailyTask>()
+                .eq(DailyTask::getUserId, userId)
+                .eq(DailyTask::getPlanId, planId)
+                .eq(DailyTask::getTaskDate, today)
+                .eq(DailyTask::getStatus, DailyTaskStatus.DONE)
+                .orderByDesc(DailyTask::getTaskDate)
+                .orderByDesc(DailyTask::getGroupNo)
+                .orderByDesc(DailyTask::getId));
+        return doneTasks.stream()
+                .filter(task -> !hasCompletedGroupClozeAttempt(task))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private boolean hasCompletedGroupClozeAttempt(DailyTask task) {
+        List<ClozeQuiz> quizzes = clozeQuizMapper.selectList(new LambdaQueryWrapper<ClozeQuiz>()
+                .eq(ClozeQuiz::getDailyTaskId, task.getId())
+                .orderByDesc(ClozeQuiz::getId));
+        if (quizzes.isEmpty()) {
+            return false;
+        }
+        return quizzes.stream().anyMatch(quiz -> hasClozeAttempt(task.getUserId(), quiz.getId()));
+    }
+
     private DailyTask generateTodayTask(Long userId, StudyPlan plan, LocalDate today) {
-        List<UserWordState> dueReviewStates = selectDueReviewStates(userId, plan, today, Set.of());
+        List<UserWordState> dueReviewStates = selectDueReviewStates(userId, plan, today, Set.of(), reviewWordsPerGroup(plan));
         List<WordPickRow> newWords = wordMapper.selectNewWordCandidates(
                 plan.getWordbookId(),
                 plan.getCurrentSequenceNo(),
-                plan.getDailyNewWords()
+                newWordsPerGroup(plan)
         );
+        if (dueReviewStates.isEmpty() && newWords.isEmpty()) {
+            throw new BizException(ErrorCode.TODAY_TASK_NOT_FOUND);
+        }
 
         DailyTask task = new DailyTask();
         task.setUserId(userId);
         task.setPlanId(plan.getId());
         task.setTaskDate(today);
+        task.setGroupNo(nextGroupNo(userId, plan.getId(), today));
         task.setStatus(DailyTaskStatus.PENDING);
         task.setNewCount(newWords.size());
         task.setReviewCount(dueReviewStates.size());
@@ -245,7 +280,8 @@ public class DailyTaskService {
                 .stream()
                 .map(DailyTaskItem::getWordId)
                 .collect(Collectors.toCollection(HashSet::new));
-        List<UserWordState> dueReviewStates = selectDueReviewStates(userId, plan, today, existingWordIds);
+        int reviewSlots = Math.max(0, reviewWordsPerGroup(plan) - countTaskItems(task.getId(), DailyTaskItemType.REVIEW));
+        List<UserWordState> dueReviewStates = selectDueReviewStates(userId, plan, today, existingWordIds, reviewSlots);
         if (!dueReviewStates.isEmpty()) {
             insertReviewItems(task, dueReviewStates, countTaskItems(task.getId(), DailyTaskItemType.REVIEW));
         }
@@ -261,7 +297,21 @@ public class DailyTaskService {
         return task;
     }
 
-    private List<UserWordState> selectDueReviewStates(Long userId, StudyPlan plan, LocalDate today, Set<Long> excludedWordIds) {
+    private int nextGroupNo(Long userId, Long planId, LocalDate today) {
+        DailyTask latestTask = dailyTaskMapper.selectOne(new LambdaQueryWrapper<DailyTask>()
+                .eq(DailyTask::getUserId, userId)
+                .eq(DailyTask::getPlanId, planId)
+                .eq(DailyTask::getTaskDate, today)
+                .orderByDesc(DailyTask::getGroupNo)
+                .orderByDesc(DailyTask::getId)
+                .last("LIMIT 1"));
+        return latestTask == null || latestTask.getGroupNo() == null ? 1 : latestTask.getGroupNo() + 1;
+    }
+
+    private List<UserWordState> selectDueReviewStates(Long userId, StudyPlan plan, LocalDate today, Set<Long> excludedWordIds, int limit) {
+        if (limit <= 0) {
+            return Collections.emptyList();
+        }
         return userWordStateMapper.selectList(new LambdaQueryWrapper<UserWordState>()
                 .eq(UserWordState::getUserId, userId)
                 .eq(UserWordState::getWordbookId, plan.getWordbookId())
@@ -272,7 +322,8 @@ public class DailyTaskService {
                 .orderByAsc(UserWordState::getNextReviewDate)
                 .orderByDesc(UserWordState::getWrongCount)
                 .orderByAsc(UserWordState::getUpdatedAt)
-                .orderByAsc(UserWordState::getId));
+                .orderByAsc(UserWordState::getId)
+                .last("LIMIT " + limit));
     }
 
     private void insertReviewItems(DailyTask task, List<UserWordState> dueReviewStates, int startIndex) {
@@ -317,7 +368,24 @@ public class DailyTaskService {
                 .orderByAsc(DailyTaskItem::getId));
         List<DailyTaskItemResponse> itemResponses = buildItemResponses(items);
         DailyTaskPlanResponse planResponse = new DailyTaskPlanResponse(String.valueOf(plan.getId()), wordbook.getName());
-        return DailyTaskResponse.from(task, planResponse, itemResponses);
+        Long clozeQuizId = latestClozeQuizId(task.getId());
+        boolean clozeGenerated = clozeQuizId != null;
+        boolean clozeAttempted = hasCompletedGroupClozeAttempt(task);
+        return DailyTaskResponse.from(task, planResponse, itemResponses, clozeGenerated, clozeAttempted, clozeQuizId);
+    }
+
+    private Long latestClozeQuizId(Long dailyTaskId) {
+        ClozeQuiz quiz = clozeQuizMapper.selectOne(new LambdaQueryWrapper<ClozeQuiz>()
+                .eq(ClozeQuiz::getDailyTaskId, dailyTaskId)
+                .orderByDesc(ClozeQuiz::getId)
+                .last("LIMIT 1"));
+        return quiz == null ? null : quiz.getId();
+    }
+
+    private boolean hasClozeAttempt(Long userId, Long quizId) {
+        return clozeAttemptMapper.selectCount(new LambdaQueryWrapper<ClozeAttempt>()
+                .eq(ClozeAttempt::getUserId, userId)
+                .eq(ClozeAttempt::getQuizId, quizId)) > 0;
     }
 
     private List<DailyTaskItemResponse> buildItemResponses(List<DailyTaskItem> items) {
@@ -569,6 +637,14 @@ public class DailyTaskService {
 
     private int totalCount(DailyTask task) {
         return task.getNewCount() + task.getReviewCount() + task.getExtraCount();
+    }
+
+    private int newWordsPerGroup(StudyPlan plan) {
+        return plan.getNewWordsPerGroup() == null ? 20 : plan.getNewWordsPerGroup();
+    }
+
+    private int reviewWordsPerGroup(StudyPlan plan) {
+        return plan.getReviewWordsPerGroup() == null ? newWordsPerGroup(plan) * 2 : plan.getReviewWordsPerGroup();
     }
 
     private StudyScene toStudyScene(DailyTaskItemType itemType) {
