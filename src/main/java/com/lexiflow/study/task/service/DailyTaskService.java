@@ -184,7 +184,6 @@ public class DailyTaskService {
         task.setDoneCount(0);
         task.setSkippedCount(0);
         task.setDeleted(0);
-        task.setVersion(0);
         dailyTaskMapper.insert(task);
 
         insertReviewItems(task, dueReviewStates, 0);
@@ -200,7 +199,6 @@ public class DailyTaskService {
             item.setStatus(DailyTaskItemStatus.PENDING);
             item.setSequenceNo(row.sequenceNo());
             item.setDeleted(0);
-            item.setVersion(0);
             dailyTaskItemMapper.insert(item);
         }
 
@@ -265,7 +263,6 @@ public class DailyTaskService {
             item.setStatus(DailyTaskItemStatus.PENDING);
             item.setSequenceNo(REVIEW_SEQUENCE_BASE + index++);
             item.setDeleted(0);
-            item.setVersion(0);
             dailyTaskItemMapper.insert(item);
         }
     }
@@ -283,7 +280,6 @@ public class DailyTaskService {
             item.setStatus(DailyTaskItemStatus.PENDING);
             item.setSequenceNo(EXTRA_SEQUENCE_BASE + index++);
             item.setDeleted(0);
-            item.setVersion(0);
             dailyTaskItemMapper.insert(item);
         }
     }
@@ -382,7 +378,6 @@ public class DailyTaskService {
         state.setWrongCount(0);
         state.setCorrectCount(0);
         state.setDeleted(0);
-        state.setVersion(0);
         return state;
     }
 
@@ -487,7 +482,6 @@ public class DailyTaskService {
             wrongWord.setLastWrongAt(LocalDateTime.now());
             wrongWord.setResolved(false);
             wrongWord.setDeleted(0);
-            wrongWord.setVersion(0);
             wrongWordMapper.insert(wrongWord);
             return;
         }

@@ -117,7 +117,6 @@ public class WordAiContentService {
             cache.setSourceHash(sourceHash);
             cache.setHitCount(0);
             cache.setDeleted(0);
-            cache.setVersion(0);
         }
         cache.setContentJson(toJson(content));
         cache.setMarkdownContent(null);

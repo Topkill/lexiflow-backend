@@ -192,7 +192,6 @@ public class StudyReportService {
             report.setUserId(userId);
             report.setReportDate(reportDate);
             report.setDeleted(0);
-            report.setVersion(0);
         }
         report.setPlanId(plan.getId());
         report.setWordbookId(plan.getWordbookId());

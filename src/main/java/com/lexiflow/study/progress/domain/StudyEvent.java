@@ -14,7 +14,7 @@ import lombok.Setter;
 @TableName("study_event")
 public class StudyEvent {
 
-    @TableId(type = IdType.ASSIGN_ID)
+    @TableId(type = IdType.AUTO)
     private Long id;
 
     private Long userId;

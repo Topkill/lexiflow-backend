@@ -296,7 +296,6 @@ public class WordImportService {
             word.setSequenceNo(nextSequenceNo(wordbook.getId()));
             word.setCreatedBy(adminUserId);
             word.setDeleted(0);
-            word.setVersion(0);
         }
         if (newWord || duplicateStrategy == WordImportDuplicateStrategy.OVERWRITE) {
             fillWord(word, row, difficulty, adminUserId, true);
@@ -372,7 +371,6 @@ public class WordImportService {
             word.setNormalizedWord(normalizedWord);
             word.setCreatedBy(adminUserId);
             word.setDeleted(0);
-            word.setVersion(0);
         }
         if (newWord || duplicateStrategy == WordImportDuplicateStrategy.OVERWRITE) {
             fillWordFromJson(word, node, adminUserId, true);

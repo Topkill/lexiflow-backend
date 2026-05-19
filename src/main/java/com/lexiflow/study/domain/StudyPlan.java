@@ -17,7 +17,7 @@ import lombok.Setter;
 @TableName("study_plan")
 public class StudyPlan {
 
-    @TableId(type = IdType.ASSIGN_ID)
+    @TableId(type = IdType.AUTO)
     private Long id;
 
     private Long userId;

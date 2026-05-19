@@ -14,7 +14,7 @@ import lombok.Setter;
 @TableName("word_import_error")
 public class WordImportError {
 
-    @TableId(type = IdType.ASSIGN_ID)
+    @TableId(type = IdType.AUTO)
     private Long id;
 
     private Long importTaskId;

@@ -161,7 +161,6 @@ public class ClozeQuizService {
             answer.setCorrectAnswer(blank.getAnswerWord());
             answer.setCorrect(correct);
             answer.setDeleted(0);
-            answer.setVersion(0);
             answerEntities.add(answer);
         }
 
@@ -178,7 +177,6 @@ public class ClozeQuizService {
         attempt.setDurationSeconds(request.durationSeconds());
         attempt.setSubmittedAt(LocalDateTime.now());
         attempt.setDeleted(0);
-        attempt.setVersion(0);
         clozeAttemptMapper.insert(attempt);
 
         for (ClozeAttemptAnswer answer : answerEntities) {
@@ -380,7 +378,6 @@ public class ClozeQuizService {
             cache.setSourceHash(sourceHash);
             cache.setHitCount(0);
             cache.setDeleted(0);
-            cache.setVersion(0);
         }
         cache.setContentJson(toJson(content));
         cache.setMarkdownContent(null);
@@ -430,7 +427,6 @@ public class ClozeQuizService {
             blank.setHint(blankNode.path("hint").asText(word.getPrimaryDefinition()));
             blank.setExplanation(blankNode.path("explanation").asText(null));
             blank.setDeleted(0);
-            blank.setVersion(0);
             blankDrafts.add(blank);
             blankNo++;
         }
@@ -450,7 +446,6 @@ public class ClozeQuizService {
         quiz.setTargetWordIds(toJson(selection.targetWords().stream().map(word -> String.valueOf(word.getId())).toList()));
         quiz.setExplanation(content.path("explanation").asText(null));
         quiz.setDeleted(0);
-        quiz.setVersion(0);
         clozeQuizMapper.insert(quiz);
         for (ClozeQuizBlank blank : blankDrafts) {
             blank.setQuizId(quiz.getId());
@@ -683,7 +678,6 @@ public class ClozeQuizService {
             wrongWord.setLastWrongAt(LocalDateTime.now());
             wrongWord.setResolved(false);
             wrongWord.setDeleted(0);
-            wrongWord.setVersion(0);
             wrongWordMapper.insert(wrongWord);
             return;
         }

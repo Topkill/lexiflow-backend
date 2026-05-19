@@ -70,7 +70,6 @@ public class AdminWordbookService {
         wordbook.setCreatedBy(adminUserId);
         wordbook.setUpdatedBy(adminUserId);
         wordbook.setDeleted(0);
-        wordbook.setVersion(0);
         wordbookMapper.insert(wordbook);
         return AdminWordbookResponse.from(wordbook);
     }
@@ -128,7 +127,6 @@ public class AdminWordbookService {
         applyWordScopeRequest(word, request);
         word.setCreatedBy(adminUserId);
         word.setDeleted(0);
-        word.setVersion(0);
         wordMapper.insert(word);
         refreshWordbookCount(wordbookId);
         return getWordResponse(wordbookId, word.getId());

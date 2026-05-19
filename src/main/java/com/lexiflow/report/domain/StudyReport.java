@@ -6,7 +6,6 @@ import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.baomidou.mybatisplus.annotation.TableName;
-import com.baomidou.mybatisplus.annotation.Version;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -18,7 +17,7 @@ import lombok.Setter;
 @TableName("study_report")
 public class StudyReport {
 
-    @TableId(type = IdType.ASSIGN_ID)
+    @TableId(type = IdType.AUTO)
     private Long id;
 
     private Long userId;
@@ -40,6 +39,4 @@ public class StudyReport {
     private LocalDateTime updatedAt;
     @TableLogic
     private Integer deleted;
-    @Version
-    private Integer version;
 }

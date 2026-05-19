@@ -43,7 +43,6 @@ public class UserService {
         user.setRole(UserRole.USER);
         user.setStatus(UserStatus.ACTIVE);
         user.setDeleted(0);
-        user.setVersion(0);
         userMapper.insert(user);
 
         createDefaultSettings(user.getId());
@@ -127,7 +126,6 @@ public class UserService {
         settings.setEnableDailyReport(true);
         settings.setTimezone("Asia/Shanghai");
         settings.setDeleted(0);
-        settings.setVersion(0);
         userSettingsMapper.insert(settings);
         return settings;
     }

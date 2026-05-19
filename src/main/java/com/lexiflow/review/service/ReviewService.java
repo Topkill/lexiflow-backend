@@ -133,7 +133,6 @@ public class ReviewService {
             favoriteWord.setWordId(request.wordId());
             favoriteWord.setNote(StringUtils.hasText(request.note()) ? request.note().trim() : null);
             favoriteWord.setDeleted(0);
-            favoriteWord.setVersion(0);
             favoriteWordMapper.insert(favoriteWord);
         } else {
             favoriteWord.setNote(StringUtils.hasText(request.note()) ? request.note().trim() : null);

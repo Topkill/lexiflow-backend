@@ -14,7 +14,7 @@ import lombok.Setter;
 @TableName("async_task")
 public class AsyncTask {
 
-    @TableId(type = IdType.ASSIGN_ID)
+    @TableId(type = IdType.AUTO)
     private Long id;
 
     private Long userId;

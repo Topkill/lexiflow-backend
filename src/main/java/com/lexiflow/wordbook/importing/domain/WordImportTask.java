@@ -14,7 +14,7 @@ import lombok.Setter;
 @TableName("word_import_task")
 public class WordImportTask {
 
-    @TableId(type = IdType.ASSIGN_ID)
+    @TableId(type = IdType.AUTO)
     private Long id;
 
     private Long asyncTaskId;

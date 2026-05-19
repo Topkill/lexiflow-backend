@@ -29,7 +29,6 @@ public class UserAiConfigService {
             config = new UserAiConfig();
             config.setUserId(userId);
             config.setDeleted(0);
-            config.setVersion(0);
         }
         config.setApiBaseUrl(request.apiBaseUrl().trim());
         config.setEncryptedApiKey(apiKeyCryptoService.encrypt(request.apiKey().trim()));
