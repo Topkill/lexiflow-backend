@@ -140,6 +140,18 @@ public class DailyTaskService {
         if (item.getStatus() != DailyTaskItemStatus.PENDING) {
             throw new BizException(ErrorCode.TASK_ITEM_NOT_SUBMITTABLE);
         }
+        if (request.feedback() == StudyFeedback.UNKNOWN && StudyFeedback.UNKNOWN.name().equals(item.getFeedback())) {
+            UserWordState state = findUserWordState(userId, item.getWordbookId(), item.getWordId());
+            DailyTask task = updateDailyTaskProgress(item.getDailyTaskId());
+            TaskProgressResponse progress = TaskProgressResponse.from(task.getDoneCount(), totalCount(task));
+            return SubmitFeedbackResponse.from(
+                    item,
+                    request.feedback(),
+                    state == null ? null : state.getNextReviewDate(),
+                    task.getStatus() == DailyTaskStatus.DONE,
+                    progress
+            );
+        }
 
         StudyScene scene = toStudyScene(item.getItemType());
         Sm2Result sm2Result = updateWordState(userId, item, request.feedback(), scene);
