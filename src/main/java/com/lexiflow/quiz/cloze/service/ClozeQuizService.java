@@ -256,7 +256,7 @@ public class ClozeQuizService {
 
     private ClozeWordSelection selectClozeWords(Long userId, DailyTask dailyTask, Long wordbookId, ClozeSourceType sourceType, int targetWordCount) {
         if (sourceType == ClozeSourceType.COMPLETED_GROUP) {
-            return selectCompletedGroupWords(userId, dailyTask);
+            return selectCompletedGroupWords(userId, dailyTask, targetWordCount);
         }
         LinkedHashSet<Long> wordIds = new LinkedHashSet<>();
         if (sourceType == ClozeSourceType.TODAY_NEW || sourceType == ClozeSourceType.MIXED) {
@@ -288,7 +288,7 @@ public class ClozeQuizService {
         return new ClozeWordSelection(words, words);
     }
 
-    private ClozeWordSelection selectCompletedGroupWords(Long userId, DailyTask dailyTask) {
+    private ClozeWordSelection selectCompletedGroupWords(Long userId, DailyTask dailyTask, int targetWordCount) {
         if (dailyTask.getStatus() != DailyTaskStatus.DONE) {
             throw new BizException(ErrorCode.BAD_REQUEST, "完成本组单词后才能生成本组完形填空");
         }
@@ -307,7 +307,7 @@ public class ClozeQuizService {
         Map<Long, Word> wordMap = wordMapper.selectBatchIds(targetWordIds).stream()
                 .collect(Collectors.toMap(Word::getId, Function.identity()));
         List<Word> targetWords = targetWordIds.stream().map(wordMap::get).filter(Objects::nonNull).toList();
-        int blankCount = Math.min(COMPLETED_GROUP_MAX_BLANK_COUNT, targetWords.size());
+        int blankCount = Math.min(Math.min(COMPLETED_GROUP_MAX_BLANK_COUNT, targetWordCount), targetWords.size());
         if (blankCount <= 0) {
             throw new BizException(ErrorCode.BAD_REQUEST, "本组暂无可用于生成完形填空的单词");
         }
