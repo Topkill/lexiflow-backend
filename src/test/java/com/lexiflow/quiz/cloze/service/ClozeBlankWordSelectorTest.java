@@ -13,11 +13,11 @@ class ClozeBlankWordSelectorTest {
     private final ClozeBlankWordSelector selector = new ClozeBlankWordSelector();
 
     @Test
-    void selectBlankWordsShouldPreferUnknownThenVagueThenKnown() {
+    void selectBlankWordsShouldPreferUnknownThenKnown() {
         List<Word> words = words(1, 2, 3, 4, 5);
         Map<Long, StudyFeedback> feedbackMap = Map.of(
                 1L, StudyFeedback.KNOWN,
-                2L, StudyFeedback.VAGUE,
+                2L, StudyFeedback.KNOWN,
                 3L, StudyFeedback.UNKNOWN,
                 4L, StudyFeedback.KNOWN,
                 5L, StudyFeedback.UNKNOWN
@@ -29,8 +29,7 @@ class ClozeBlankWordSelectorTest {
                 .toList();
 
         assertThat(selectedIds.subList(0, 2)).containsExactlyInAnyOrder(3L, 5L);
-        assertThat(selectedIds.get(2)).isEqualTo(2L);
-        assertThat(selectedIds.get(3)).isIn(1L, 4L);
+        assertThat(selectedIds.subList(2, 4)).allSatisfy(id -> assertThat(id).isIn(1L, 2L, 4L));
     }
 
     @Test
@@ -40,8 +39,8 @@ class ClozeBlankWordSelectorTest {
                 1L, StudyFeedback.UNKNOWN,
                 2L, StudyFeedback.UNKNOWN,
                 3L, StudyFeedback.UNKNOWN,
-                4L, StudyFeedback.VAGUE,
-                5L, StudyFeedback.VAGUE,
+                4L, StudyFeedback.KNOWN,
+                5L, StudyFeedback.KNOWN,
                 6L, StudyFeedback.KNOWN,
                 7L, StudyFeedback.KNOWN,
                 8L, StudyFeedback.KNOWN
@@ -57,8 +56,8 @@ class ClozeBlankWordSelectorTest {
     void higherFeedbackShouldKeepHighestPriorityFeedback() {
         assertThat(ClozeBlankWordSelector.higherFeedback(StudyFeedback.KNOWN, StudyFeedback.UNKNOWN))
                 .isEqualTo(StudyFeedback.UNKNOWN);
-        assertThat(ClozeBlankWordSelector.higherFeedback(StudyFeedback.VAGUE, StudyFeedback.KNOWN))
-                .isEqualTo(StudyFeedback.VAGUE);
+        assertThat(ClozeBlankWordSelector.higherFeedback(StudyFeedback.KNOWN, StudyFeedback.KNOWN))
+                .isEqualTo(StudyFeedback.KNOWN);
     }
 
     private List<Word> words(long... ids) {

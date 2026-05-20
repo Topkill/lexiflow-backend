@@ -89,7 +89,8 @@ public class DailyTaskService {
         task = findLatestPendingTask(userId, plan.getId());
         if (task == null) {
             task = generateTodayTask(userId, plan, today);
-        } else {
+        } else if (shouldSyncDueReviewItems(task, today)) {
+            task = rollUntouchedPendingTaskToToday(task, today);
             task = syncDueReviewItems(userId, plan, task, today);
         }
         return toResponse(task, plan);
@@ -120,7 +121,8 @@ public class DailyTaskService {
         task = findLatestPendingTask(userId, plan.getId());
         if (task == null) {
             task = generateTodayTask(userId, plan, today);
-        } else if (task.getStatus() != DailyTaskStatus.DONE) {
+        } else if (task.getStatus() != DailyTaskStatus.DONE && shouldSyncDueReviewItems(task, today)) {
+            task = rollUntouchedPendingTaskToToday(task, today);
             task = syncDueReviewItems(userId, plan, task, today);
         }
 
@@ -194,6 +196,36 @@ public class DailyTaskService {
                 .orderByDesc(DailyTask::getGroupNo)
                 .orderByDesc(DailyTask::getId)
                 .last("LIMIT 1"));
+    }
+
+    private DailyTask rollUntouchedPendingTaskToToday(DailyTask task, LocalDate today) {
+        if (task.getTaskDate() == null || !task.getTaskDate().isBefore(today)) {
+            return task;
+        }
+        if (hasTouchedTaskItems(task.getId())) {
+            return task;
+        }
+        task.setTaskDate(today);
+        dailyTaskMapper.updateById(task);
+        return task;
+    }
+
+    private boolean shouldSyncDueReviewItems(DailyTask task, LocalDate today) {
+        if (task.getTaskDate() == null || !task.getTaskDate().isBefore(today)) {
+            return true;
+        }
+        return !hasTouchedTaskItems(task.getId());
+    }
+
+    private boolean hasTouchedTaskItems(Long dailyTaskId) {
+        return dailyTaskItemMapper.selectCount(new LambdaQueryWrapper<DailyTaskItem>()
+                .eq(DailyTaskItem::getDailyTaskId, dailyTaskId)
+                .and(wrapper -> wrapper
+                        .eq(DailyTaskItem::getStatus, DailyTaskItemStatus.DONE)
+                        .or()
+                        .isNotNull(DailyTaskItem::getFeedback)
+                        .or()
+                        .isNotNull(DailyTaskItem::getDoneAt))) > 0;
     }
 
     private DailyTask findLatestDoneTaskAwaitingClozeAttempt(Long userId, Long planId, LocalDate today) {
@@ -490,7 +522,7 @@ public class DailyTaskService {
             state.setMasteryStatus(nextWrongCount >= 3 ? MasteryStatus.DIFFICULT : MasteryStatus.LEARNING);
         } else {
             nextRepetition = state.getRepetition() + 1;
-            nextInterval = nextIntervalDays(nextRepetition, state.getIntervalDays(), nextEf, feedback);
+            nextInterval = nextIntervalDays(nextRepetition, state.getIntervalDays(), nextEf);
             state.setCorrectCount(state.getCorrectCount() + 1);
             state.setMasteryStatus(nextRepetition >= 3 && feedback == StudyFeedback.KNOWN ? MasteryStatus.MASTERED : MasteryStatus.REVIEWING);
         }
@@ -507,10 +539,7 @@ public class DailyTaskService {
         }
     }
 
-    private int nextIntervalDays(int repetition, int previousInterval, BigDecimal ef, StudyFeedback feedback) {
-        if (feedback == StudyFeedback.VAGUE) {
-            return Math.max(1, previousInterval + 1);
-        }
+    private int nextIntervalDays(int repetition, int previousInterval, BigDecimal ef) {
         if (repetition <= 1) {
             return 1;
         }
@@ -536,7 +565,6 @@ public class DailyTaskService {
     private int qualityScore(StudyFeedback feedback) {
         return switch (feedback) {
             case UNKNOWN -> 2;
-            case VAGUE -> 4;
             case KNOWN -> 5;
         };
     }

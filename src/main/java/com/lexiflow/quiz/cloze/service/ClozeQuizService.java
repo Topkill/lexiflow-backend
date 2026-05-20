@@ -36,8 +36,11 @@ import com.lexiflow.quiz.cloze.mapper.ClozeQuizMapper;
 import com.lexiflow.study.progress.domain.StudyEvent;
 import com.lexiflow.study.progress.domain.StudyFeedback;
 import com.lexiflow.study.progress.domain.StudyScene;
+import com.lexiflow.study.progress.domain.UserWordState;
+import com.lexiflow.study.progress.domain.MasteryStatus;
 import com.lexiflow.study.progress.domain.WrongWord;
 import com.lexiflow.study.progress.mapper.StudyEventMapper;
+import com.lexiflow.study.progress.mapper.UserWordStateMapper;
 import com.lexiflow.study.progress.mapper.WrongWordMapper;
 import com.lexiflow.study.task.domain.DailyTask;
 import com.lexiflow.study.task.domain.DailyTaskItem;
@@ -52,6 +55,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -83,6 +87,7 @@ public class ClozeQuizService {
     private final ClozeBlankWordSelector clozeBlankWordSelector;
     private final DailyTaskMapper dailyTaskMapper;
     private final DailyTaskItemMapper dailyTaskItemMapper;
+    private final UserWordStateMapper userWordStateMapper;
     private final WordMapper wordMapper;
     private final ClozeQuizMapper clozeQuizMapper;
     private final ClozeQuizBlankMapper clozeQuizBlankMapper;
@@ -185,6 +190,7 @@ public class ClozeQuizService {
             StudyEvent event = createStudyEvent(userId, quiz, answer, request.durationSeconds(), attempt.getId());
             if (!answer.getCorrect()) {
                 upsertWrongWord(userId, quiz.getWordbookId(), answer.getWordId(), event.getId());
+                markQuizWrongInWordState(userId, quiz, answer.getWordId());
             }
         }
 
@@ -425,7 +431,7 @@ public class ClozeQuizService {
             blank.setBlankNo(blankNode.path("blankNo").asInt(blankNo));
             blank.setWordId(word.getId());
             blank.setAnswerWord(word.getWord());
-            blank.setHint(blankNode.path("hint").asText(word.getPrimaryDefinition()));
+            blank.setHint(null);
             blank.setExplanation(blankNode.path("explanation").asText(null));
             blank.setDeleted(0);
             blankDrafts.add(blank);
@@ -468,8 +474,8 @@ public class ClozeQuizService {
             context.put("previousValidationError", previousError);
         }
         String sourceJson = toJson(context);
-        String schema = "输出 JSON 对象：title 字符串；passage 字符串，必须使用 ___1___、___2___ 这样的占位符；candidateWords 字符串数组；blanks 数组，每项包含 blankNo、answer、hint、explanation；explanation 字符串。";
-        String rules = "严格规则：1. blanks 数量必须等于 blankCount；2. blankWords 中每个单词必须且只能作为一个空格答案出现；3. backgroundWords 中每个单词必须完整出现在 passage 文本中，不能被挖空；4. candidateWords 必须包含所有 blankWords，可加入少量干扰词；5. passage 要是一篇自然连贯的 100-180 词英文短文。";
+        String schema = "输出 JSON 对象：title 字符串；passage 字符串，必须使用 ___1___、___2___ 这样的占位符；candidateWords 字符串数组；blanks 数组，每项包含 blankNo、answer、explanation；explanation 字符串。";
+        String rules = "严格规则：1. blanks 数量必须等于 blankCount；2. blankWords 中每个单词必须且只能作为一个空格答案出现；3. passage 只能是自然英文短文，不得出现中文释义、英文释义、词性解释、because it relates to 或类似泄题模板；4. blankWords 的原词不得出现在 passage 中，只能以对应占位符出现；5. backgroundWords 是软约束，尽量自然融入 passage，影响通顺时可以省略，出现时不能被挖空；6. candidateWords 只包含所有 blankWords，不要加入额外干扰词；7. passage 要自然连贯，控制在 100-180 个英文词。";
         String userPrompt = schema + "\n" + rules + "\n" + sourceJson;
         return new AiPrompt(SYSTEM_PROMPT, userPrompt, sha256(sourceJson));
     }
@@ -507,12 +513,17 @@ public class ClozeQuizService {
         if (!StringUtils.hasText(passage)) {
             throw new BizException(ErrorCode.AI_CALL_FAILED, "AI 完形填空缺少文章内容");
         }
-        List<String> missingWords = selection.backgroundWords().stream()
-                .map(Word::getWord)
-                .filter(word -> !containsWord(passage, word))
-                .toList();
-        if (!missingWords.isEmpty()) {
-            throw new BizException(ErrorCode.AI_CALL_FAILED, "AI 完形填空文章未覆盖全部背景词：" + String.join(", ", missingWords));
+        String normalizedPassage = passage.toLowerCase(Locale.ROOT);
+        if (normalizedPassage.contains("because it relates to")) {
+            throw new BizException(ErrorCode.AI_CALL_FAILED, "AI 完形填空文章包含泄题模板");
+        }
+        if (containsCjk(passage)) {
+            throw new BizException(ErrorCode.AI_CALL_FAILED, "AI 完形填空文章包含中文释义");
+        }
+        for (Word word : selection.blankWords()) {
+            if (containsWord(passage, word.getWord())) {
+                throw new BizException(ErrorCode.AI_CALL_FAILED, "AI 完形填空文章泄露挖空词：" + word.getWord());
+            }
         }
     }
 
@@ -523,15 +534,12 @@ public class ClozeQuizService {
         return Pattern.compile("(?i)(?<![A-Za-z])" + Pattern.quote(word.trim()) + "(?![A-Za-z])").matcher(text).find();
     }
 
+    private boolean containsCjk(String text) {
+        return StringUtils.hasText(text) && Pattern.compile("[\\p{IsHan}]").matcher(text).find();
+    }
+
     private List<String> normalizeCandidateWords(JsonNode candidateWords, List<Word> targetWords) {
         LinkedHashSet<String> words = new LinkedHashSet<>();
-        if (candidateWords.isArray()) {
-            candidateWords.forEach(node -> {
-                if (StringUtils.hasText(node.asText())) {
-                    words.add(node.asText().trim());
-                }
-            });
-        }
         targetWords.stream().map(Word::getWord).filter(StringUtils::hasText).forEach(words::add);
         return words.stream().toList();
     }
@@ -555,7 +563,6 @@ public class ClozeQuizService {
             ObjectNode blank = blanks.addObject();
             blank.put("blankNo", blankNo);
             blank.put("answer", word.getWord());
-            blank.put("hint", safe(word.getPrimaryDefinition()));
             blank.put("explanation", fallbackExplanation(word));
             blankNo++;
         }
@@ -564,26 +571,24 @@ public class ClozeQuizService {
 
     private String buildFallbackPassage(ClozeWordSelection selection) {
         StringBuilder passage = new StringBuilder();
-        passage.append("During a focused English study session, the learner reviewed a connected set of ideas. ");
+        passage.append("A student prepared for a busy week by making practical decisions. ");
         int blankNo = 1;
         for (Word word : selection.blankWords()) {
-            passage.append("For idea ")
+            passage.append("At one point, the situation required ___")
                     .append(blankNo)
-                    .append(", the best word is ___")
-                    .append(blankNo)
-                    .append("___ because it relates to ")
-                    .append(simpleDefinition(word))
+                    .append("___ as part of a clear response")
                     .append(". ");
             blankNo++;
         }
         List<Word> backgroundWords = selection.backgroundWords();
         if (!backgroundWords.isEmpty()) {
-            passage.append("The same review also kept these background words visible in context: ");
+            passage.append("The wider context also mentioned ");
             passage.append(backgroundWords.stream()
                     .map(Word::getWord)
                     .filter(StringUtils::hasText)
+                    .limit(6)
                     .collect(Collectors.joining(", ")));
-            passage.append(".");
+            passage.append(" during the discussion.");
         }
         return passage.toString();
     }
@@ -594,15 +599,6 @@ public class ClozeQuizService {
             return "该空对应本组目标词 " + word.getWord() + "。";
         }
         return "该空对应 " + word.getWord() + "，核心含义是：" + definition;
-    }
-
-    private String simpleDefinition(Word word) {
-        String definition = safe(word.getPrimaryDefinition());
-        if (!StringUtils.hasText(definition)) {
-            return "the review context";
-        }
-        String cleaned = definition.replaceAll("[\\r\\n]+", " ").trim();
-        return cleaned.length() > 60 ? cleaned.substring(0, 60) : cleaned;
     }
 
     private DailyTask getOwnedDailyTask(Long userId, Long dailyTaskId) {
@@ -689,6 +685,56 @@ public class ClozeQuizService {
         wrongWord.setResolved(false);
         wrongWord.setResolvedAt(null);
         wrongWordMapper.updateById(wrongWord);
+    }
+
+    private void markQuizWrongInWordState(Long userId, ClozeQuiz quiz, Long wordId) {
+        UserWordState state = userWordStateMapper.selectOne(new LambdaQueryWrapper<UserWordState>()
+                .eq(UserWordState::getUserId, userId)
+                .eq(UserWordState::getWordbookId, quiz.getWordbookId())
+                .eq(UserWordState::getWordId, wordId)
+                .last("LIMIT 1"));
+        LocalDateTime now = LocalDateTime.now();
+        if (state == null) {
+            state = new UserWordState();
+            state.setUserId(userId);
+            state.setWordbookId(quiz.getWordbookId());
+            state.setWordId(wordId);
+            state.setPlanId(null);
+            state.setMasteryStatus(MasteryStatus.LEARNING);
+            state.setLearned(true);
+            state.setRepetition(0);
+            state.setIntervalDays(1);
+            state.setEasinessFactor(new BigDecimal("2.18"));
+            state.setWrongCount(1);
+            state.setCorrectCount(0);
+            state.setNextReviewDate(LocalDate.now().plusDays(1));
+            state.setLastFeedback(StudyFeedback.UNKNOWN);
+            state.setLastStudiedAt(now);
+            state.setDeleted(0);
+            userWordStateMapper.insert(state);
+            return;
+        }
+        int nextWrongCount = (state.getWrongCount() == null ? 0 : state.getWrongCount()) + 1;
+        state.setWrongCount(nextWrongCount);
+        state.setMasteryStatus(nextWrongCount >= 3 ? MasteryStatus.DIFFICULT : MasteryStatus.LEARNING);
+        state.setLearned(true);
+        state.setRepetition(0);
+        state.setIntervalDays(1);
+        state.setEasinessFactor(nextEasinessFactor(state.getEasinessFactor(), 2));
+        state.setNextReviewDate(LocalDate.now().plusDays(1));
+        state.setLastFeedback(StudyFeedback.UNKNOWN);
+        state.setLastStudiedAt(now);
+        userWordStateMapper.updateById(state);
+    }
+
+    private BigDecimal nextEasinessFactor(BigDecimal currentEf, int quality) {
+        BigDecimal ef = currentEf == null ? new BigDecimal("2.50") : currentEf;
+        BigDecimal q = BigDecimal.valueOf(quality);
+        BigDecimal delta = new BigDecimal("0.10")
+                .subtract(new BigDecimal("5").subtract(q).multiply(new BigDecimal("0.08")))
+                .subtract(new BigDecimal("5").subtract(q).multiply(new BigDecimal("5").subtract(q)).multiply(new BigDecimal("0.02")));
+        BigDecimal next = ef.add(delta).setScale(2, RoundingMode.HALF_UP);
+        return next.max(new BigDecimal("1.30"));
     }
 
     private BigDecimal calculateScore(int correctCount, int totalBlanks) {

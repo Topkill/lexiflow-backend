@@ -17,11 +17,9 @@ public class ClozeBlankWordSelector {
 
     public List<Word> selectBlankWords(List<Word> targetWords, Map<Long, StudyFeedback> feedbackMap, int blankCount, Long dailyTaskId) {
         List<Word> unknownWords = shuffleByPriority(targetWords, feedbackMap, FeedbackPriority.UNKNOWN, dailyTaskId);
-        List<Word> vagueWords = shuffleByPriority(targetWords, feedbackMap, FeedbackPriority.VAGUE, dailyTaskId);
         List<Word> knownWords = shuffleByPriority(targetWords, feedbackMap, FeedbackPriority.KNOWN, dailyTaskId);
         List<Word> selected = new ArrayList<>();
         appendUntilLimit(selected, unknownWords, blankCount);
-        appendUntilLimit(selected, vagueWords, blankCount);
         appendUntilLimit(selected, knownWords, blankCount);
         return selected;
     }
@@ -64,14 +62,12 @@ public class ClozeBlankWordSelector {
         }
         return switch (feedback) {
             case UNKNOWN -> FeedbackPriority.UNKNOWN;
-            case VAGUE -> FeedbackPriority.VAGUE;
             case KNOWN -> FeedbackPriority.KNOWN;
         };
     }
 
     private enum FeedbackPriority {
-        UNKNOWN(3),
-        VAGUE(2),
+        UNKNOWN(2),
         KNOWN(1);
 
         private final int weight;
