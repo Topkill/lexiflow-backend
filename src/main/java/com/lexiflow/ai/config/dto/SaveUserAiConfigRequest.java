@@ -14,6 +14,7 @@ public record SaveUserAiConfigRequest(
         @Schema(description = "API Key") @NotBlank @Size(max = 512) String apiKey,
         @Schema(description = "模型名称") @NotBlank @Size(max = 128) String modelName,
         @Schema(description = "温度") @NotNull @DecimalMin("0.00") @DecimalMax("2.00") BigDecimal temperature,
+        @Schema(description = "是否使用流式输出，不传则默认非流式") Boolean streamEnabled,
         @Schema(description = "是否启用") @NotNull Boolean enabled
 ) {
 }

@@ -8,6 +8,10 @@ public record AiRuntimeConfig(
         String apiKey,
         String modelName,
         BigDecimal temperature,
+        Boolean streamEnabled,
         Integer dailyQuotaPerUser
 ) {
+    public boolean useStream() {
+        return Boolean.TRUE.equals(streamEnabled);
+    }
 }

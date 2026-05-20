@@ -48,6 +48,7 @@ public class AiConfigResolver {
                 apiKeyCryptoService.decrypt(config.getEncryptedApiKey()),
                 config.getModelName(),
                 config.getTemperature(),
+                config.getStreamEnabled(),
                 null
         );
     }
@@ -66,6 +67,7 @@ public class AiConfigResolver {
                 apiKeyCryptoService.decrypt(config.getEncryptedApiKey()),
                 config.getModelName(),
                 config.getTemperature(),
+                config.getStreamEnabled(),
                 config.getDailyQuotaPerUser()
         );
     }

@@ -25,6 +25,7 @@ public class AiPublicConfig {
     private String encryptedApiKey;
     private String modelName;
     private BigDecimal temperature;
+    private Boolean streamEnabled;
     private Integer dailyQuotaPerUser;
     private Boolean active;
     private Boolean enabled;

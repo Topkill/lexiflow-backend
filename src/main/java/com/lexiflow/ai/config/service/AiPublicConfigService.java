@@ -103,6 +103,7 @@ public class AiPublicConfigService {
         }
         config.setModelName(request.modelName().trim());
         config.setTemperature(request.temperature());
+        config.setStreamEnabled(Boolean.TRUE.equals(request.streamEnabled()));
         config.setDailyQuotaPerUser(request.dailyQuotaPerUser());
         config.setEnabled(request.enabled());
         config.setRemark(StringUtils.hasText(request.remark()) ? request.remark().trim() : null);

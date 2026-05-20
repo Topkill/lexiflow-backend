@@ -24,6 +24,7 @@ public class UserAiConfig {
     private String encryptedApiKey;
     private String modelName;
     private BigDecimal temperature;
+    private Boolean streamEnabled;
     private Boolean enabled;
     private LocalDateTime lastVerifiedAt;
     @TableField(fill = FieldFill.INSERT)

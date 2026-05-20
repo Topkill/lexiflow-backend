@@ -34,6 +34,7 @@ public class UserAiConfigService {
         config.setEncryptedApiKey(apiKeyCryptoService.encrypt(request.apiKey().trim()));
         config.setModelName(request.modelName().trim());
         config.setTemperature(request.temperature());
+        config.setStreamEnabled(Boolean.TRUE.equals(request.streamEnabled()));
         config.setEnabled(request.enabled());
         if (config.getId() == null) {
             userAiConfigMapper.insert(config);
