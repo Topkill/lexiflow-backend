@@ -451,7 +451,7 @@ public class ClozeQuizService {
         }
         String sourceJson = toJson(context);
         String schema = "输出 JSON 对象：title 字符串；passage 字符串，必须是包含 blankWords 原词的完整英文短文，不要提前挖空；explanations 数组，每项包含 word、explanation；explanation 字符串。";
-        String rules = "严格规则：1. passage 必须逐字包含 blankWords 中每个 word，且每个 word 在 passage 中只出现一次；2. 不要输出 ___1___ 这类占位符，后端会按实际出现位置自动挖空并生成正确答案；3. passage 只能是自然英文短文，不得出现中文释义、英文释义、词性解释、because it relates to 或类似泄题模板；4. backgroundWords 是软约束，尽量自然融入 passage，影响通顺时可以省略；5. 不要输出 candidateWords 或 blanks，候选词和答案由后端程序生成；6. passage 要自然连贯，控制在 100-180 个英文词。";
+        String rules = "严格规则：1. passage 必须逐字包含 blankWords 中每个 word，且每个 word 在 passage 中只出现一次；2. 可以参考 definitionZh、pos、examples 理解词义和用法，但 passage 不得出现中文释义、英文释义、词性解释、because it relates to 或类似泄题模板；3. 不要输出 ___1___ 这类占位符，后端会按实际出现位置自动挖空并生成正确答案；4. backgroundWords 是软约束，尽量自然融入 passage，影响通顺时可以省略；5. 不要输出 candidateWords 或 blanks，候选词和答案由后端程序生成；6. passage 要自然连贯，控制在 100-180 个英文词。";
         String userPrompt = schema + "\n" + rules + "\n" + sourceJson;
         return new AiPrompt(SYSTEM_PROMPT, userPrompt, sha256(sourceJson));
     }
@@ -463,8 +463,8 @@ public class ClozeQuizService {
                     item.put("wordId", String.valueOf(word.getId()));
                     item.put("word", word.getWord());
                     item.put("pos", safe(word.getPrimaryPos()));
-                    item.put("definition", safe(word.getPrimaryDefinition()));
-                    item.put("sentences", safe(word.getSentences()));
+                    item.put("definitionZh", safe(word.getPrimaryDefinition()));
+                    item.put("examples", safe(word.getSentences()));
                     return item;
                 })
                 .toList();
