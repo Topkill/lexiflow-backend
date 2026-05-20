@@ -154,6 +154,16 @@ public class AdminWordbookService {
         refreshWordbookCount(wordbookId);
     }
 
+    @Transactional
+    public void enableWord(Long adminUserId, Long wordbookId, Long wordId) {
+        changeWordEnabled(adminUserId, wordbookId, wordId, true);
+    }
+
+    @Transactional
+    public void disableWord(Long adminUserId, Long wordbookId, Long wordId) {
+        changeWordEnabled(adminUserId, wordbookId, wordId, false);
+    }
+
     private AdminWordResponse getWordResponse(Long wordbookId, Long wordId) {
         AdminWordRow row = wordMapper.selectAdminWord(wordbookId, wordId);
         if (row == null) {
@@ -239,6 +249,15 @@ public class AdminWordbookService {
             throw new BizException(ErrorCode.WORD_NOT_FOUND);
         }
         return word;
+    }
+
+    private void changeWordEnabled(Long adminUserId, Long wordbookId, Long wordId, boolean enabled) {
+        getWordbookEntity(wordbookId);
+        Word word = requireWord(wordbookId, wordId);
+        word.setEnabled(enabled);
+        word.setUpdatedBy(adminUserId);
+        wordMapper.updateById(word);
+        refreshWordbookCount(wordbookId);
     }
 
     private void ensureWordbookCodeAvailable(String code, Long excludedId) {

@@ -104,7 +104,27 @@ public class AdminWordbookController {
         return ApiResponse.success(adminWordbookService.updateWord(AuthContext.currentUserId(), wordbookId, wordId, request));
     }
 
-    @Operation(summary = "移除词库单词")
+    @Operation(summary = "启用词库单词")
+    @PostMapping("/{wordbookId}/words/{wordId}/enable")
+    public ApiResponse<Void> enableWord(
+            @PathVariable @Positive Long wordbookId,
+            @PathVariable @Positive Long wordId
+    ) {
+        adminWordbookService.enableWord(AuthContext.currentUserId(), wordbookId, wordId);
+        return ApiResponse.success();
+    }
+
+    @Operation(summary = "停用词库单词")
+    @PostMapping("/{wordbookId}/words/{wordId}/disable")
+    public ApiResponse<Void> disableWord(
+            @PathVariable @Positive Long wordbookId,
+            @PathVariable @Positive Long wordId
+    ) {
+        adminWordbookService.disableWord(AuthContext.currentUserId(), wordbookId, wordId);
+        return ApiResponse.success();
+    }
+
+    @Operation(summary = "删除词库单词")
     @DeleteMapping("/{wordbookId}/words/{wordId}")
     public ApiResponse<Void> removeWord(
             @PathVariable @Positive Long wordbookId,
