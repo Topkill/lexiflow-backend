@@ -66,6 +66,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
@@ -77,7 +78,7 @@ import org.springframework.util.StringUtils;
 @RequiredArgsConstructor
 public class ClozeQuizService {
 
-    private static final String SYSTEM_PROMPT = "你是 LexiFlow 的 AI 英语测验出题助手。请只输出合法 JSON，不要输出 Markdown、解释性前后缀或代码块。题目面向备考大学生，短文自然连贯，所有空格答案必须来自候选词。";
+    private static final String SYSTEM_PROMPT = "你是 LexiFlow 的 AI 英语测验出题助手。请只输出合法 JSON，不要输出 Markdown、解释性前后缀或代码块。题目面向备考大学生，短文自然连贯；后端程序会自动挖空、生成候选词和判分。";
     private static final int COMPLETED_GROUP_MAX_BLANK_COUNT = 10;
     private static final int MAX_GENERATE_ATTEMPTS = 2;
 
@@ -399,6 +400,7 @@ public class ClozeQuizService {
 
     private String buildClozeSourceHash(Long userId, DailyTask dailyTask, Long wordbookId, ClozeSourceType sourceType, ClozeWordSelection selection) {
         Map<String, Object> source = new LinkedHashMap<>();
+        source.put("generatorVersion", "programmatic-blank-v1");
         source.put("userId", String.valueOf(userId));
         source.put("dailyTaskId", String.valueOf(dailyTask.getId()));
         source.put("wordbookId", String.valueOf(wordbookId));
@@ -413,33 +415,7 @@ public class ClozeQuizService {
     }
 
     private ClozeQuiz saveQuiz(Long userId, DailyTask dailyTask, Long wordbookId, Long asyncTaskId, ClozeSourceType sourceType, ClozeWordSelection selection, JsonNode content) {
-        JsonNode blanksNode = content.path("blanks");
-        if (!blanksNode.isArray() || blanksNode.isEmpty()) {
-            throw new BizException(ErrorCode.AI_CALL_FAILED, "AI 完形填空缺少空格数据");
-        }
-        Map<String, Word> wordMap = selection.blankWords().stream()
-                .collect(Collectors.toMap(word -> normalizeAnswer(word.getWord()), Function.identity(), (left, right) -> left));
-        List<ClozeQuizBlank> blankDrafts = new ArrayList<>();
-        int blankNo = 1;
-        for (JsonNode blankNode : blanksNode) {
-            String answerWord = blankNode.path("answer").asText();
-            Word word = wordMap.get(normalizeAnswer(answerWord));
-            if (word == null) {
-                continue;
-            }
-            ClozeQuizBlank blank = new ClozeQuizBlank();
-            blank.setBlankNo(blankNode.path("blankNo").asInt(blankNo));
-            blank.setWordId(word.getId());
-            blank.setAnswerWord(word.getWord());
-            blank.setHint(null);
-            blank.setExplanation(blankNode.path("explanation").asText(null));
-            blank.setDeleted(0);
-            blankDrafts.add(blank);
-            blankNo++;
-        }
-        if (blankDrafts.size() != selection.blankWords().size()) {
-            throw new BizException(ErrorCode.AI_CALL_FAILED, "AI 完形填空答案未匹配目标词");
-        }
+        ProgrammaticClozeDraft draft = buildProgrammaticClozeDraft(content, selection);
 
         ClozeQuiz quiz = new ClozeQuiz();
         quiz.setUserId(userId);
@@ -448,13 +424,13 @@ public class ClozeQuizService {
         quiz.setAsyncTaskId(asyncTaskId);
         quiz.setSourceType(sourceType);
         quiz.setTitle(content.path("title").asText("LexiFlow Cloze Practice"));
-        quiz.setPassage(content.path("passage").asText());
-        quiz.setCandidateWords(toJson(normalizeCandidateWords(content.path("candidateWords"), selection.blankWords())));
+        quiz.setPassage(draft.passage());
+        quiz.setCandidateWords(toJson(normalizeCandidateWords(selection.blankWords())));
         quiz.setTargetWordIds(toJson(selection.targetWords().stream().map(word -> String.valueOf(word.getId())).toList()));
         quiz.setExplanation(content.path("explanation").asText(null));
         quiz.setDeleted(0);
         clozeQuizMapper.insert(quiz);
-        for (ClozeQuizBlank blank : blankDrafts) {
+        for (ClozeQuizBlank blank : draft.blanks()) {
             blank.setQuizId(quiz.getId());
             clozeQuizBlankMapper.insert(blank);
         }
@@ -474,8 +450,8 @@ public class ClozeQuizService {
             context.put("previousValidationError", previousError);
         }
         String sourceJson = toJson(context);
-        String schema = "输出 JSON 对象：title 字符串；passage 字符串，必须使用 ___1___、___2___ 这样的占位符；candidateWords 字符串数组；blanks 数组，每项包含 blankNo、answer、explanation；explanation 字符串。";
-        String rules = "严格规则：1. blanks 数量必须等于 blankCount；2. blankWords 中每个单词必须且只能作为一个空格答案出现；3. passage 只能是自然英文短文，不得出现中文释义、英文释义、词性解释、because it relates to 或类似泄题模板；4. blankWords 的原词不得出现在 passage 中，只能以对应占位符出现；5. backgroundWords 是软约束，尽量自然融入 passage，影响通顺时可以省略，出现时不能被挖空；6. candidateWords 只包含所有 blankWords，不要加入额外干扰词；7. passage 要自然连贯，控制在 100-180 个英文词。";
+        String schema = "输出 JSON 对象：title 字符串；passage 字符串，必须是包含 blankWords 原词的完整英文短文，不要提前挖空；explanations 数组，每项包含 word、explanation；explanation 字符串。";
+        String rules = "严格规则：1. passage 必须逐字包含 blankWords 中每个 word，且每个 word 在 passage 中只出现一次；2. 不要输出 ___1___ 这类占位符，后端会按实际出现位置自动挖空并生成正确答案；3. passage 只能是自然英文短文，不得出现中文释义、英文释义、词性解释、because it relates to 或类似泄题模板；4. backgroundWords 是软约束，尽量自然融入 passage，影响通顺时可以省略；5. 不要输出 candidateWords 或 blanks，候选词和答案由后端程序生成；6. passage 要自然连贯，控制在 100-180 个英文词。";
         String userPrompt = schema + "\n" + rules + "\n" + sourceJson;
         return new AiPrompt(SYSTEM_PROMPT, userPrompt, sha256(sourceJson));
     }
@@ -495,21 +471,60 @@ public class ClozeQuizService {
     }
 
     private void validateGeneratedContent(JsonNode content, ClozeWordSelection selection) {
-        JsonNode blanksNode = content.path("blanks");
-        if (!blanksNode.isArray() || blanksNode.size() != selection.blankWords().size()) {
-            throw new BizException(ErrorCode.AI_CALL_FAILED, "AI 完形填空空格数量不符合要求");
-        }
-        Set<String> expectedBlankWords = selection.blankWords().stream()
-                .map(word -> normalizeAnswer(word.getWord()))
-                .collect(Collectors.toCollection(LinkedHashSet::new));
-        Set<String> actualBlankWords = new LinkedHashSet<>();
-        for (JsonNode blankNode : blanksNode) {
-            actualBlankWords.add(normalizeAnswer(blankNode.path("answer").asText()));
-        }
-        if (!actualBlankWords.equals(expectedBlankWords)) {
-            throw new BizException(ErrorCode.AI_CALL_FAILED, "AI 完形填空挖空词未按学习反馈规则命中");
-        }
+        buildProgrammaticClozeDraft(content, selection);
+    }
+
+    private ProgrammaticClozeDraft buildProgrammaticClozeDraft(JsonNode content, ClozeWordSelection selection) {
         String passage = content.path("passage").asText("");
+        validateGeneratedPassageText(passage);
+
+        Set<String> normalizedBlankWords = new LinkedHashSet<>();
+        List<WordOccurrence> occurrences = new ArrayList<>();
+        for (Word word : selection.blankWords()) {
+            String normalized = normalizeAnswer(word.getWord());
+            if (!StringUtils.hasText(normalized) || !normalizedBlankWords.add(normalized)) {
+                throw new BizException(ErrorCode.AI_CALL_FAILED, "AI 完形填空挖空词重复或为空");
+            }
+            List<WordOccurrence> matches = findWordOccurrences(passage, word);
+            if (matches.isEmpty()) {
+                throw new BizException(ErrorCode.AI_CALL_FAILED, "AI 完形填空文章未包含挖空词：" + word.getWord());
+            }
+            if (matches.size() > 1) {
+                throw new BizException(ErrorCode.AI_CALL_FAILED, "AI 完形填空文章重复出现挖空词：" + word.getWord());
+            }
+            occurrences.add(matches.get(0));
+        }
+
+        occurrences.sort((left, right) -> Integer.compare(left.start(), right.start()));
+        Map<String, String> explanationMap = buildExplanationMap(content);
+        StringBuilder maskedPassage = new StringBuilder();
+        List<ClozeQuizBlank> blanks = new ArrayList<>();
+        int cursor = 0;
+        int blankNo = 1;
+        for (WordOccurrence occurrence : occurrences) {
+            if (occurrence.start() < cursor) {
+                throw new BizException(ErrorCode.AI_CALL_FAILED, "AI 完形填空挖空词位置重叠");
+            }
+            maskedPassage.append(passage, cursor, occurrence.start());
+            maskedPassage.append("___").append(blankNo).append("___");
+            cursor = occurrence.end();
+
+            Word word = occurrence.word();
+            ClozeQuizBlank blank = new ClozeQuizBlank();
+            blank.setBlankNo(blankNo);
+            blank.setWordId(word.getId());
+            blank.setAnswerWord(word.getWord());
+            blank.setHint(null);
+            blank.setExplanation(explanationMap.getOrDefault(normalizeAnswer(word.getWord()), fallbackExplanation(word)));
+            blank.setDeleted(0);
+            blanks.add(blank);
+            blankNo++;
+        }
+        maskedPassage.append(passage.substring(cursor));
+        return new ProgrammaticClozeDraft(maskedPassage.toString(), blanks);
+    }
+
+    private void validateGeneratedPassageText(String passage) {
         if (!StringUtils.hasText(passage)) {
             throw new BizException(ErrorCode.AI_CALL_FAILED, "AI 完形填空缺少文章内容");
         }
@@ -517,28 +532,51 @@ public class ClozeQuizService {
         if (normalizedPassage.contains("because it relates to")) {
             throw new BizException(ErrorCode.AI_CALL_FAILED, "AI 完形填空文章包含泄题模板");
         }
+        if (Pattern.compile("_{2,}\\s*\\d+\\s*_{2,}").matcher(passage).find()) {
+            throw new BizException(ErrorCode.AI_CALL_FAILED, "AI 完形填空文章不应提前挖空");
+        }
         if (containsCjk(passage)) {
             throw new BizException(ErrorCode.AI_CALL_FAILED, "AI 完形填空文章包含中文释义");
         }
-        for (Word word : selection.blankWords()) {
-            if (containsWord(passage, word.getWord())) {
-                throw new BizException(ErrorCode.AI_CALL_FAILED, "AI 完形填空文章泄露挖空词：" + word.getWord());
-            }
-        }
     }
 
-    private boolean containsWord(String text, String word) {
-        if (!StringUtils.hasText(text) || !StringUtils.hasText(word)) {
-            return false;
+    private List<WordOccurrence> findWordOccurrences(String text, Word word) {
+        if (!StringUtils.hasText(text) || word == null || !StringUtils.hasText(word.getWord())) {
+            return List.of();
         }
-        return Pattern.compile("(?i)(?<![A-Za-z])" + Pattern.quote(word.trim()) + "(?![A-Za-z])").matcher(text).find();
+        Matcher matcher = wordPattern(word.getWord()).matcher(text);
+        List<WordOccurrence> occurrences = new ArrayList<>();
+        while (matcher.find()) {
+            occurrences.add(new WordOccurrence(word, matcher.start(), matcher.end()));
+        }
+        return occurrences;
+    }
+
+    private Pattern wordPattern(String word) {
+        return Pattern.compile("(?i)(?<![A-Za-z])" + Pattern.quote(word.trim()) + "(?![A-Za-z])");
     }
 
     private boolean containsCjk(String text) {
         return StringUtils.hasText(text) && Pattern.compile("[\\p{IsHan}]").matcher(text).find();
     }
 
-    private List<String> normalizeCandidateWords(JsonNode candidateWords, List<Word> targetWords) {
+    private Map<String, String> buildExplanationMap(JsonNode content) {
+        Map<String, String> explanations = new LinkedHashMap<>();
+        JsonNode explanationsNode = content.path("explanations");
+        if (!explanationsNode.isArray()) {
+            return explanations;
+        }
+        for (JsonNode explanationNode : explanationsNode) {
+            String word = explanationNode.path("word").asText("");
+            String explanation = explanationNode.path("explanation").asText("");
+            if (StringUtils.hasText(word) && StringUtils.hasText(explanation)) {
+                explanations.put(normalizeAnswer(word), explanation);
+            }
+        }
+        return explanations;
+    }
+
+    private List<String> normalizeCandidateWords(List<Word> targetWords) {
         LinkedHashSet<String> words = new LinkedHashSet<>();
         targetWords.stream().map(Word::getWord).filter(StringUtils::hasText).forEach(words::add);
         return words.stream().toList();
@@ -551,20 +589,11 @@ public class ClozeQuizService {
         root.put("explanation", "AI 返回内容暂未通过解析或文本检测，系统已根据本组单词生成可继续练习的兜底题。"
                 + (lastError == null || !StringUtils.hasText(lastError.getCustomMessage()) ? "" : "最近一次原因：" + lastError.getCustomMessage()));
 
-        ArrayNode candidateWords = root.putArray("candidateWords");
-        selection.blankWords().stream()
-                .map(Word::getWord)
-                .filter(StringUtils::hasText)
-                .forEach(candidateWords::add);
-
-        ArrayNode blanks = root.putArray("blanks");
-        int blankNo = 1;
+        ArrayNode explanations = root.putArray("explanations");
         for (Word word : selection.blankWords()) {
-            ObjectNode blank = blanks.addObject();
-            blank.put("blankNo", blankNo);
-            blank.put("answer", word.getWord());
-            blank.put("explanation", fallbackExplanation(word));
-            blankNo++;
+            ObjectNode explanation = explanations.addObject();
+            explanation.put("word", word.getWord());
+            explanation.put("explanation", fallbackExplanation(word));
         }
         return root;
     }
@@ -572,13 +601,11 @@ public class ClozeQuizService {
     private String buildFallbackPassage(ClozeWordSelection selection) {
         StringBuilder passage = new StringBuilder();
         passage.append("A student prepared for a busy week by making practical decisions. ");
-        int blankNo = 1;
         for (Word word : selection.blankWords()) {
-            passage.append("At one point, the situation required ___")
-                    .append(blankNo)
-                    .append("___ as part of a clear response")
+            passage.append("The report used ")
+                    .append(word.getWord())
+                    .append(" to describe one important part of the situation")
                     .append(". ");
-            blankNo++;
         }
         List<Word> backgroundWords = selection.backgroundWords();
         if (!backgroundWords.isEmpty()) {
@@ -785,6 +812,12 @@ public class ClozeQuizService {
 
     private String safe(String value) {
         return value == null ? "" : value;
+    }
+
+    private record ProgrammaticClozeDraft(String passage, List<ClozeQuizBlank> blanks) {
+    }
+
+    private record WordOccurrence(Word word, int start, int end) {
     }
 
     private record ClozeWordSelection(List<Word> targetWords, List<Word> blankWords) {
