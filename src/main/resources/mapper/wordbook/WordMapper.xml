@@ -83,4 +83,25 @@
         LIMIT #{limit}
     </select>
 
+    <select id="selectChoiceQuestionCandidates" resultType="com.lexiflow.wordbook.domain.Word">
+        SELECT
+            w.id AS id,
+            w.wordbook_id AS wordbookId,
+            w.word AS word,
+            w.normalized_word AS normalizedWord,
+            w.trans AS trans,
+            w.rel_words AS relWords,
+            w.primary_pos AS primaryPos,
+            w.primary_definition AS primaryDefinition
+        FROM word w
+        WHERE w.deleted = 0
+          AND w.enabled = 1
+          AND w.wordbook_id = #{wordbookId}
+          AND (
+            w.primary_definition IS NOT NULL
+            OR w.trans IS NOT NULL
+          )
+        ORDER BY w.sequence_no ASC, w.id ASC
+    </select>
+
 </mapper>

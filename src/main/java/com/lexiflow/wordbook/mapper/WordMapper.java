@@ -37,6 +37,8 @@ public interface WordMapper extends BaseMapper<Word> {
             @Param("limit") Integer limit
     );
 
+    List<Word> selectChoiceQuestionCandidates(@Param("wordbookId") Long wordbookId);
+
     @Delete("DELETE FROM word WHERE wordbook_id = #{wordbookId}")
     int physicalDeleteByWordbookId(@Param("wordbookId") Long wordbookId);
 }

@@ -26,13 +26,15 @@ public record TaskItemCardResponse(
         @Schema(description = "标签") String tags,
         @Schema(description = "收藏 ID，未收藏时为空") String favoriteWordId,
         @Schema(description = "是否已收藏", example = "false") Boolean favorite,
-        @Schema(description = "掌握状态", example = "NEW") String masteryStatus
+        @Schema(description = "掌握状态", example = "NEW") String masteryStatus,
+        @Schema(description = "回忆阶段中文释义选择题") ChoiceQuestionResponse choiceQuestion
 ) {
     public static TaskItemCardResponse from(
             com.lexiflow.study.task.domain.DailyTaskItem item,
             Word word,
             Long favoriteWordId,
-            MasteryStatus masteryStatus
+            MasteryStatus masteryStatus,
+            ChoiceQuestionResponse choiceQuestion
     ) {
         return new TaskItemCardResponse(
                 String.valueOf(item.getId()),
@@ -55,7 +57,8 @@ public record TaskItemCardResponse(
                 word.getTags(),
                 favoriteWordId == null ? null : String.valueOf(favoriteWordId),
                 favoriteWordId != null,
-                masteryStatus.name()
+                masteryStatus.name(),
+                choiceQuestion
         );
     }
 }

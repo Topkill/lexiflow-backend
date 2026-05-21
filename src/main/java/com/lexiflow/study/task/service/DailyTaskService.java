@@ -51,6 +51,7 @@ import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -78,6 +79,7 @@ public class DailyTaskService {
     private final ClozeQuizMapper clozeQuizMapper;
     private final ClozeAttemptMapper clozeAttemptMapper;
     private final SpacedRepetitionService spacedRepetitionService;
+    private final WordChoiceQuestionService wordChoiceQuestionService;
 
     @Transactional
     public DailyTaskResponse getTodayTask(Long userId) {
@@ -110,10 +112,17 @@ public class DailyTaskService {
     public TaskItemCardResponse getCard(Long userId, Long itemId) {
         DailyTaskItem item = getOwnedTaskItem(userId, itemId);
         Word word = getWord(item.getWordId());
+        List<Word> dailyTaskWords = selectDailyTaskWords(item.getDailyTaskId());
         UserWordState state = findUserWordState(userId, item.getWordbookId(), item.getWordId());
         FavoriteWord favorite = findFavoriteWord(userId, item.getWordbookId(), item.getWordId());
         MasteryStatus masteryStatus = state == null ? MasteryStatus.NEW : state.getMasteryStatus();
-        return TaskItemCardResponse.from(item, word, favorite == null ? null : favorite.getId(), masteryStatus);
+        return TaskItemCardResponse.from(
+                item,
+                word,
+                favorite == null ? null : favorite.getId(),
+                masteryStatus,
+                wordChoiceQuestionService.buildQuestion(item.getId(), item.getWordbookId(), word, dailyTaskWords)
+        );
     }
 
     @Transactional
@@ -488,6 +497,33 @@ public class DailyTaskService {
                     }
                     return DailyTaskItemResponse.from(item, word);
                 })
+                .toList();
+    }
+
+    private List<Word> selectDailyTaskWords(Long dailyTaskId) {
+        if (dailyTaskId == null) {
+            return Collections.emptyList();
+        }
+        List<DailyTaskItem> items = dailyTaskItemMapper.selectList(new LambdaQueryWrapper<DailyTaskItem>()
+                .eq(DailyTaskItem::getDailyTaskId, dailyTaskId)
+                .orderByAsc(DailyTaskItem::getSequenceNo)
+                .orderByAsc(DailyTaskItem::getId));
+        if (items.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<Long> wordIds = items.stream()
+                .map(DailyTaskItem::getWordId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        if (wordIds.isEmpty()) {
+            return Collections.emptyList();
+        }
+        Map<Long, Word> wordMap = wordMapper.selectBatchIds(wordIds).stream()
+                .collect(Collectors.toMap(Word::getId, Function.identity(), (first, ignored) -> first));
+        return wordIds.stream()
+                .map(wordMap::get)
+                .filter(Objects::nonNull)
                 .toList();
     }
 
