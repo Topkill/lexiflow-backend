@@ -13,7 +13,7 @@ public record DailyTaskResponse(
         @Schema(description = "任务状态", example = "PENDING") String status,
         @Schema(description = "本组新词数量", example = "20") Integer newCount,
         @Schema(description = "本组复习数量", example = "40") Integer reviewCount,
-        @Schema(description = "额外学习数量", example = "0") Integer extraCount,
+        @Schema(description = "错词重练数量", example = "0") Integer extraCount,
         @Schema(description = "已完成数量", example = "0") Integer doneCount,
         @Schema(description = "跳过数量", example = "0") Integer skippedCount,
         @Schema(description = "完成率百分比", example = "50") Integer completionRate,

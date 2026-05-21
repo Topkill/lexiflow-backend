@@ -36,12 +36,10 @@ import com.lexiflow.quiz.cloze.mapper.ClozeQuizMapper;
 import com.lexiflow.study.progress.domain.StudyEvent;
 import com.lexiflow.study.progress.domain.StudyFeedback;
 import com.lexiflow.study.progress.domain.StudyScene;
-import com.lexiflow.study.progress.domain.UserWordState;
-import com.lexiflow.study.progress.domain.MasteryStatus;
 import com.lexiflow.study.progress.domain.WrongWord;
 import com.lexiflow.study.progress.mapper.StudyEventMapper;
-import com.lexiflow.study.progress.mapper.UserWordStateMapper;
 import com.lexiflow.study.progress.mapper.WrongWordMapper;
+import com.lexiflow.study.progress.service.SpacedRepetitionService;
 import com.lexiflow.study.task.domain.DailyTask;
 import com.lexiflow.study.task.domain.DailyTaskItem;
 import com.lexiflow.study.task.domain.DailyTaskItemStatus;
@@ -55,7 +53,6 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -88,7 +85,6 @@ public class ClozeQuizService {
     private final ClozeBlankWordSelector clozeBlankWordSelector;
     private final DailyTaskMapper dailyTaskMapper;
     private final DailyTaskItemMapper dailyTaskItemMapper;
-    private final UserWordStateMapper userWordStateMapper;
     private final WordMapper wordMapper;
     private final ClozeQuizMapper clozeQuizMapper;
     private final ClozeQuizBlankMapper clozeQuizBlankMapper;
@@ -97,6 +93,7 @@ public class ClozeQuizService {
     private final StudyEventMapper studyEventMapper;
     private final WrongWordMapper wrongWordMapper;
     private final ObjectMapper objectMapper;
+    private final SpacedRepetitionService spacedRepetitionService;
 
     public CreateClozeTaskResponse createClozeTask(Long userId, CreateClozeTaskRequest request) {
         DailyTask dailyTask = getOwnedDailyTask(userId, request.dailyTaskId());
@@ -191,7 +188,14 @@ public class ClozeQuizService {
             StudyEvent event = createStudyEvent(userId, quiz, answer, request.durationSeconds(), attempt.getId());
             if (!answer.getCorrect()) {
                 upsertWrongWord(userId, quiz.getWordbookId(), answer.getWordId(), event.getId());
-                markQuizWrongInWordState(userId, quiz, answer.getWordId());
+                spacedRepetitionService.applyFeedback(
+                        userId,
+                        quiz.getWordbookId(),
+                        answer.getWordId(),
+                        null,
+                        StudyFeedback.UNKNOWN,
+                        StudyScene.QUIZ
+                );
             }
         }
 
@@ -677,7 +681,7 @@ public class ClozeQuizService {
         event.setDailyTaskItemId(null);
         event.setScene(StudyScene.QUIZ);
         event.setFeedback(null);
-        event.setQualityScore(answer.getCorrect() ? 5 : 2);
+        event.setQualityScore(spacedRepetitionService.qualityScore(answer.getCorrect() ? StudyFeedback.KNOWN : StudyFeedback.UNKNOWN));
         event.setIsCorrect(answer.getCorrect());
         event.setDurationSeconds(durationSeconds);
         event.setSourceRefId(attemptId);
@@ -712,56 +716,6 @@ public class ClozeQuizService {
         wrongWord.setResolved(false);
         wrongWord.setResolvedAt(null);
         wrongWordMapper.updateById(wrongWord);
-    }
-
-    private void markQuizWrongInWordState(Long userId, ClozeQuiz quiz, Long wordId) {
-        UserWordState state = userWordStateMapper.selectOne(new LambdaQueryWrapper<UserWordState>()
-                .eq(UserWordState::getUserId, userId)
-                .eq(UserWordState::getWordbookId, quiz.getWordbookId())
-                .eq(UserWordState::getWordId, wordId)
-                .last("LIMIT 1"));
-        LocalDateTime now = LocalDateTime.now();
-        if (state == null) {
-            state = new UserWordState();
-            state.setUserId(userId);
-            state.setWordbookId(quiz.getWordbookId());
-            state.setWordId(wordId);
-            state.setPlanId(null);
-            state.setMasteryStatus(MasteryStatus.LEARNING);
-            state.setLearned(true);
-            state.setRepetition(0);
-            state.setIntervalDays(1);
-            state.setEasinessFactor(new BigDecimal("2.18"));
-            state.setWrongCount(1);
-            state.setCorrectCount(0);
-            state.setNextReviewDate(LocalDate.now().plusDays(1));
-            state.setLastFeedback(StudyFeedback.UNKNOWN);
-            state.setLastStudiedAt(now);
-            state.setDeleted(0);
-            userWordStateMapper.insert(state);
-            return;
-        }
-        int nextWrongCount = (state.getWrongCount() == null ? 0 : state.getWrongCount()) + 1;
-        state.setWrongCount(nextWrongCount);
-        state.setMasteryStatus(nextWrongCount >= 3 ? MasteryStatus.DIFFICULT : MasteryStatus.LEARNING);
-        state.setLearned(true);
-        state.setRepetition(0);
-        state.setIntervalDays(1);
-        state.setEasinessFactor(nextEasinessFactor(state.getEasinessFactor(), 2));
-        state.setNextReviewDate(LocalDate.now().plusDays(1));
-        state.setLastFeedback(StudyFeedback.UNKNOWN);
-        state.setLastStudiedAt(now);
-        userWordStateMapper.updateById(state);
-    }
-
-    private BigDecimal nextEasinessFactor(BigDecimal currentEf, int quality) {
-        BigDecimal ef = currentEf == null ? new BigDecimal("2.50") : currentEf;
-        BigDecimal q = BigDecimal.valueOf(quality);
-        BigDecimal delta = new BigDecimal("0.10")
-                .subtract(new BigDecimal("5").subtract(q).multiply(new BigDecimal("0.08")))
-                .subtract(new BigDecimal("5").subtract(q).multiply(new BigDecimal("5").subtract(q)).multiply(new BigDecimal("0.02")));
-        BigDecimal next = ef.add(delta).setScale(2, RoundingMode.HALF_UP);
-        return next.max(new BigDecimal("1.30"));
     }
 
     private BigDecimal calculateScore(int correctCount, int totalBlanks) {

@@ -20,6 +20,8 @@ import com.lexiflow.study.progress.mapper.FavoriteWordMapper;
 import com.lexiflow.study.progress.mapper.StudyEventMapper;
 import com.lexiflow.study.progress.mapper.UserWordStateMapper;
 import com.lexiflow.study.progress.mapper.WrongWordMapper;
+import com.lexiflow.study.progress.service.SpacedRepetitionService;
+import com.lexiflow.study.progress.service.SpacedRepetitionService.SpacedRepetitionResult;
 import com.lexiflow.study.service.StudyPlanService;
 import com.lexiflow.study.task.domain.DailyTask;
 import com.lexiflow.study.task.domain.DailyTaskItem;
@@ -41,8 +43,6 @@ import com.lexiflow.wordbook.domain.Wordbook;
 import com.lexiflow.wordbook.dto.WordPickRow;
 import com.lexiflow.wordbook.mapper.WordMapper;
 import com.lexiflow.wordbook.service.WordbookService;
-import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Collections;
@@ -76,6 +76,7 @@ public class DailyTaskService {
     private final FavoriteWordMapper favoriteWordMapper;
     private final ClozeQuizMapper clozeQuizMapper;
     private final ClozeAttemptMapper clozeAttemptMapper;
+    private final SpacedRepetitionService spacedRepetitionService;
 
     @Transactional
     public DailyTaskResponse getTodayTask(Long userId) {
@@ -169,13 +170,22 @@ public class DailyTaskService {
         }
 
         StudyScene scene = toStudyScene(item.getItemType());
-        Sm2Result sm2Result = updateWordState(userId, item, request.feedback(), scene);
-        StudyEvent event = createStudyEvent(userId, item, request.feedback(), request.durationSeconds(), scene, sm2Result.qualityScore());
+        SpacedRepetitionResult repetitionResult = spacedRepetitionService.applyFeedback(
+                userId,
+                item.getWordbookId(),
+                item.getWordId(),
+                item.getPlanId(),
+                request.feedback(),
+                scene
+        );
+        StudyEvent event = createStudyEvent(userId, item, request.feedback(), request.durationSeconds(), scene, repetitionResult.qualityScore());
         if (request.feedback() == StudyFeedback.UNKNOWN) {
             upsertWrongWord(userId, item, event.getId(), scene);
+        } else if (item.getItemType() == DailyTaskItemType.EXTRA) {
+            resolveWrongWord(userId, item);
         }
         boolean completed = request.feedback() == StudyFeedback.KNOWN;
-        updateStudyPlanProgress(item, scene, sm2Result, completed);
+        updateStudyPlanProgress(item, scene, repetitionResult, completed);
 
         item.setStatus(completed ? DailyTaskItemStatus.DONE : DailyTaskItemStatus.PENDING);
         item.setFeedback(request.feedback().name());
@@ -184,7 +194,7 @@ public class DailyTaskService {
 
         DailyTask task = updateDailyTaskProgress(item.getDailyTaskId());
         TaskProgressResponse progress = TaskProgressResponse.from(task.getDoneCount(), totalCount(task));
-        return SubmitFeedbackResponse.from(item, request.feedback(), sm2Result.nextReviewDate(), task.getStatus() == DailyTaskStatus.DONE, progress);
+        return SubmitFeedbackResponse.from(item, request.feedback(), repetitionResult.nextReviewDate(), task.getStatus() == DailyTaskStatus.DONE, progress);
     }
 
     private DailyTask findLatestPendingTask(Long userId, Long planId) {
@@ -474,101 +484,6 @@ public class DailyTaskService {
                 .last("LIMIT 1"));
     }
 
-    private Sm2Result updateWordState(Long userId, DailyTaskItem item, StudyFeedback feedback, StudyScene scene) {
-        UserWordState state = findUserWordState(userId, item.getWordbookId(), item.getWordId());
-        MasteryStatus oldMasteryStatus = state == null ? MasteryStatus.NEW : state.getMasteryStatus();
-        if (state == null) {
-            state = newDefaultWordState(userId, item);
-            applyFeedback(state, feedback, scene);
-            userWordStateMapper.insert(state);
-        } else {
-            state.setPlanId(item.getPlanId());
-            applyFeedback(state, feedback, scene);
-            userWordStateMapper.updateById(state);
-        }
-        return new Sm2Result(state.getNextReviewDate(), qualityScore(feedback), oldMasteryStatus, state.getMasteryStatus());
-    }
-
-    private UserWordState newDefaultWordState(Long userId, DailyTaskItem item) {
-        UserWordState state = new UserWordState();
-        state.setUserId(userId);
-        state.setWordbookId(item.getWordbookId());
-        state.setWordId(item.getWordId());
-        state.setPlanId(item.getPlanId());
-        state.setMasteryStatus(MasteryStatus.NEW);
-        state.setLearned(false);
-        state.setRepetition(0);
-        state.setIntervalDays(0);
-        state.setEasinessFactor(new BigDecimal("2.50"));
-        state.setWrongCount(0);
-        state.setCorrectCount(0);
-        state.setDeleted(0);
-        return state;
-    }
-
-    private void applyFeedback(UserWordState state, StudyFeedback feedback, StudyScene scene) {
-        LocalDate today = LocalDate.now();
-        LocalDateTime now = LocalDateTime.now();
-        int quality = qualityScore(feedback);
-        int nextRepetition;
-        int nextInterval;
-        BigDecimal nextEf = nextEasinessFactor(state.getEasinessFactor(), quality);
-
-        if (feedback == StudyFeedback.UNKNOWN) {
-            nextRepetition = 0;
-            nextInterval = 1;
-            int nextWrongCount = state.getWrongCount() + 1;
-            state.setWrongCount(nextWrongCount);
-            state.setMasteryStatus(nextWrongCount >= 3 ? MasteryStatus.DIFFICULT : MasteryStatus.LEARNING);
-        } else {
-            nextRepetition = state.getRepetition() + 1;
-            nextInterval = nextIntervalDays(nextRepetition, state.getIntervalDays(), nextEf);
-            state.setCorrectCount(state.getCorrectCount() + 1);
-            state.setMasteryStatus(nextRepetition >= 3 && feedback == StudyFeedback.KNOWN ? MasteryStatus.MASTERED : MasteryStatus.REVIEWING);
-        }
-
-        state.setLearned(true);
-        state.setRepetition(nextRepetition);
-        state.setIntervalDays(nextInterval);
-        state.setEasinessFactor(nextEf);
-        state.setNextReviewDate(today.plusDays(nextInterval));
-        state.setLastFeedback(feedback);
-        state.setLastStudiedAt(now);
-        if (scene == StudyScene.REVIEW) {
-            state.setLastReviewedAt(now);
-        }
-    }
-
-    private int nextIntervalDays(int repetition, int previousInterval, BigDecimal ef) {
-        if (repetition <= 1) {
-            return 1;
-        }
-        if (repetition == 2) {
-            return 3;
-        }
-        return Math.max(1, BigDecimal.valueOf(Math.max(previousInterval, 3))
-                .multiply(ef)
-                .setScale(0, RoundingMode.HALF_UP)
-                .intValue());
-    }
-
-    private BigDecimal nextEasinessFactor(BigDecimal currentEf, int quality) {
-        BigDecimal ef = currentEf == null ? new BigDecimal("2.50") : currentEf;
-        BigDecimal q = BigDecimal.valueOf(quality);
-        BigDecimal delta = new BigDecimal("0.10")
-                .subtract(new BigDecimal("5").subtract(q).multiply(new BigDecimal("0.08")))
-                .subtract(new BigDecimal("5").subtract(q).multiply(new BigDecimal("5").subtract(q)).multiply(new BigDecimal("0.02")));
-        BigDecimal next = ef.add(delta).setScale(2, RoundingMode.HALF_UP);
-        return next.max(new BigDecimal("1.30"));
-    }
-
-    private int qualityScore(StudyFeedback feedback) {
-        return switch (feedback) {
-            case UNKNOWN -> 2;
-            case KNOWN -> 5;
-        };
-    }
-
     private StudyEvent createStudyEvent(Long userId, DailyTaskItem item, StudyFeedback feedback, Integer durationSeconds, StudyScene scene, int qualityScore) {
         StudyEvent event = new StudyEvent();
         event.setUserId(userId);
@@ -615,6 +530,21 @@ public class DailyTaskService {
         wrongWordMapper.updateById(wrongWord);
     }
 
+    private void resolveWrongWord(Long userId, DailyTaskItem item) {
+        WrongWord wrongWord = wrongWordMapper.selectOne(new LambdaQueryWrapper<WrongWord>()
+                .eq(WrongWord::getUserId, userId)
+                .eq(WrongWord::getWordbookId, item.getWordbookId())
+                .eq(WrongWord::getWordId, item.getWordId())
+                .eq(WrongWord::getResolved, false)
+                .last("LIMIT 1"));
+        if (wrongWord == null) {
+            return;
+        }
+        wrongWord.setResolved(true);
+        wrongWord.setResolvedAt(LocalDateTime.now());
+        wrongWordMapper.updateById(wrongWord);
+    }
+
     private DailyTask updateDailyTaskProgress(Long dailyTaskId) {
         DailyTask task = dailyTaskMapper.selectById(dailyTaskId);
         if (task == null) {
@@ -647,7 +577,7 @@ public class DailyTaskService {
                 .eq(DailyTaskItem::getStatus, status)).intValue();
     }
 
-    private void updateStudyPlanProgress(DailyTaskItem item, StudyScene scene, Sm2Result sm2Result, boolean completed) {
+    private void updateStudyPlanProgress(DailyTaskItem item, StudyScene scene, SpacedRepetitionResult repetitionResult, boolean completed) {
         StudyPlan plan = studyPlanMapper.selectById(item.getPlanId());
         if (plan == null) {
             throw new BizException(ErrorCode.STUDY_PLAN_NOT_FOUND);
@@ -655,9 +585,9 @@ public class DailyTaskService {
         if (completed && scene == StudyScene.REVIEW) {
             plan.setReviewedCount(plan.getReviewedCount() + 1);
         }
-        if (sm2Result.oldMasteryStatus() != MasteryStatus.MASTERED && sm2Result.newMasteryStatus() == MasteryStatus.MASTERED) {
+        if (repetitionResult.oldMasteryStatus() != MasteryStatus.MASTERED && repetitionResult.newMasteryStatus() == MasteryStatus.MASTERED) {
             plan.setMasteredCount(plan.getMasteredCount() + 1);
-        } else if (sm2Result.oldMasteryStatus() == MasteryStatus.MASTERED && sm2Result.newMasteryStatus() != MasteryStatus.MASTERED) {
+        } else if (repetitionResult.oldMasteryStatus() == MasteryStatus.MASTERED && repetitionResult.newMasteryStatus() != MasteryStatus.MASTERED) {
             plan.setMasteredCount(Math.max(0, plan.getMasteredCount() - 1));
         }
         studyPlanMapper.updateById(plan);
@@ -683,6 +613,4 @@ public class DailyTaskService {
         };
     }
 
-    private record Sm2Result(LocalDate nextReviewDate, int qualityScore, MasteryStatus oldMasteryStatus, MasteryStatus newMasteryStatus) {
-    }
 }
