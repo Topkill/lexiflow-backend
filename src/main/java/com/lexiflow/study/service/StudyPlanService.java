@@ -17,6 +17,7 @@ import com.lexiflow.study.task.domain.DailyTaskItem;
 import com.lexiflow.study.task.domain.DailyTaskItemStatus;
 import com.lexiflow.study.task.domain.DailyTaskItemType;
 import com.lexiflow.study.task.domain.DailyTaskStatus;
+import com.lexiflow.study.task.domain.DailyTaskType;
 import com.lexiflow.study.task.mapper.DailyTaskItemMapper;
 import com.lexiflow.study.task.mapper.DailyTaskMapper;
 import com.lexiflow.wordbook.dto.WordPickRow;
@@ -185,6 +186,7 @@ public class StudyPlanService {
         DailyTask task = dailyTaskMapper.selectOne(new LambdaQueryWrapper<DailyTask>()
                 .eq(DailyTask::getUserId, userId)
                 .eq(DailyTask::getPlanId, plan.getId())
+                .eq(DailyTask::getTaskType, DailyTaskType.DAILY)
                 .eq(DailyTask::getStatus, DailyTaskStatus.PENDING)
                 .orderByDesc(DailyTask::getTaskDate)
                 .orderByDesc(DailyTask::getGroupNo)

@@ -23,6 +23,7 @@ public class DailyTask {
     private Long planId;
     private LocalDate taskDate;
     private Integer groupNo;
+    private DailyTaskType taskType;
     private DailyTaskStatus status;
     private Integer newCount;
     private Integer reviewCount;

@@ -45,6 +45,7 @@ import com.lexiflow.study.task.domain.DailyTaskItem;
 import com.lexiflow.study.task.domain.DailyTaskItemStatus;
 import com.lexiflow.study.task.domain.DailyTaskItemType;
 import com.lexiflow.study.task.domain.DailyTaskStatus;
+import com.lexiflow.study.task.domain.DailyTaskType;
 import com.lexiflow.study.task.mapper.DailyTaskItemMapper;
 import com.lexiflow.study.task.mapper.DailyTaskMapper;
 import com.lexiflow.wordbook.domain.Word;
@@ -182,20 +183,23 @@ public class ClozeQuizService {
         attempt.setDeleted(0);
         clozeAttemptMapper.insert(attempt);
 
+        boolean skipScheduling = isWrongWordPracticeQuiz(quiz);
         for (ClozeAttemptAnswer answer : answerEntities) {
             answer.setAttemptId(attempt.getId());
             clozeAttemptAnswerMapper.insert(answer);
             StudyEvent event = createStudyEvent(userId, quiz, answer, request.durationSeconds(), attempt.getId());
             if (!answer.getCorrect()) {
                 upsertWrongWord(userId, quiz.getWordbookId(), answer.getWordId(), event.getId());
-                spacedRepetitionService.applyFeedback(
-                        userId,
-                        quiz.getWordbookId(),
-                        answer.getWordId(),
-                        null,
-                        StudyFeedback.UNKNOWN,
-                        StudyScene.QUIZ
-                );
+                if (!skipScheduling) {
+                    spacedRepetitionService.applyFeedback(
+                            userId,
+                            quiz.getWordbookId(),
+                            answer.getWordId(),
+                            null,
+                            StudyFeedback.UNKNOWN,
+                            StudyScene.QUIZ
+                    );
+                }
             }
         }
 
@@ -652,6 +656,14 @@ public class ClozeQuizService {
             throw new BizException(ErrorCode.CLOZE_QUIZ_NOT_FOUND);
         }
         return quiz;
+    }
+
+    private boolean isWrongWordPracticeQuiz(ClozeQuiz quiz) {
+        if (quiz.getDailyTaskId() == null) {
+            return false;
+        }
+        DailyTask task = dailyTaskMapper.selectById(quiz.getDailyTaskId());
+        return task != null && task.getTaskType() == DailyTaskType.WRONG_WORD_PRACTICE;
     }
 
     private List<ClozeQuizBlank> listBlanks(Long quizId) {

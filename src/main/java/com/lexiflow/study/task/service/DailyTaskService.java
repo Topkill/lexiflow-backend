@@ -28,6 +28,7 @@ import com.lexiflow.study.task.domain.DailyTaskItem;
 import com.lexiflow.study.task.domain.DailyTaskItemStatus;
 import com.lexiflow.study.task.domain.DailyTaskItemType;
 import com.lexiflow.study.task.domain.DailyTaskStatus;
+import com.lexiflow.study.task.domain.DailyTaskType;
 import com.lexiflow.study.task.dto.CreateWrongWordPracticeRequest;
 import com.lexiflow.study.task.dto.DailyTaskItemResponse;
 import com.lexiflow.study.task.dto.DailyTaskPlanResponse;
@@ -97,6 +98,15 @@ public class DailyTaskService {
         return toResponse(task, plan);
     }
 
+    public DailyTaskResponse getTask(Long userId, Long taskId) {
+        DailyTask task = getOwnedTask(userId, taskId);
+        StudyPlan plan = studyPlanMapper.selectById(task.getPlanId());
+        if (plan == null || !plan.getUserId().equals(userId)) {
+            throw new BizException(ErrorCode.STUDY_PLAN_NOT_FOUND);
+        }
+        return toResponse(task, plan);
+    }
+
     public TaskItemCardResponse getCard(Long userId, Long itemId) {
         DailyTaskItem item = getOwnedTaskItem(userId, itemId);
         Word word = getWord(item.getWordId());
@@ -114,37 +124,33 @@ public class DailyTaskService {
             throw new BizException(ErrorCode.WORDBOOK_NOT_FOUND);
         }
         LocalDate today = LocalDate.now();
-        DailyTask task = findLatestDoneTaskAwaitingClozeAttempt(userId, plan.getId(), today);
-        if (task != null) {
-            return toResponse(task, plan);
-        }
-
-        task = findLatestPendingTask(userId, plan.getId());
-        if (task == null) {
-            task = generateTodayTask(userId, plan, today);
-        } else if (task.getStatus() != DailyTaskStatus.DONE && shouldSyncDueReviewItems(task, today)) {
-            task = rollUntouchedPendingTaskToToday(task, today);
-            task = syncDueReviewItems(userId, plan, task, today);
-        }
-
-        Set<Long> existingWordIds = dailyTaskItemMapper.selectList(new LambdaQueryWrapper<DailyTaskItem>()
-                        .eq(DailyTaskItem::getDailyTaskId, task.getId())
-                        .and(wrapper -> wrapper
-                                .eq(DailyTaskItem::getStatus, DailyTaskItemStatus.PENDING)
-                                .or()
-                                .eq(DailyTaskItem::getItemType, DailyTaskItemType.EXTRA)))
-                .stream()
-                .map(DailyTaskItem::getWordId)
-                .collect(Collectors.toCollection(HashSet::new));
         List<WrongWord> wrongWords = wrongWordMapper.selectList(new LambdaQueryWrapper<WrongWord>()
                 .eq(WrongWord::getUserId, userId)
                 .eq(WrongWord::getWordbookId, targetWordbookId)
                 .eq(WrongWord::getResolved, false)
-                .notIn(!existingWordIds.isEmpty(), WrongWord::getWordId, existingWordIds)
                 .orderByDesc(WrongWord::getWrongCount)
                 .orderByDesc(WrongWord::getLastWrongAt)
                 .orderByAsc(WrongWord::getId)
                 .last("LIMIT " + request.safeLimit()));
+        if (wrongWords.isEmpty()) {
+            throw new BizException(ErrorCode.TODAY_TASK_NOT_FOUND);
+        }
+
+        DailyTask task = new DailyTask();
+        task.setUserId(userId);
+        task.setPlanId(plan.getId());
+        task.setTaskDate(today);
+        task.setGroupNo(nextGroupNo(userId, plan.getId(), today, DailyTaskType.WRONG_WORD_PRACTICE));
+        task.setTaskType(DailyTaskType.WRONG_WORD_PRACTICE);
+        task.setStatus(DailyTaskStatus.PENDING);
+        task.setNewCount(0);
+        task.setReviewCount(0);
+        task.setExtraCount(0);
+        task.setDoneCount(0);
+        task.setSkippedCount(0);
+        task.setDeleted(0);
+        dailyTaskMapper.insert(task);
+
         insertExtraItems(task, wrongWords, countTaskItems(task.getId(), DailyTaskItemType.EXTRA));
         task = updateDailyTaskProgress(task.getId());
         return toResponse(task, plan);
@@ -153,6 +159,7 @@ public class DailyTaskService {
     @Transactional
     public SubmitFeedbackResponse submitFeedback(Long userId, Long itemId, SubmitFeedbackRequest request) {
         DailyTaskItem item = getOwnedTaskItem(userId, itemId);
+        DailyTask sourceTask = getOwnedTask(userId, item.getDailyTaskId());
         if (item.getStatus() != DailyTaskItemStatus.PENDING) {
             throw new BizException(ErrorCode.TASK_ITEM_NOT_SUBMITTABLE);
         }
@@ -167,6 +174,10 @@ public class DailyTaskService {
                     task.getStatus() == DailyTaskStatus.DONE,
                     progress
             );
+        }
+
+        if (sourceTask.getTaskType() == DailyTaskType.WRONG_WORD_PRACTICE) {
+            return submitWrongWordPracticeFeedback(userId, item, request);
         }
 
         StudyScene scene = toStudyScene(item.getItemType());
@@ -197,10 +208,38 @@ public class DailyTaskService {
         return SubmitFeedbackResponse.from(item, request.feedback(), repetitionResult.nextReviewDate(), task.getStatus() == DailyTaskStatus.DONE, progress);
     }
 
+    private SubmitFeedbackResponse submitWrongWordPracticeFeedback(Long userId, DailyTaskItem item, SubmitFeedbackRequest request) {
+        StudyScene scene = StudyScene.EXTRA;
+        StudyEvent event = createStudyEvent(userId, item, request.feedback(), request.durationSeconds(), scene, qualityScore(request.feedback()));
+        boolean completed = request.feedback() == StudyFeedback.KNOWN;
+        if (completed) {
+            resolveWrongWord(userId, item);
+        } else {
+            upsertWrongWord(userId, item, event.getId(), scene);
+        }
+
+        item.setStatus(completed ? DailyTaskItemStatus.DONE : DailyTaskItemStatus.PENDING);
+        item.setFeedback(request.feedback().name());
+        item.setDoneAt(completed ? LocalDateTime.now() : null);
+        dailyTaskItemMapper.updateById(item);
+
+        DailyTask task = updateDailyTaskProgress(item.getDailyTaskId());
+        TaskProgressResponse progress = TaskProgressResponse.from(task.getDoneCount(), totalCount(task));
+        return SubmitFeedbackResponse.from(item, request.feedback(), null, task.getStatus() == DailyTaskStatus.DONE, progress);
+    }
+
+    private int qualityScore(StudyFeedback feedback) {
+        return switch (feedback) {
+            case UNKNOWN -> 2;
+            case KNOWN -> 4;
+        };
+    }
+
     private DailyTask findLatestPendingTask(Long userId, Long planId) {
         return dailyTaskMapper.selectOne(new LambdaQueryWrapper<DailyTask>()
                 .eq(DailyTask::getUserId, userId)
                 .eq(DailyTask::getPlanId, planId)
+                .eq(DailyTask::getTaskType, DailyTaskType.DAILY)
                 .eq(DailyTask::getStatus, DailyTaskStatus.PENDING)
                 .orderByDesc(DailyTask::getTaskDate)
                 .orderByDesc(DailyTask::getGroupNo)
@@ -243,6 +282,7 @@ public class DailyTaskService {
                 .eq(DailyTask::getUserId, userId)
                 .eq(DailyTask::getPlanId, planId)
                 .eq(DailyTask::getTaskDate, today)
+                .eq(DailyTask::getTaskType, DailyTaskType.DAILY)
                 .eq(DailyTask::getStatus, DailyTaskStatus.DONE)
                 .orderByDesc(DailyTask::getTaskDate)
                 .orderByDesc(DailyTask::getGroupNo)
@@ -278,7 +318,8 @@ public class DailyTaskService {
         task.setUserId(userId);
         task.setPlanId(plan.getId());
         task.setTaskDate(today);
-        task.setGroupNo(nextGroupNo(userId, plan.getId(), today));
+        task.setGroupNo(nextGroupNo(userId, plan.getId(), today, DailyTaskType.DAILY));
+        task.setTaskType(DailyTaskType.DAILY);
         task.setStatus(DailyTaskStatus.PENDING);
         task.setNewCount(newWords.size());
         task.setReviewCount(dueReviewStates.size());
@@ -339,11 +380,12 @@ public class DailyTaskService {
         return task;
     }
 
-    private int nextGroupNo(Long userId, Long planId, LocalDate today) {
+    private int nextGroupNo(Long userId, Long planId, LocalDate today, DailyTaskType taskType) {
         DailyTask latestTask = dailyTaskMapper.selectOne(new LambdaQueryWrapper<DailyTask>()
                 .eq(DailyTask::getUserId, userId)
                 .eq(DailyTask::getPlanId, planId)
                 .eq(DailyTask::getTaskDate, today)
+                .eq(DailyTask::getTaskType, taskType)
                 .orderByDesc(DailyTask::getGroupNo)
                 .orderByDesc(DailyTask::getId)
                 .last("LIMIT 1"));
@@ -458,6 +500,17 @@ public class DailyTaskService {
             throw new BizException(ErrorCode.TODAY_TASK_NOT_FOUND);
         }
         return item;
+    }
+
+    private DailyTask getOwnedTask(Long userId, Long taskId) {
+        DailyTask task = dailyTaskMapper.selectOne(new LambdaQueryWrapper<DailyTask>()
+                .eq(DailyTask::getId, taskId)
+                .eq(DailyTask::getUserId, userId)
+                .last("LIMIT 1"));
+        if (task == null) {
+            throw new BizException(ErrorCode.TODAY_TASK_NOT_FOUND);
+        }
+        return task;
     }
 
     private Word getWord(Long wordId) {

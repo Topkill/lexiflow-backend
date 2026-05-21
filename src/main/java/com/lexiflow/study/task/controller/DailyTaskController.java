@@ -36,6 +36,12 @@ public class DailyTaskController {
         return ApiResponse.success(dailyTaskService.getTodayTask(AuthContext.currentUserId()));
     }
 
+    @Operation(summary = "按 ID 查询学习任务")
+    @GetMapping("/tasks/{taskId}")
+    public ApiResponse<DailyTaskResponse> task(@PathVariable @Positive Long taskId) {
+        return ApiResponse.success(dailyTaskService.getTask(AuthContext.currentUserId(), taskId));
+    }
+
     @Operation(summary = "创建错词专项复习")
     @PostMapping("/tasks/today/wrong-word-practice")
     public ApiResponse<DailyTaskResponse> createWrongWordPractice(@Valid @RequestBody CreateWrongWordPracticeRequest request) {

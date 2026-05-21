@@ -15,6 +15,7 @@ import com.lexiflow.study.progress.mapper.UserWordStateMapper;
 import com.lexiflow.study.progress.mapper.WrongWordMapper;
 import com.lexiflow.study.statistics.dto.StudyStatisticsOverviewResponse;
 import com.lexiflow.study.task.domain.DailyTask;
+import com.lexiflow.study.task.domain.DailyTaskType;
 import com.lexiflow.study.task.mapper.DailyTaskMapper;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -135,6 +136,7 @@ public class StudyStatisticsService {
     private BigDecimal calculateTodayTaskCompletionRate(Long userId, Long planId) {
         LambdaQueryWrapper<DailyTask> wrapper = new LambdaQueryWrapper<DailyTask>()
                 .eq(DailyTask::getUserId, userId)
+                .eq(DailyTask::getTaskType, DailyTaskType.DAILY)
                 .eq(DailyTask::getTaskDate, LocalDate.now());
         if (planId != null) {
             wrapper.eq(DailyTask::getPlanId, planId);
