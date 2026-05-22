@@ -126,6 +126,7 @@ public class ClozeQuizService {
         List<ClozeQuizBlank> blanks = listBlanks(quizId);
         return ClozeQuizResponse.of(
                 quiz,
+                resolveQuizWordbookId(quiz),
                 parseJsonNode(quiz.getCandidateWords()),
                 blanks.stream().map(ClozeBlankResponse::from).toList()
         );
@@ -681,6 +682,17 @@ public class ClozeQuizService {
             throw new BizException(ErrorCode.TODAY_TASK_NOT_FOUND);
         }
         return item.getWordbookId();
+    }
+
+    private Long resolveQuizWordbookId(ClozeQuiz quiz) {
+        if (quiz.getWordbookId() != null || quiz.getDailyTaskId() == null) {
+            return quiz.getWordbookId();
+        }
+        DailyTaskItem item = dailyTaskItemMapper.selectOne(new LambdaQueryWrapper<DailyTaskItem>()
+                .eq(DailyTaskItem::getDailyTaskId, quiz.getDailyTaskId())
+                .eq(DailyTaskItem::getUserId, quiz.getUserId())
+                .last("LIMIT 1"));
+        return item == null ? null : item.getWordbookId();
     }
 
     private StudyEvent createStudyEvent(Long userId, ClozeQuiz quiz, ClozeAttemptAnswer answer, Integer durationSeconds, Long attemptId) {

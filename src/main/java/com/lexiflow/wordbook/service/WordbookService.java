@@ -15,6 +15,7 @@ import com.lexiflow.wordbook.dto.WordbookResponse;
 import com.lexiflow.wordbook.mapper.WordMapper;
 import com.lexiflow.wordbook.mapper.WordbookMapper;
 import java.util.List;
+import java.util.Locale;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -58,6 +59,20 @@ public class WordbookService {
         return PageResponse.of(records, result.getTotal(), result.getCurrent(), result.getSize());
     }
 
+    public WordResponse lookupWord(Long wordbookId, String text) {
+        getEnabledWordbook(wordbookId);
+        String normalizedText = normalizeLookupText(text);
+        String compactText = normalizedText.replaceAll("[^a-z0-9]", "");
+        if (!StringUtils.hasText(compactText)) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "请选择英文单词或词组");
+        }
+        WordRow row = wordMapper.selectLookupWord(wordbookId, normalizedText, compactText);
+        if (row == null) {
+            throw new BizException(ErrorCode.WORD_NOT_FOUND, "未找到该单词或词组");
+        }
+        return WordResponse.from(row);
+    }
+
     public Wordbook getEnabledWordbook(Long wordbookId) {
         Wordbook wordbook = wordbookMapper.selectOne(new LambdaQueryWrapper<Wordbook>()
                 .eq(Wordbook::getId, wordbookId)
@@ -67,5 +82,21 @@ public class WordbookService {
             throw new BizException(ErrorCode.WORDBOOK_NOT_FOUND);
         }
         return wordbook;
+    }
+
+    private String normalizeLookupText(String text) {
+        if (!StringUtils.hasText(text)) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "请选择英文单词或词组");
+        }
+        String normalized = text
+                .replace('’', '\'')
+                .trim()
+                .toLowerCase(Locale.ROOT)
+                .replaceAll("\\s+", " ")
+                .replaceAll("^([^a-z]+)|([^a-z]+)$", "");
+        if (!normalized.matches("[a-z]+(?:['-][a-z]+)?(?:[ -]+[a-z]+(?:['-][a-z]+)?)*")) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "请选择英文单词或词组");
+        }
+        return normalized;
     }
 }

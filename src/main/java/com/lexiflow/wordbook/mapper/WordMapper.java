@@ -19,6 +19,12 @@ public interface WordMapper extends BaseMapper<Word> {
             @Param("keyword") String keyword
     );
 
+    WordRow selectLookupWord(
+            @Param("wordbookId") Long wordbookId,
+            @Param("normalizedText") String normalizedText,
+            @Param("compactText") String compactText
+    );
+
     AdminWordRow selectAdminWord(
             @Param("wordbookId") Long wordbookId,
             @Param("wordId") Long wordId

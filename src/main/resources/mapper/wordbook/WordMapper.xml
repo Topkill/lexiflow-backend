@@ -39,6 +39,30 @@
         ORDER BY w.sequence_no ASC, w.id ASC
     </select>
 
+    <select id="selectLookupWord" resultType="com.lexiflow.wordbook.dto.WordRow">
+        SELECT
+        <include refid="WordColumns"/>
+        FROM word w
+        WHERE w.deleted = 0
+          AND w.enabled = 1
+          AND w.wordbook_id = #{wordbookId}
+          AND (
+            LOWER(w.word) = #{normalizedText}
+            OR LOWER(w.normalized_word) = #{normalizedText}
+            OR REPLACE(REPLACE(REPLACE(LOWER(w.word), '-', ''), ' ', ''), CHAR(39), '') = #{compactText}
+            OR REPLACE(REPLACE(REPLACE(LOWER(w.normalized_word), '-', ''), ' ', ''), CHAR(39), '') = #{compactText}
+          )
+        ORDER BY
+          CASE
+            WHEN LOWER(w.word) = #{normalizedText} THEN 0
+            WHEN LOWER(w.normalized_word) = #{normalizedText} THEN 1
+            ELSE 2
+          END,
+          w.sequence_no ASC,
+          w.id ASC
+        LIMIT 1
+    </select>
+
     <select id="selectAdminWord" resultType="com.lexiflow.wordbook.dto.AdminWordRow">
         SELECT
         <include refid="WordColumns"/>,
