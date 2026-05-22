@@ -63,6 +63,57 @@
         LIMIT 1
     </select>
 
+    <select id="selectLookupWordInEnabledWordbooks" resultType="com.lexiflow.wordbook.dto.WordRow">
+        SELECT
+        <include refid="WordColumns"/>
+        FROM word w
+        INNER JOIN wordbook wb ON wb.id = w.wordbook_id
+        WHERE w.deleted = 0
+          AND w.enabled = 1
+          AND wb.deleted = 0
+          AND wb.enabled = 1
+          AND (
+            LOWER(w.word) = #{normalizedText}
+            OR LOWER(w.normalized_word) = #{normalizedText}
+            OR REPLACE(REPLACE(REPLACE(LOWER(w.word), '-', ''), ' ', ''), CHAR(39), '') = #{compactText}
+            OR REPLACE(REPLACE(REPLACE(LOWER(w.normalized_word), '-', ''), ' ', ''), CHAR(39), '') = #{compactText}
+          )
+        ORDER BY
+          CASE
+            WHEN LOWER(w.word) = #{normalizedText} THEN 0
+            WHEN LOWER(w.normalized_word) = #{normalizedText} THEN 1
+            ELSE 2
+          END,
+          wb.sort_order ASC,
+          wb.id ASC,
+          w.sequence_no ASC,
+          w.id ASC
+        LIMIT 1
+    </select>
+
+    <select id="selectLookupDictionaryEntry" resultType="com.lexiflow.wordbook.dto.LexiflowDictionaryEntryRow">
+        SELECT
+            de.id AS id,
+            de.word AS word,
+            de.normalized_word AS normalizedWord,
+            de.phonetics_json AS phoneticsJson,
+            de.primary_pos AS primaryPos,
+            de.primary_definition AS primaryDefinition,
+            de.senses_json AS sensesJson,
+            de.source AS source
+        FROM lexiflow_dict.dictionary_entry de
+        WHERE de.normalized_word = #{normalizedText}
+           OR de.strip_word = #{compactText}
+        ORDER BY
+          CASE
+            WHEN de.normalized_word = #{normalizedText} THEN 0
+            WHEN de.strip_word = #{compactText} THEN 1
+            ELSE 2
+          END,
+          de.id ASC
+        LIMIT 1
+    </select>
+
     <select id="selectAdminWord" resultType="com.lexiflow.wordbook.dto.AdminWordRow">
         SELECT
         <include refid="WordColumns"/>,

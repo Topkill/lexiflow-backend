@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.lexiflow.wordbook.domain.Word;
 import com.lexiflow.wordbook.dto.AdminWordRow;
+import com.lexiflow.wordbook.dto.LexiflowDictionaryEntryRow;
 import com.lexiflow.wordbook.dto.WordPickRow;
 import com.lexiflow.wordbook.dto.WordRow;
 import java.util.List;
@@ -21,6 +22,16 @@ public interface WordMapper extends BaseMapper<Word> {
 
     WordRow selectLookupWord(
             @Param("wordbookId") Long wordbookId,
+            @Param("normalizedText") String normalizedText,
+            @Param("compactText") String compactText
+    );
+
+    WordRow selectLookupWordInEnabledWordbooks(
+            @Param("normalizedText") String normalizedText,
+            @Param("compactText") String compactText
+    );
+
+    LexiflowDictionaryEntryRow selectLookupDictionaryEntry(
             @Param("normalizedText") String normalizedText,
             @Param("compactText") String compactText
     );
