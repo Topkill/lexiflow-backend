@@ -128,7 +128,8 @@ public class ClozeQuizService {
                 quiz,
                 resolveQuizWordbookId(quiz),
                 parseJsonNode(quiz.getCandidateWords()),
-                blanks.stream().map(ClozeBlankResponse::from).toList()
+                blanks.stream().map(ClozeBlankResponse::from).toList(),
+                findQuizAttemptResponse(userId, quizId)
         );
     }
 
@@ -219,8 +220,20 @@ public class ClozeQuizService {
         if (attempt == null) {
             throw new BizException(ErrorCode.CLOZE_QUIZ_NOT_FOUND);
         }
+        return buildAttemptResponse(attempt);
+    }
+
+    private ClozeAttemptResponse findQuizAttemptResponse(Long userId, Long quizId) {
+        ClozeAttempt attempt = clozeAttemptMapper.selectOne(new LambdaQueryWrapper<ClozeAttempt>()
+                .eq(ClozeAttempt::getQuizId, quizId)
+                .eq(ClozeAttempt::getUserId, userId)
+                .last("LIMIT 1"));
+        return attempt == null ? null : buildAttemptResponse(attempt);
+    }
+
+    private ClozeAttemptResponse buildAttemptResponse(ClozeAttempt attempt) {
         List<ClozeAttemptAnswer> answers = clozeAttemptAnswerMapper.selectList(new LambdaQueryWrapper<ClozeAttemptAnswer>()
-                .eq(ClozeAttemptAnswer::getAttemptId, attemptId)
+                .eq(ClozeAttemptAnswer::getAttemptId, attempt.getId())
                 .orderByAsc(ClozeAttemptAnswer::getId));
         Map<Long, ClozeQuizBlank> blankMap = clozeQuizBlankMapper.selectBatchIds(answers.stream().map(ClozeAttemptAnswer::getBlankId).toList())
                 .stream()

@@ -12,20 +12,32 @@ public record ClozeQuizResponse(
         @Schema(description = "标题") String title,
         @Schema(description = "短文内容") String passage,
         @Schema(description = "候选词") JsonNode candidateWords,
-        @Schema(description = "空格列表") List<ClozeBlankResponse> blanks
+        @Schema(description = "空格列表") List<ClozeBlankResponse> blanks,
+        @Schema(description = "已提交作答结果") ClozeAttemptResponse attempt
 ) {
     public static ClozeQuizResponse of(ClozeQuiz quiz, JsonNode candidateWords, List<ClozeBlankResponse> blanks) {
-        return of(quiz, quiz.getWordbookId(), candidateWords, blanks);
+        return of(quiz, quiz.getWordbookId(), candidateWords, blanks, null);
     }
 
     public static ClozeQuizResponse of(ClozeQuiz quiz, Long wordbookId, JsonNode candidateWords, List<ClozeBlankResponse> blanks) {
+        return of(quiz, wordbookId, candidateWords, blanks, null);
+    }
+
+    public static ClozeQuizResponse of(
+            ClozeQuiz quiz,
+            Long wordbookId,
+            JsonNode candidateWords,
+            List<ClozeBlankResponse> blanks,
+            ClozeAttemptResponse attempt
+    ) {
         return new ClozeQuizResponse(
                 String.valueOf(quiz.getId()),
                 wordbookId == null ? null : String.valueOf(wordbookId),
                 quiz.getTitle(),
                 quiz.getPassage(),
                 candidateWords,
-                blanks
+                blanks,
+                attempt
         );
     }
 }
