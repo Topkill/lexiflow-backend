@@ -11,6 +11,7 @@ public record ClozeQuizResponse(
         @Schema(description = "词库 ID") String wordbookId,
         @Schema(description = "标题") String title,
         @Schema(description = "短文内容") String passage,
+        @Schema(description = "短文中文翻译") String passageZh,
         @Schema(description = "候选词") JsonNode candidateWords,
         @Schema(description = "空格列表") List<ClozeBlankResponse> blanks,
         @Schema(description = "已提交作答结果") ClozeAttemptResponse attempt
@@ -35,6 +36,7 @@ public record ClozeQuizResponse(
                 wordbookId == null ? null : String.valueOf(wordbookId),
                 quiz.getTitle(),
                 quiz.getPassage(),
+                quiz.getExplanation(),
                 candidateWords,
                 blanks,
                 attempt

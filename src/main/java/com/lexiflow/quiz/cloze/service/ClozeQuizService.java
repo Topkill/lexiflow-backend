@@ -23,6 +23,7 @@ import com.lexiflow.quiz.cloze.domain.ClozeQuiz;
 import com.lexiflow.quiz.cloze.domain.ClozeQuizBlank;
 import com.lexiflow.quiz.cloze.domain.ClozeSourceType;
 import com.lexiflow.quiz.cloze.dto.ClozeAttemptAnswerResponse;
+import com.lexiflow.quiz.cloze.dto.ClozeDefinitionGroupResponse;
 import com.lexiflow.quiz.cloze.dto.ClozeAttemptResponse;
 import com.lexiflow.quiz.cloze.dto.ClozeBlankResponse;
 import com.lexiflow.quiz.cloze.dto.ClozeQuizResponse;
@@ -78,6 +79,7 @@ public class ClozeQuizService {
 
     private static final String SYSTEM_PROMPT = "你是 LexiFlow 的 AI 英语测验出题助手。请只输出合法 JSON，不要输出 Markdown、解释性前后缀或代码块。题目面向备考大学生，短文自然连贯；后端程序会自动挖空、生成候选词和判分。";
     private static final int COMPLETED_GROUP_MAX_BLANK_COUNT = 10;
+    private static final List<String> DEFINITION_TEXT_FIELDS = List.of("cn", "definition", "definitionZh", "zh", "chinese", "meaning");
     private static final int MAX_GENERATE_ATTEMPTS = 2;
 
     private final AsyncTaskService asyncTaskService;
@@ -247,10 +249,14 @@ public class ClozeQuizService {
 
     private ClozeAttemptAnswerResponse buildAttemptAnswerResponse(ClozeAttemptAnswer answer, ClozeQuizBlank blank, Word word) {
         ClozeExplanationDetail explanation = resolveExplanationDetail(blank, word);
+        List<ClozeDefinitionGroupResponse> definitions = buildDefinitionGroups(word);
+        String usedPos = StringUtils.hasText(explanation.usedPos()) ? explanation.usedPos() : resolvePrimaryPos(word);
         return ClozeAttemptAnswerResponse.of(
                 answer,
                 blank,
+                usedPos,
                 explanation.definitionZh(),
+                definitions,
                 explanation.reasonZh()
         );
     }
@@ -474,7 +480,7 @@ public class ClozeQuizService {
         quiz.setPassage(draft.passage());
         quiz.setCandidateWords(toJson(normalizeCandidateWords(selection.blankWords())));
         quiz.setTargetWordIds(toJson(selection.targetWords().stream().map(word -> String.valueOf(word.getId())).toList()));
-        quiz.setExplanation(content.path("explanation").asText(null));
+        quiz.setExplanation(content.path("passageZh").asText(null));
         quiz.setDeleted(0);
         clozeQuizMapper.insert(quiz);
         for (ClozeQuizBlank blank : draft.blanks()) {
@@ -497,8 +503,8 @@ public class ClozeQuizService {
             context.put("previousValidationError", previousError);
         }
         String sourceJson = toJson(context);
-        String schema = "输出 JSON 对象：title 字符串；passage 字符串，必须是包含 blankWords 原词的完整英文短文，不要提前挖空；explanations 数组，每项包含 word、definitionZh、reasonZh；definitionZh 字符串，reasonZh 字符串，且 reasonZh 必须是中文。";
-        String rules = "严格规则：1. passage 必须逐字包含 blankWords 中每个 word，且每个 word 在 passage 中只出现一次；2. 可以参考 definitionZh、trans、pos、examples 理解词义和用法，但 passage 不得出现中文释义、英文释义、词性解释、because it relates to 或类似泄题模板；3. 不要输出 ___1___ 这类占位符，后端会按实际出现位置自动挖空并生成正确答案；4. backgroundWords 是软约束，尽量自然融入 passage，影响通顺时可以省略；5. 不要输出 candidateWords 或 blanks，候选词和答案由后端程序生成；6. passage 要自然连贯，控制在 100-180 个英文词；7. explanation 相关内容必须面向中文用户，reasonZh 要简短解释为什么这里选这个词。";
+        String schema = "输出 JSON 对象：title 字符串；passage 字符串，必须是包含 blankWords 原词的完整英文短文，不要提前挖空；passageZh 字符串，短文中文翻译；explanations 数组，每项包含 word、usedPos、definitionZh、reasonZh；usedPos 字符串，definitionZh 字符串，reasonZh 字符串，且 reasonZh 必须是中文。";
+        String rules = "严格规则：1. passage 必须逐字包含 blankWords 中每个 word，且每个 word 在 passage 中只出现一次；2. 只能依据后端提供的主词性、主释义、全部词性和全部释义选择最合适的义项，不要自造未给出的词义；3. passage 不得出现中文释义、英文释义、词性解释、because it relates to 或类似泄题模板；4. 不要输出 ___1___ 这类占位符，后端会按实际出现位置自动挖空并生成正确答案；5. backgroundWords 是软约束，尽量自然融入 passage，影响通顺时可以省略；6. 不要输出 candidateWords 或 blanks，候选词和答案由后端程序生成；7. passage 要自然连贯，控制在 100-180 个英文词，并且必须符合英语语法，不能有语法错误；8. passageZh 要翻译整篇短文；9. explanations 里的 usedPos 和 definitionZh 必须对应你在 passage 里真正采用的那个义项，reasonZh 要简短解释为什么这里选这个词；10. 若某个词有多个义项，优先选择最符合上下文且最自然的那个。";
         String userPrompt = schema + "\n" + rules + "\n" + sourceJson;
         return new AiPrompt(SYSTEM_PROMPT, userPrompt, sha256(sourceJson));
     }
@@ -509,16 +515,34 @@ public class ClozeQuizService {
                     Map<String, Object> item = new LinkedHashMap<>();
                     item.put("wordId", String.valueOf(word.getId()));
                     item.put("word", word.getWord());
-                    item.put("pos", safe(word.getPrimaryPos()));
-                    item.put("definitionZh", safe(word.getPrimaryDefinition()));
-                    item.put("trans", safe(word.getTrans()));
-                    item.put("examples", safe(word.getSentences()));
+                    item.put("primaryPos", safe(word.getPrimaryPos()));
+                    item.put("primaryDefinition", safe(word.getPrimaryDefinition()));
+                    item.put("definitions", buildPromptDefinitions(word));
+                    return item;
+                })
+                .toList();
+    }
+
+    private List<Map<String, Object>> buildPromptDefinitions(Word word) {
+        List<DefinitionGroup> groups = parseDefinitionGroups(word);
+        if (groups.isEmpty()) {
+            return List.of();
+        }
+        return groups.stream()
+                .map(group -> {
+                    Map<String, Object> item = new LinkedHashMap<>();
+                    item.put("pos", group.pos());
+                    item.put("definitions", group.definitions());
                     return item;
                 })
                 .toList();
     }
 
     private void validateGeneratedContent(JsonNode content, ClozeWordSelection selection) {
+        String passageZh = content.path("passageZh").asText("");
+        if (!StringUtils.hasText(passageZh) || !containsCjk(passageZh)) {
+            throw new BizException(ErrorCode.AI_CALL_FAILED, "AI 完形填空缺少短文中文翻译");
+        }
         buildProgrammaticClozeDraft(content, selection);
     }
 
@@ -617,13 +641,11 @@ public class ClozeQuizService {
         }
         for (JsonNode explanationNode : explanationsNode) {
             String word = explanationNode.path("word").asText("");
+            String usedPos = explanationNode.path("usedPos").asText("");
             String definitionZh = explanationNode.path("definitionZh").asText("");
             String reasonZh = explanationNode.path("reasonZh").asText("");
-            if (!StringUtils.hasText(reasonZh)) {
-                reasonZh = explanationNode.path("explanation").asText("");
-            }
             if (StringUtils.hasText(word) && StringUtils.hasText(reasonZh)) {
-                explanations.put(normalizeAnswer(word), new ClozeExplanationDetail(definitionZh, reasonZh));
+                explanations.put(normalizeAnswer(word), new ClozeExplanationDetail(usedPos, definitionZh, reasonZh));
             }
         }
         return explanations;
@@ -639,7 +661,7 @@ public class ClozeQuizService {
         ObjectNode root = objectMapper.createObjectNode();
         root.put("title", "LexiFlow 本组单词完形练习");
         root.put("passage", buildFallbackPassage(selection));
-        root.put("explanation", "AI 返回内容暂未通过解析或文本检测，系统已根据本组单词生成可继续练习的兜底题。"
+        root.put("passageZh", "系统已根据本组单词生成可继续练习的兜底题。"
                 + (lastError == null || !StringUtils.hasText(lastError.getCustomMessage()) ? "" : "最近一次原因：" + lastError.getCustomMessage()));
 
         ArrayNode explanations = root.putArray("explanations");
@@ -647,6 +669,7 @@ public class ClozeQuizService {
             ObjectNode explanation = explanations.addObject();
             explanation.put("word", word.getWord());
             ClozeExplanationDetail fallback = fallbackExplanationDetail(word);
+            explanation.put("usedPos", fallback.usedPos());
             explanation.put("definitionZh", fallback.definitionZh());
             explanation.put("reasonZh", fallback.reasonZh());
         }
@@ -677,6 +700,7 @@ public class ClozeQuizService {
 
     private ClozeExplanationDetail fallbackExplanationDetail(Word word) {
         String definitionZh = resolveChineseDefinition(word);
+        String usedPos = resolvePrimaryPos(word);
         String reasonZh;
         if (StringUtils.hasText(definitionZh)) {
             reasonZh = "这里语义上需要这个词，对应中文释义是“" + definitionZh + "”。";
@@ -685,20 +709,22 @@ public class ClozeQuizService {
         } else {
             reasonZh = "这里语义上需要本组目标词。";
         }
-        return new ClozeExplanationDetail(definitionZh, reasonZh);
+        return new ClozeExplanationDetail(usedPos, definitionZh, reasonZh);
     }
 
     private ClozeExplanationDetail resolveExplanationDetail(ClozeQuizBlank blank, Word word) {
         String rawExplanation = blank == null ? "" : safe(blank.getExplanation());
         String definitionZh = resolveChineseDefinition(word);
+        String usedPos = resolvePrimaryPos(word);
         String reasonZh = "";
 
         JsonNode node = readJsonNodeOrNull(rawExplanation);
         if (node != null && node.isObject()) {
+            String parsedUsedPos = node.path("usedPos").asText("");
             String parsedDefinition = node.path("definitionZh").asText("");
             String parsedReason = node.path("reasonZh").asText("");
-            if (!StringUtils.hasText(parsedReason)) {
-                parsedReason = node.path("explanation").asText("");
+            if (StringUtils.hasText(parsedUsedPos)) {
+                usedPos = parsedUsedPos;
             }
             if (StringUtils.hasText(parsedDefinition)) {
                 definitionZh = parsedDefinition;
@@ -706,14 +732,12 @@ public class ClozeQuizService {
             if (StringUtils.hasText(parsedReason)) {
                 reasonZh = parsedReason;
             }
-        } else if (StringUtils.hasText(rawExplanation)) {
-            reasonZh = rawExplanation;
         }
 
         if (!StringUtils.hasText(reasonZh)) {
             reasonZh = fallbackExplanationDetail(word).reasonZh();
         }
-        return new ClozeExplanationDetail(definitionZh, reasonZh);
+        return new ClozeExplanationDetail(usedPos, definitionZh, reasonZh);
     }
 
     private JsonNode readJsonNodeOrNull(String value) {
@@ -739,7 +763,109 @@ public class ClozeQuizService {
         if (StringUtils.hasText(definition)) {
             return definition;
         }
-        return safe(word.getTrans());
+        return parseDefinitionGroups(word).stream()
+                .flatMap(group -> group.definitions().stream())
+                .findFirst()
+                .orElse("");
+    }
+
+    private String resolvePrimaryPos(Word word) {
+        if (word == null) {
+            return "";
+        }
+        String primaryPos = safe(word.getPrimaryPos());
+        if (StringUtils.hasText(primaryPos)) {
+            return primaryPos;
+        }
+        return parseDefinitionGroups(word).stream()
+                .map(DefinitionGroup::pos)
+                .filter(StringUtils::hasText)
+                .findFirst()
+                .orElse("");
+    }
+
+    private List<ClozeDefinitionGroupResponse> buildDefinitionGroups(Word word) {
+        return parseDefinitionGroups(word).stream()
+                .map(group -> new ClozeDefinitionGroupResponse(group.pos(), group.definitions()))
+                .toList();
+    }
+
+    private List<DefinitionGroup> parseDefinitionGroups(Word word) {
+        if (word == null) {
+            return List.of();
+        }
+        List<DefinitionGroup> groups = parseDefinitionGroups(word.getTrans());
+        if (groups.isEmpty() && StringUtils.hasText(word.getPrimaryDefinition())) {
+            return List.of(new DefinitionGroup(safe(word.getPrimaryPos()), List.of(word.getPrimaryDefinition().trim())));
+        }
+        return groups;
+    }
+
+    private List<DefinitionGroup> parseDefinitionGroups(String transJson) {
+        if (!StringUtils.hasText(transJson)) {
+            return List.of();
+        }
+        try {
+            JsonNode root = objectMapper.readTree(transJson);
+            LinkedHashMap<String, LinkedHashSet<String>> grouped = new LinkedHashMap<>();
+            collectDefinitionGroups(root, "", grouped);
+            return grouped.entrySet().stream()
+                    .map(entry -> new DefinitionGroup(entry.getKey(), entry.getValue().stream().toList()))
+                    .filter(group -> !group.definitions().isEmpty())
+                    .toList();
+        } catch (Exception ignored) {
+            return List.of();
+        }
+    }
+
+    private void collectDefinitionGroups(JsonNode node, String inheritedPos, LinkedHashMap<String, LinkedHashSet<String>> grouped) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return;
+        }
+        if (node.isArray()) {
+            node.forEach(item -> collectDefinitionGroups(item, inheritedPos, grouped));
+            return;
+        }
+        if (node.isObject()) {
+            String pos = StringUtils.hasText(node.path("pos").asText("")) ? node.path("pos").asText("").trim() : inheritedPos;
+            List<String> definitions = new ArrayList<>();
+            for (String field : DEFINITION_TEXT_FIELDS) {
+                definitions.addAll(collectDefinitionTexts(node.path(field)));
+            }
+            definitions.addAll(collectDefinitionTexts(node.path("definitions")));
+            definitions.stream()
+                    .map(String::trim)
+                    .filter(StringUtils::hasText)
+                    .forEach(definition -> grouped.computeIfAbsent(pos, ignored -> new LinkedHashSet<>()).add(definition));
+            if (node.has("trans")) {
+                collectDefinitionGroups(node.path("trans"), pos, grouped);
+            }
+            return;
+        }
+        String text = node.asText("").trim();
+        if (StringUtils.hasText(text)) {
+            grouped.computeIfAbsent(inheritedPos, ignored -> new LinkedHashSet<>()).add(text);
+        }
+    }
+
+    private List<String> collectDefinitionTexts(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return List.of();
+        }
+        if (node.isArray()) {
+            List<String> values = new ArrayList<>();
+            node.forEach(item -> values.addAll(collectDefinitionTexts(item)));
+            return values;
+        }
+        if (node.isObject()) {
+            List<String> values = new ArrayList<>();
+            for (String field : DEFINITION_TEXT_FIELDS) {
+                values.addAll(collectDefinitionTexts(node.path(field)));
+            }
+            return values;
+        }
+        String text = node.asText("").trim();
+        return StringUtils.hasText(text) ? List.of(text) : List.of();
     }
 
     private DailyTask getOwnedDailyTask(Long userId, Long dailyTaskId) {
@@ -903,7 +1029,10 @@ public class ClozeQuizService {
     private record WordOccurrence(Word word, int start, int end) {
     }
 
-    private record ClozeExplanationDetail(String definitionZh, String reasonZh) {
+    private record ClozeExplanationDetail(String usedPos, String definitionZh, String reasonZh) {
+    }
+
+    private record DefinitionGroup(String pos, List<String> definitions) {
     }
 
     private record ClozeWordSelection(List<Word> targetWords, List<Word> blankWords) {
