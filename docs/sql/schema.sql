@@ -483,6 +483,29 @@ CREATE TABLE IF NOT EXISTS `cloze_attempt_answer` (
   KEY `idx_cloze_answer_correct` (`attempt_id`, `correct`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='完形填空作答明细表';
 
+CREATE TABLE IF NOT EXISTS `cloze_attempt_ai_review` (
+  `id` INT NOT NULL AUTO_INCREMENT COMMENT '评阅 ID',
+  `attempt_id` INT NOT NULL COMMENT '作答 ID',
+  `quiz_id` INT NOT NULL COMMENT '题目 ID',
+  `user_id` INT NOT NULL COMMENT '用户 ID',
+  `wordbook_id` INT NOT NULL COMMENT '词库 ID',
+  `source_hash` CHAR(64) NOT NULL COMMENT '评阅输入哈希',
+  `content_json` JSON NULL COMMENT 'AI 评阅结构化内容',
+  `status` VARCHAR(32) NOT NULL DEFAULT 'RUNNING' COMMENT 'RUNNING、DONE、FAILED',
+  `model_name` VARCHAR(128) NULL COMMENT '生成模型',
+  `error_message` VARCHAR(1024) NULL COMMENT '错误信息',
+  `started_at` DATETIME(3) NULL COMMENT '开始时间',
+  `finished_at` DATETIME(3) NULL COMMENT '结束时间',
+  `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+  `updated_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+  `deleted` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '逻辑删除',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_cloze_attempt_ai_review_attempt` (`attempt_id`, `deleted`),
+  KEY `idx_cloze_attempt_ai_review_user` (`user_id`, `created_at`),
+  KEY `idx_cloze_attempt_ai_review_quiz` (`quiz_id`),
+  KEY `idx_cloze_attempt_ai_review_wordbook` (`wordbook_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='完形填空 AI 评阅表';
+
 CREATE TABLE IF NOT EXISTS `study_report` (
   `id` INT NOT NULL AUTO_INCREMENT COMMENT '报告 ID',
   `user_id` INT NOT NULL COMMENT '用户 ID',
