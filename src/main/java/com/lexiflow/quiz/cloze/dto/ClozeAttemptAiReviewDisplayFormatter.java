@@ -16,65 +16,86 @@ public final class ClozeAttemptAiReviewDisplayFormatter {
             return "";
         }
         StringBuilder builder = new StringBuilder();
-        appendHeading(builder, "总体评价");
-        appendLine(builder, fallback(content.path("overall").asText("暂无总体评价。")));
+        appendSectionHeading(builder, "总体评价");
+        appendLine(builder, displayText(content.path("overall").asText("暂无总体评价。")));
 
         List<String> mistakeTags = normalizeTexts(content.path("mistakeTags"));
         if (!mistakeTags.isEmpty()) {
             appendBlankLine(builder);
-            appendHeading(builder, "错因标签");
+            appendSectionHeading(builder, "错因标签");
             appendLine(builder, String.join(" / ", wrapInlineCode(mistakeTags)));
         }
 
         List<String> strengths = normalizeTexts(content.path("strengths"));
         if (!strengths.isEmpty()) {
             appendBlankLine(builder);
-            appendHeading(builder, "亮点");
+            appendSectionHeading(builder, "亮点");
             for (String item : strengths) {
-                appendLine(builder, "- " + item);
+                appendLine(builder, "- " + displayText(item));
             }
         }
 
         List<ClozeAttemptAiReviewWeaknessResponse> weaknesses = normalizeWeaknesses(content.path("weaknesses"));
         if (!weaknesses.isEmpty()) {
             appendBlankLine(builder);
-            appendHeading(builder, "需要注意");
+            appendSectionHeading(builder, "需要注意");
             for (ClozeAttemptAiReviewWeaknessResponse weakness : weaknesses) {
                 StringJoiner joiner = new StringJoiner("、");
                 weakness.blankNos().forEach(no -> joiner.add("第" + no + "空"));
-                String prefix = StringUtils.hasText(weakness.tag()) ? "**" + weakness.tag() + "**：" : "";
+                String prefix = StringUtils.hasText(weakness.tag()) ? "**" + displayText(weakness.tag()) + "**：" : "";
                 String blanks = weakness.blankNos().isEmpty() ? "" : "（" + joiner + "）";
-                appendLine(builder, "- " + prefix + weakness.comment() + blanks);
+                appendLine(builder, "- " + prefix + displayText(weakness.comment()) + blanks);
             }
         }
 
         List<String> suggestions = normalizeTexts(content.path("suggestions"));
         if (!suggestions.isEmpty()) {
             appendBlankLine(builder);
-            appendHeading(builder, "学习建议");
+            appendSectionHeading(builder, "学习建议");
             int index = 1;
             for (String item : suggestions) {
-                appendLine(builder, index++ + ". " + item);
+                appendLine(builder, index++ + ". " + displayText(item));
             }
         }
 
         List<ClozeAttemptAiReviewBlankReviewResponse> blankReviews = normalizeBlankReviews(content.path("blankReviews"));
         if (!blankReviews.isEmpty()) {
             appendBlankLine(builder);
-            appendHeading(builder, "逐空提醒");
+            appendSectionHeading(builder, "逐空提醒");
             for (ClozeAttemptAiReviewBlankReviewResponse item : blankReviews) {
                 String title = item.blankNo() == null ? "某一空" : "第" + item.blankNo() + "空";
-                appendLine(builder, "- **" + title + "**：" + item.comment());
+                appendBlankLine(builder);
+                appendSubHeading(builder, title);
+                appendLine(builder, displayText(item.comment()));
                 if (StringUtils.hasText(item.tip())) {
-                    appendLine(builder, "  - 建议：" + item.tip());
+                    appendLine(builder, "- **建议**：" + displayText(item.tip()));
                 }
             }
         }
         return builder.toString().trim();
     }
 
-    private static void appendHeading(StringBuilder builder, String text) {
+    private static void appendSectionHeading(StringBuilder builder, String text) {
         appendLine(builder, "## " + text);
+    }
+
+    private static void appendSubHeading(StringBuilder builder, String text) {
+        appendLine(builder, "### " + text);
+    }
+
+    private static String displayText(String value) {
+        return normalizeMixedTextSpacing(fallback(value));
+    }
+
+    private static String normalizeMixedTextSpacing(String value) {
+        if (!StringUtils.hasText(value)) {
+            return "";
+        }
+        return value
+                .replaceAll("([\\u4e00-\\u9fff])([A-Za-z])", "$1 $2")
+                .replaceAll("([A-Za-z])([\\u4e00-\\u9fff])", "$1 $2")
+                .replaceAll("[ \\t]{2,}", " ")
+                .trim();
     }
 
     private static List<String> wrapInlineCode(List<String> values) {
@@ -83,7 +104,7 @@ public final class ClozeAttemptAiReviewDisplayFormatter {
         }
         List<String> wrapped = new ArrayList<>(values.size());
         for (String value : values) {
-            wrapped.add("`" + value + "`");
+            wrapped.add("`" + displayText(value).replace("`", "") + "`");
         }
         return wrapped;
     }
