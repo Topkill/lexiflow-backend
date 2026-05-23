@@ -10,15 +10,24 @@ public record ClozeAttemptAnswerResponse(
         @Schema(description = "用户答案") String userAnswer,
         @Schema(description = "正确答案") String correctAnswer,
         @Schema(description = "是否正确") Boolean correct,
+        @Schema(description = "正确答案中文释义") String correctDefinitionZh,
+        @Schema(description = "选择原因") String reasonZh,
         @Schema(description = "解析") String explanation
 ) {
-    public static ClozeAttemptAnswerResponse of(ClozeAttemptAnswer answer, ClozeQuizBlank blank) {
+    public static ClozeAttemptAnswerResponse of(
+            ClozeAttemptAnswer answer,
+            ClozeQuizBlank blank,
+            String correctDefinitionZh,
+            String reasonZh
+    ) {
         return new ClozeAttemptAnswerResponse(
                 String.valueOf(answer.getBlankId()),
                 answer.getUserAnswer(),
                 answer.getCorrectAnswer(),
                 answer.getCorrect(),
-                blank.getExplanation()
+                correctDefinitionZh,
+                reasonZh,
+                blank == null ? null : blank.getExplanation()
         );
     }
 }
