@@ -80,10 +80,42 @@ public class WordChoiceQuestionService {
         Collections.shuffle(options, new Random(seed(taskItemId, target.wordId(), "options")));
 
         List<ChoiceQuestionOptionResponse> responses = options.stream()
-                .map(choice -> new ChoiceQuestionOptionResponse(String.valueOf(choice.wordId()), choice.definition()))
+                .map(choice -> toOptionResponse(target, choice))
                 .toList();
         int correctIndex = options.indexOf(target);
         return new ChoiceQuestionResponse(correctIndex, responses);
+    }
+
+    private ChoiceQuestionOptionResponse toOptionResponse(WordChoice target, WordChoice choice) {
+        if (Objects.equals(target.wordId(), choice.wordId())) {
+            return new ChoiceQuestionOptionResponse(String.valueOf(choice.wordId()), choice.primaryPos(), choice.definition());
+        }
+        Definition matchedDefinition = mostRelevantDefinition(target, choice);
+        String displayDefinition = matchedDefinition == null ? choice.definition() : matchedDefinition.text();
+        String displayPos = matchedDefinition == null || !StringUtils.hasText(matchedDefinition.pos())
+                ? choice.primaryPos()
+                : matchedDefinition.pos();
+        return new ChoiceQuestionOptionResponse(String.valueOf(choice.wordId()), displayPos, displayDefinition);
+    }
+
+    private Definition mostRelevantDefinition(WordChoice target, WordChoice choice) {
+        return choice.definitions().stream()
+                .max(Comparator.comparingLong(definition -> definitionRelevance(target, definition)))
+                .orElse(null);
+    }
+
+    private long definitionRelevance(WordChoice target, Definition definition) {
+        long score = 0;
+        for (Definition targetDefinition : target.definitions()) {
+            if (normalizeForCompare(targetDefinition.text()).equals(normalizeForCompare(definition.text()))) {
+                score += Math.max(1, targetDefinition.frequency()) * Math.max(1, definition.frequency()) * EXACT_DEFINITION_WEIGHT;
+            }
+            score += commonScore(targetDefinition.text(), definition.text());
+            if (StringUtils.hasText(targetDefinition.pos()) && targetDefinition.pos().equals(definition.pos())) {
+                score += SAME_POS_WEIGHT;
+            }
+        }
+        return score;
     }
 
     private void addRandomWordDistractors(
@@ -173,7 +205,7 @@ public class WordChoiceQuestionService {
         List<Definition> definitions = parseDefinitions(word.getTrans());
         String fallbackDefinition = normalizeText(word.getPrimaryDefinition());
         if (definitions.isEmpty() && StringUtils.hasText(fallbackDefinition)) {
-            definitions = List.of(new Definition(fallbackDefinition, 0));
+            definitions = List.of(new Definition(normalizeText(word.getPrimaryPos()), fallbackDefinition, 0));
         }
         String definition = StringUtils.hasText(fallbackDefinition)
                 ? fallbackDefinition
@@ -205,25 +237,32 @@ public class WordChoiceQuestionService {
     }
 
     private void collectDefinitions(JsonNode node, int inheritedFrequency, Map<String, Definition> definitions) {
+        collectDefinitions(node, "", inheritedFrequency, definitions);
+    }
+
+    private void collectDefinitions(JsonNode node, String inheritedPos, int inheritedFrequency, Map<String, Definition> definitions) {
         if (node == null || node.isMissingNode() || node.isNull()) {
             return;
         }
         if (node.isArray()) {
-            node.forEach(item -> collectDefinitions(item, inheritedFrequency, definitions));
+            node.forEach(item -> collectDefinitions(item, inheritedPos, inheritedFrequency, definitions));
             return;
         }
         if (node.isObject()) {
             int frequency = readFrequency(node, inheritedFrequency);
+            String pos = StringUtils.hasText(normalizeText(node.path("pos").asText("")))
+                    ? normalizeText(node.path("pos").asText(""))
+                    : inheritedPos;
             for (String field : TEXT_FIELDS) {
-                collectTextValues(node.path(field)).forEach(text -> putDefinition(definitions, text, frequency));
+                collectTextValues(node.path(field)).forEach(text -> putDefinition(definitions, pos, text, frequency));
             }
-            collectTextValues(node.path("definitions")).forEach(text -> putDefinition(definitions, text, frequency));
+            collectTextValues(node.path("definitions")).forEach(text -> putDefinition(definitions, pos, text, frequency));
             if (node.has("trans")) {
-                collectDefinitions(node.path("trans"), frequency, definitions);
+                collectDefinitions(node.path("trans"), pos, frequency, definitions);
             }
             return;
         }
-        putDefinition(definitions, node.asText(), inheritedFrequency);
+        putDefinition(definitions, inheritedPos, node.asText(), inheritedFrequency);
     }
 
     private List<String> collectTextValues(JsonNode node) {
@@ -244,7 +283,7 @@ public class WordChoiceQuestionService {
         return StringUtils.hasText(text) ? List.of(text) : List.of();
     }
 
-    private void putDefinition(Map<String, Definition> definitions, String value, int frequency) {
+    private void putDefinition(Map<String, Definition> definitions, String pos, String value, int frequency) {
         String text = normalizeText(value);
         if (!StringUtils.hasText(text)) {
             return;
@@ -252,7 +291,7 @@ public class WordChoiceQuestionService {
         String key = normalizeForCompare(text);
         Definition existing = definitions.get(key);
         if (existing == null || frequency > existing.frequency()) {
-            definitions.put(key, new Definition(text, frequency));
+            definitions.put(key, new Definition(normalizeText(pos), text, frequency));
         }
     }
 
@@ -360,7 +399,7 @@ public class WordChoiceQuestionService {
         return seed;
     }
 
-    private record Definition(String text, int frequency) {
+    private record Definition(String pos, String text, int frequency) {
     }
 
     private record WordChoice(

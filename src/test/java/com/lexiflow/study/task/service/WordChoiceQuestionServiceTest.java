@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.lexiflow.study.task.dto.ChoiceQuestionOptionResponse;
 import com.lexiflow.study.task.dto.ChoiceQuestionResponse;
 import com.lexiflow.wordbook.domain.Word;
 import com.lexiflow.wordbook.mapper.WordMapper;
@@ -46,6 +47,7 @@ class WordChoiceQuestionServiceTest {
         List<String> optionWordIds = question.options().stream().map(option -> option.wordId()).toList();
         assertThat(optionWordIds).contains("1");
         assertThat(optionWordIds).doesNotContain("5", "6");
+        assertThat(question.options().stream().map(option -> option.pos()).toList()).doesNotContainNull();
         assertThat(question.options().get(question.correctIndex()).wordId()).isEqualTo("1");
     }
 
@@ -97,6 +99,26 @@ class WordChoiceQuestionServiceTest {
 
         assertThat(second.options()).isEqualTo(first.options());
         assertThat(second.correctIndex()).isEqualTo(first.correctIndex());
+    }
+
+    @Test
+    void buildQuestionShouldUseMostRelevantDefinitionForDistractors() {
+        Word target = word(1, "conduct", "n.", "行为；实施",
+                "[{\"pos\":\"n.\",\"cn\":\"行为；实施\",\"frequency\":4},{\"pos\":\"v.\",\"cn\":\"引导；指挥\",\"frequency\":2}]",
+                related("conductive"));
+        Word distractor = word(2, "contract", "n.", "合同；收缩",
+                "[{\"pos\":\"n.\",\"cn\":\"合同；收缩\",\"frequency\":3},{\"pos\":\"v.\",\"cn\":\"行为；实施\",\"frequency\":1}]",
+                null);
+        when(wordMapper.selectChoiceQuestionCandidates(100L)).thenReturn(List.of(target, distractor));
+
+        ChoiceQuestionResponse question = service.buildQuestion(200L, 100L, target);
+        ChoiceQuestionOptionResponse distractorOption = question.options().stream()
+                .filter(option -> "2".equals(option.wordId()))
+                .findFirst()
+                .orElseThrow();
+
+        assertThat(distractorOption.pos()).isEqualTo("v.");
+        assertThat(distractorOption.definition()).isEqualTo("行为；实施");
     }
 
     private Word word(long id, String text, String pos, String definition, String trans, String relWords) {
