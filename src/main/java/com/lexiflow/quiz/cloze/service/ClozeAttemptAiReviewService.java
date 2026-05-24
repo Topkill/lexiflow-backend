@@ -216,7 +216,7 @@ public class ClozeAttemptAiReviewService {
 
     private String buildUserPrompt(String sourceJson) {
         String schema = "输出 JSON 对象：overall 字符串；mistakeTags 字符串数组；strengths 字符串数组；weaknesses 数组，每项包含 tag、blankNos、comment；suggestions 字符串数组；blankReviews 数组，每项包含 blankNo、comment、tip。全部用中文，不要输出 Markdown 代码块。";
-        String rules = "要求：1. overall 先给本次整体评价，简洁但具体；2. mistakeTags 只保留 2-4 个最主要的错因标签；3. strengths 写 2-3 条亮点；4. weaknesses 只总结影响较大的问题，并标出相关空格序号；5. suggestions 写 2-4 条可执行的学习建议；6. blankReviews 只写答错的空，分别说明错在哪里和下次怎么想；7. 只能依据后端提供的原英文短文、作答结果、本题采用词性、本题采用中文释义、后端已有中文选择原因，以及错题的全部词性释义来分析，不要编造题目外信息；8. 不要提用户 ID、题目标题或中文翻译；9. 语言自然，适合备考大学生。";
+        String rules = "要求：1. overall 先给本次整体评价，简洁但具体；2. mistakeTags 只保留 2-4 个最主要的错因标签；3. strengths 写 2-3 条亮点；4. weaknesses 只总结影响较大的问题，并标出相关空格序号；5. suggestions 写 2-4 条可执行的学习建议；6. blankReviews 只写答错的空，分别说明错在哪里和下次怎么想；7. 只能依据后端提供的原英文短文、作答结果、本题采用词性、本题采用中文释义、后端已有中文选择原因，以及错题的全部词性释义来分析，不要编造题目外信息；8. 不要提用户 ID、题目标题或中文翻译；9. 关键结论可以用 **加粗**；10. 允许使用 Markdown 语法适当排版，关键结论和英文词可以组合写成 **`resume`** 这种嵌套强调；11. 英文词可以用 `resume` 这种反引号包裹；12. 语言自然，适合备考大学生。";
         return schema + "\n" + rules + "\n" + sourceJson;
     }
 
