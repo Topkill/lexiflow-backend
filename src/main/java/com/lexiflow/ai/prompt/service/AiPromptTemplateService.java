@@ -140,6 +140,19 @@ public class AiPromptTemplateService {
     }
 
     @Transactional
+    public void deleteTemplate(Long templateId) {
+        AiPromptTemplate template = getTemplate(templateId);
+        AiPromptFeatureBinding binding = bindingMapper.selectOne(new LambdaQueryWrapper<AiPromptFeatureBinding>()
+                .eq(AiPromptFeatureBinding::getTemplateId, templateId)
+                .last("LIMIT 1"));
+        if (binding != null) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "当前使用中的提示词模板不能删除，请先恢复默认或切换到其他模板");
+        }
+        templateMapper.deleteById(templateId);
+        evict(template.getFeatureType());
+    }
+
+    @Transactional
     public void bindFeature(Long adminUserId, AiPromptFeatureType featureType, AiPromptFeatureBindingRequest request) {
         Long templateId = request == null ? null : request.templateId();
         if (templateId != null) {

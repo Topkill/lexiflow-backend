@@ -5,6 +5,7 @@ import com.lexiflow.ai.content.domain.AiCallStatus;
 import com.lexiflow.ai.content.domain.AiContentType;
 import com.lexiflow.ai.content.mapper.AiCallLogMapper;
 import com.lexiflow.ai.core.client.AiClientException;
+import com.lexiflow.ai.core.client.AiStreamDeltaHandler;
 import com.lexiflow.ai.core.client.OpenAiCompatibleClient;
 import com.lexiflow.ai.core.dto.AiChatCompletionResult;
 import com.lexiflow.ai.core.dto.AiPrompt;
@@ -29,6 +30,20 @@ public class AiGatewayService {
         long startNanos = System.nanoTime();
         try {
             AiChatCompletionResult result = openAiCompatibleClient.chatJson(config, prompt.systemPrompt(), prompt.userPrompt());
+            saveLog(userId, contentType, prompt, config, result, latencyMs(startNanos), null, null);
+            return result;
+        } catch (AiClientException ex) {
+            saveLog(userId, contentType, prompt, config, null, latencyMs(startNanos), ex.getErrorCode(), ex.getMessage());
+            throw new BizException(ErrorCode.AI_CALL_FAILED, "AI 调用失败，请稍后重试");
+        }
+    }
+
+    public AiChatCompletionResult generateJsonStream(Long userId, AiContentType contentType, AiPrompt prompt, AiStreamDeltaHandler deltaHandler) {
+        AiRuntimeConfig config = aiConfigResolver.resolve(userId);
+        aiQuotaService.checkQuota(userId, config);
+        long startNanos = System.nanoTime();
+        try {
+            AiChatCompletionResult result = openAiCompatibleClient.chatJsonStream(config, prompt.systemPrompt(), prompt.userPrompt(), deltaHandler);
             saveLog(userId, contentType, prompt, config, result, latencyMs(startNanos), null, null);
             return result;
         } catch (AiClientException ex) {

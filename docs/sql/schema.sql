@@ -416,6 +416,7 @@ CREATE TABLE IF NOT EXISTS `ai_call_log` (
   `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
   PRIMARY KEY (`id`),
   KEY `idx_ai_call_user_time` (`user_id`, `created_at`),
+  KEY `idx_ai_call_quota` (`user_id`, `config_scope`, `created_at`),
   KEY `idx_ai_call_type_time` (`content_type`, `created_at`),
   KEY `idx_ai_call_status` (`status`),
   KEY `idx_ai_call_model` (`model_name`),

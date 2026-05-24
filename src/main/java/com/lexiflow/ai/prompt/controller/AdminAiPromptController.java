@@ -15,6 +15,7 @@ import jakarta.validation.constraints.Positive;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -63,6 +64,13 @@ public class AdminAiPromptController {
     @PostMapping("/prompt-templates/builtin/{featureType}/copy")
     public ApiResponse<AiPromptTemplateResponse> copyBuiltinPromptTemplate(@PathVariable AiPromptFeatureType featureType) {
         return ApiResponse.success(aiPromptTemplateService.copyBuiltin(AuthContext.currentUserId(), featureType));
+    }
+
+    @Operation(summary = "删除自定义 AI 提示词模板")
+    @DeleteMapping("/prompt-templates/{templateId}")
+    public ApiResponse<Void> deletePromptTemplate(@PathVariable @Positive Long templateId) {
+        aiPromptTemplateService.deleteTemplate(templateId);
+        return ApiResponse.success();
     }
 
     @Operation(summary = "设置 AI 功能当前提示词模板")

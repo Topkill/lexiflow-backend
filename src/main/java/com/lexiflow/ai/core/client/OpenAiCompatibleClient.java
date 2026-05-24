@@ -4,7 +4,14 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lexiflow.ai.core.dto.AiChatCompletionResult;
 import com.lexiflow.ai.core.dto.AiRuntimeConfig;
+import java.io.BufferedReader;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.math.BigDecimal;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.LinkedHashMap;
@@ -23,6 +30,7 @@ public class OpenAiCompatibleClient {
     private static final Duration READ_TIMEOUT = Duration.ofSeconds(60);
 
     private final RestClient restClient;
+    private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
 
     public OpenAiCompatibleClient(ObjectMapper objectMapper) {
@@ -30,11 +38,14 @@ public class OpenAiCompatibleClient {
         requestFactory.setConnectTimeout(CONNECT_TIMEOUT);
         requestFactory.setReadTimeout(READ_TIMEOUT);
         this.restClient = RestClient.builder().requestFactory(requestFactory).build();
+        this.httpClient = HttpClient.newBuilder()
+                .connectTimeout(CONNECT_TIMEOUT)
+                .build();
         this.objectMapper = objectMapper;
     }
 
     public AiChatCompletionResult chatJson(AiRuntimeConfig config, String systemPrompt, String userPrompt) {
-        Map<String, Object> request = buildRequest(config, systemPrompt, userPrompt);
+        Map<String, Object> request = buildRequest(config, systemPrompt, userPrompt, config.useStream());
         try {
             byte[] responseBytes = restClient.post()
                     .uri(chatCompletionsUrl(config.apiBaseUrl()))
@@ -55,12 +66,37 @@ public class OpenAiCompatibleClient {
         }
     }
 
-    private Map<String, Object> buildRequest(AiRuntimeConfig config, String systemPrompt, String userPrompt) {
+    public AiChatCompletionResult chatJsonStream(AiRuntimeConfig config, String systemPrompt, String userPrompt, AiStreamDeltaHandler deltaHandler) {
+        Map<String, Object> request = buildRequest(config, systemPrompt, userPrompt, true);
+        try {
+            String requestBody = objectMapper.writeValueAsString(request);
+            HttpRequest httpRequest = HttpRequest.newBuilder()
+                    .uri(URI.create(chatCompletionsUrl(config.apiBaseUrl())))
+                    .timeout(READ_TIMEOUT.plus(CONNECT_TIMEOUT))
+                    .header("Content-Type", MediaType.APPLICATION_JSON_VALUE)
+                    .header("Accept", MediaType.TEXT_EVENT_STREAM_VALUE)
+                    .header("Authorization", "Bearer " + config.apiKey())
+                    .POST(HttpRequest.BodyPublishers.ofString(requestBody, StandardCharsets.UTF_8))
+                    .build();
+            HttpResponse<InputStream> response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofInputStream());
+            if (response.statusCode() >= 400) {
+                String errorBody = new String(response.body().readAllBytes(), StandardCharsets.UTF_8);
+                throw new AiClientException(String.valueOf(response.statusCode()), abbreviate(errorBody));
+            }
+            return parseStreamingResponse(response.body(), deltaHandler);
+        } catch (AiClientException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            throw new AiClientException("CLIENT_ERROR", ex.getMessage(), ex);
+        }
+    }
+
+    private Map<String, Object> buildRequest(AiRuntimeConfig config, String systemPrompt, String userPrompt, boolean stream) {
         Map<String, Object> request = new LinkedHashMap<>();
         request.put("model", config.modelName());
         request.put("temperature", normalizeTemperature(config.temperature()));
         request.put("response_format", Map.of("type", "json_object"));
-        request.put("stream", config.useStream());
+        request.put("stream", stream);
         request.put("messages", List.of(
                 Map.of("role", "system", "content", systemPrompt),
                 Map.of("role", "user", "content", userPrompt)
@@ -137,6 +173,72 @@ public class OpenAiCompatibleClient {
             } catch (Exception ex) {
                 throw new AiClientException("STREAM_PARSE_ERROR", "AI 流式响应解析失败", ex);
             }
+        }
+        if (content.isEmpty()) {
+            throw new AiClientException("EMPTY_CONTENT", "AI 流式响应内容为空");
+        }
+        if (totalTokens == 0) {
+            totalTokens = promptTokens + completionTokens;
+        }
+        return new AiChatCompletionResult(content.toString(), promptTokens, completionTokens, totalTokens);
+    }
+
+    private AiChatCompletionResult parseStreamingResponse(InputStream inputStream, AiStreamDeltaHandler deltaHandler) {
+        StringBuilder content = new StringBuilder();
+        int promptTokens = 0;
+        int completionTokens = 0;
+        int totalTokens = 0;
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream, StandardCharsets.UTF_8))) {
+            String firstLine = null;
+            String line;
+            while ((line = reader.readLine()) != null) {
+                String trimmed = line.trim();
+                if (trimmed.isEmpty() || trimmed.startsWith(":") || trimmed.startsWith("event:")) {
+                    continue;
+                }
+                if (firstLine == null) {
+                    firstLine = trimmed;
+                    if (firstLine.stripLeading().startsWith("{") && !firstLine.startsWith("data:")) {
+                        StringBuilder body = new StringBuilder(firstLine);
+                        while ((line = reader.readLine()) != null) {
+                            body.append('\n').append(line);
+                        }
+                        AiChatCompletionResult result = parseResponse(body.toString());
+                        deltaHandler.onDelta(result.content());
+                        return result;
+                    }
+                }
+                String data = trimmed.startsWith("data:") ? trimmed.substring(5).trim() : trimmed;
+                if (data.isEmpty() || "[DONE]".equals(data)) {
+                    continue;
+                }
+                JsonNode root = objectMapper.readTree(data);
+                JsonNode usage = root.path("usage");
+                if (usage.isObject()) {
+                    promptTokens = usage.path("prompt_tokens").asInt(promptTokens);
+                    completionTokens = usage.path("completion_tokens").asInt(completionTokens);
+                    totalTokens = usage.path("total_tokens").asInt(totalTokens);
+                }
+                JsonNode choices = root.path("choices");
+                if (!choices.isArray()) {
+                    continue;
+                }
+                for (JsonNode choice : choices) {
+                    JsonNode delta = choice.path("delta");
+                    String deltaContent = delta.path("content").asText("");
+                    if (deltaContent.isEmpty()) {
+                        deltaContent = choice.path("message").path("content").asText("");
+                    }
+                    if (!deltaContent.isEmpty()) {
+                        content.append(deltaContent);
+                        deltaHandler.onDelta(deltaContent);
+                    }
+                }
+            }
+        } catch (AiClientException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            throw new AiClientException("STREAM_PARSE_ERROR", "AI 流式响应解析失败", ex);
         }
         if (content.isEmpty()) {
             throw new AiClientException("EMPTY_CONTENT", "AI 流式响应内容为空");

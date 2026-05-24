@@ -22,6 +22,8 @@ import com.lexiflow.wordbook.domain.Word;
 import com.lexiflow.wordbook.domain.Wordbook;
 import com.lexiflow.wordbook.mapper.WordMapper;
 import com.lexiflow.wordbook.service.WordbookService;
+import java.io.OutputStream;
+import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.LocalDateTime;
@@ -58,6 +60,113 @@ public class WordAiContentService {
             throw new BizException(ErrorCode.BAD_REQUEST, "问题不能为空");
         }
         return generateWordContent(userId, wordbookId, wordId, AiContentType.WORD_QA, question.trim(), regenerate);
+    }
+
+    public void streamWordQuestion(Long userId, Long wordbookId, Long wordId, String question, boolean regenerate, OutputStream outputStream) {
+        if (question == null || question.isBlank()) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "问题不能为空");
+        }
+        OutputStreamWriter writer = new OutputStreamWriter(outputStream, StandardCharsets.UTF_8);
+        try {
+            Wordbook wordbook = wordbookService.getEnabledWordbook(wordbookId);
+            Word word = getEnabledWord(wordbookId, wordId);
+            UserSettings settings = userService.getOrCreateSettings(userId);
+            String sourceJson = buildSourceJson(AiContentType.WORD_QA, wordbook, word, settings, question.trim());
+            ResolvedAiPromptTemplate promptTemplate = aiPromptTemplateService.resolve(AiPromptFeatureType.WORD_QA);
+            String sourceHash = sha256(sourceJson + "\n#prompt:" + promptTemplate.cacheFingerprint());
+            String cacheKey = buildCacheKey(AiContentType.WORD_QA, wordbookId, wordId, sourceHash);
+
+            if (!regenerate) {
+                AiContentCache cache = findUsableCache(AiContentType.WORD_QA, cacheKey);
+                if (cache != null) {
+                    cache.setHitCount((cache.getHitCount() == null ? 0 : cache.getHitCount()) + 1);
+                    aiContentCacheMapper.updateById(cache);
+                    JsonNode content = parseJson(cache.getContentJson());
+                    writeEvent(writer, "status", Map.of("status", "CACHE_HIT", "message", "已命中缓存"));
+                    streamCachedAnswer(writer, content);
+                    writeEvent(writer, "done", WordAiContentResponse.of(true, AiContentType.WORD_QA, wordId, wordbookId, content));
+                    return;
+                }
+            }
+
+            writeEvent(writer, "status", Map.of("status", "RUNNING", "message", "正在生成 AI 回答"));
+            AnswerJsonStreamExtractor answerExtractor = new AnswerJsonStreamExtractor();
+            AiPrompt prompt = buildPrompt(AiContentType.WORD_QA, sourceJson, sourceHash, promptTemplate);
+            prompt = new AiPrompt(
+                    prompt.systemPrompt(),
+                    prompt.userPrompt() + "\n流式输出约束：JSON 对象必须先输出 answer 字段，answer 之后再输出 keyPoints、relatedWords、followUps。",
+                    prompt.requestHash(),
+                    prompt.promptFeatureType(),
+                    prompt.promptTemplateId(),
+                    prompt.promptTemplateName()
+            );
+            AiChatCompletionResult result = generateQuestionStreamWithFallback(userId, prompt, writer, answerExtractor);
+            JsonNode content = parseJson(result.content());
+            if (!answerExtractor.hasEmitted()) {
+                String answer = content.path("answer").asText("");
+                if (!answer.isBlank()) {
+                    writeEvent(writer, "chunk", Map.of("text", answer));
+                }
+            }
+            upsertCache(AiContentType.WORD_QA, cacheKey, sourceHash, wordId, wordbookId, content);
+            writeEvent(writer, "done", WordAiContentResponse.of(false, AiContentType.WORD_QA, wordId, wordbookId, content));
+        } catch (Exception ex) {
+            try {
+                writeEvent(writer, "error", buildStreamErrorPayload(ex));
+            } catch (Exception ignored) {
+                // 客户端可能已经断开，无法继续写入错误事件。
+            }
+        } finally {
+            try {
+                writer.close();
+            } catch (Exception ignored) {
+                // 客户端可能已经断开。
+            }
+        }
+    }
+
+    private AiChatCompletionResult generateQuestionStreamWithFallback(
+            Long userId,
+            AiPrompt prompt,
+            OutputStreamWriter writer,
+            AnswerJsonStreamExtractor answerExtractor
+    ) throws Exception {
+        try {
+            return aiGatewayService.generateJsonStream(userId, AiContentType.WORD_QA, prompt, delta -> {
+                String answerDelta = answerExtractor.append(delta);
+                if (!answerDelta.isEmpty()) {
+                    writeEvent(writer, "chunk", Map.of("text", answerDelta));
+                }
+            });
+        } catch (BizException ex) {
+            if (ex.getErrorCode() != ErrorCode.AI_CALL_FAILED) {
+                throw ex;
+            }
+            AiChatCompletionResult fallback = aiGatewayService.generateJson(userId, AiContentType.WORD_QA, prompt);
+            String answer = parseJson(fallback.content()).path("answer").asText("");
+            if (!answer.isBlank()) {
+                writeEvent(writer, "status", Map.of("status", "FALLBACK", "message", "流式响应为空，已切换为普通生成"));
+                streamText(writer, answer);
+            }
+            return fallback;
+        }
+    }
+
+    private Map<String, Object> buildStreamErrorPayload(Exception ex) {
+        if (ex instanceof BizException bizException) {
+            ErrorCode errorCode = bizException.getErrorCode();
+            String message = errorCode == ErrorCode.AI_PUBLIC_QUOTA_EXHAUSTED
+                    ? "今日公共 AI 调用次数已用完"
+                    : bizException.getCustomMessage();
+            return Map.of(
+                    "code", errorCode.getCode(),
+                    "message", message
+            );
+        }
+        return Map.of(
+                "code", ErrorCode.AI_CALL_FAILED.getCode(),
+                "message", "AI 问答暂时不可用，请稍后重试"
+        );
     }
 
     private WordAiContentResponse generateWordContent(Long userId, Long wordbookId, Long wordId, AiContentType contentType, String question, boolean regenerate) {
@@ -204,6 +313,26 @@ public class WordAiContentService {
                 + ":" + sourceHash.substring(0, 24);
     }
 
+    private void streamCachedAnswer(OutputStreamWriter writer, JsonNode content) throws Exception {
+        String answer = content.path("answer").asText("");
+        streamText(writer, answer);
+    }
+
+    private void streamText(OutputStreamWriter writer, String answer) throws Exception {
+        int index = 0;
+        while (index < answer.length()) {
+            int next = Math.min(index + 12, answer.length());
+            writeEvent(writer, "chunk", Map.of("text", answer.substring(index, next)));
+            index = next;
+        }
+    }
+
+    private void writeEvent(OutputStreamWriter writer, String event, Object data) throws Exception {
+        writer.write("event: " + event + "\n");
+        writer.write("data: " + toJson(data) + "\n\n");
+        writer.flush();
+    }
+
     private JsonNode parseJson(String contentJson) {
         return AiJsonUtils.parseObject(objectMapper, contentJson);
     }
@@ -227,5 +356,127 @@ public class WordAiContentService {
 
     private String safe(String value) {
         return value == null ? "" : value;
+    }
+
+    private static final class AnswerJsonStreamExtractor {
+
+        private static final String ANSWER_KEY = "\"answer\"";
+
+        private final StringBuilder buffer = new StringBuilder();
+        private int state = 0;
+        private int index = 0;
+        private boolean emitted = false;
+
+        String append(String delta) {
+            if (delta == null || delta.isEmpty() || state == 4) {
+                return "";
+            }
+            buffer.append(delta);
+            StringBuilder output = new StringBuilder();
+            while (index < buffer.length() && state != 4) {
+                switch (state) {
+                    case 0 -> findAnswerKey();
+                    case 1 -> seekColon();
+                    case 2 -> seekOpeningQuote();
+                    case 3 -> readAnswerString(output);
+                    default -> state = 4;
+                }
+                if (state == 0 || index >= buffer.length()) {
+                    break;
+                }
+            }
+            if (!output.isEmpty()) {
+                emitted = true;
+            }
+            return output.toString();
+        }
+
+        boolean hasEmitted() {
+            return emitted;
+        }
+
+        private void findAnswerKey() {
+            int found = buffer.indexOf(ANSWER_KEY, Math.max(0, index - ANSWER_KEY.length()));
+            if (found < 0) {
+                index = Math.max(0, buffer.length() - ANSWER_KEY.length());
+                return;
+            }
+            index = found + ANSWER_KEY.length();
+            state = 1;
+        }
+
+        private void seekColon() {
+            while (index < buffer.length()) {
+                char ch = buffer.charAt(index++);
+                if (Character.isWhitespace(ch)) {
+                    continue;
+                }
+                if (ch == ':') {
+                    state = 2;
+                    return;
+                }
+            }
+        }
+
+        private void seekOpeningQuote() {
+            while (index < buffer.length()) {
+                char ch = buffer.charAt(index++);
+                if (Character.isWhitespace(ch)) {
+                    continue;
+                }
+                if (ch == '"') {
+                    state = 3;
+                    return;
+                }
+            }
+        }
+
+        private void readAnswerString(StringBuilder output) {
+            while (index < buffer.length()) {
+                char ch = buffer.charAt(index++);
+                if (ch == '"') {
+                    state = 4;
+                    return;
+                }
+                if (ch == '\\') {
+                    if (index >= buffer.length()) {
+                        index--;
+                        return;
+                    }
+                    char escaped = buffer.charAt(index++);
+                    if (escaped == 'u') {
+                        if (index + 4 > buffer.length()) {
+                            index -= 2;
+                            return;
+                        }
+                        String hex = buffer.substring(index, index + 4);
+                        index += 4;
+                        try {
+                            output.append((char) Integer.parseInt(hex, 16));
+                        } catch (NumberFormatException ex) {
+                            output.append("\\u").append(hex);
+                        }
+                    } else {
+                        output.append(decodeEscape(escaped));
+                    }
+                } else {
+                    output.append(ch);
+                }
+            }
+        }
+
+        private char decodeEscape(char escaped) {
+            return switch (escaped) {
+                case '"' -> '"';
+                case '\\' -> '\\';
+                case '/' -> '/';
+                case 'b' -> '\b';
+                case 'f' -> '\f';
+                case 'n' -> '\n';
+                case 'r' -> '\r';
+                case 't' -> '\t';
+                default -> escaped;
+            };
+        }
     }
 }
