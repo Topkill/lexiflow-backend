@@ -105,12 +105,13 @@ public class ClozeQuizService {
         String requestJson = toJson(Map.of(
                 "dailyTaskId", String.valueOf(request.dailyTaskId()),
                 "sourceType", sourceType.name(),
-                "targetWordCount", request.safeTargetWordCount()
+                "targetWordCount", request.safeTargetWordCount(),
+                "regenerate", request.safeRegenerate()
         ));
         AsyncTask task = asyncTaskService.createTask(userId, AsyncTaskType.AI_CLOZE, requestJson);
         try {
             asyncTaskService.markRunning(task.getId(), "正在生成完形填空", 20);
-            ClozeQuiz quiz = generateQuiz(userId, dailyTask, wordbookId, task.getId(), sourceType, request.safeTargetWordCount());
+            ClozeQuiz quiz = generateQuiz(userId, dailyTask, wordbookId, task.getId(), sourceType, request.safeTargetWordCount(), request.safeRegenerate());
             asyncTaskService.markSuccess(task.getId(), quiz.getId(), "完形填空生成完成");
             return CreateClozeTaskResponse.from(asyncTaskService.getOwnedTaskEntity(userId, task.getId()));
         } catch (BizException ex) {
@@ -275,15 +276,17 @@ public class ClozeQuizService {
     }
 
     @Transactional
-    protected ClozeQuiz generateQuiz(Long userId, DailyTask dailyTask, Long wordbookId, Long asyncTaskId, ClozeSourceType sourceType, int targetWordCount) {
+    protected ClozeQuiz generateQuiz(Long userId, DailyTask dailyTask, Long wordbookId, Long asyncTaskId, ClozeSourceType sourceType, int targetWordCount, boolean regenerate) {
         ClozeWordSelection selection = selectClozeWords(userId, dailyTask, wordbookId, sourceType, targetWordCount);
         if (selection.targetWords().isEmpty() || selection.blankWords().isEmpty()) {
             throw new BizException(ErrorCode.BAD_REQUEST, "今日任务暂无可用于生成完形填空的目标词");
         }
         String sourceHash = buildClozeSourceHash(userId, dailyTask, wordbookId, sourceType, selection);
-        ClozeQuiz cachedQuiz = tryCreateQuizFromCache(userId, dailyTask, wordbookId, asyncTaskId, sourceType, selection, sourceHash);
-        if (cachedQuiz != null) {
-            return cachedQuiz;
+        if (!regenerate) {
+            ClozeQuiz cachedQuiz = tryCreateQuizFromCache(userId, dailyTask, wordbookId, asyncTaskId, sourceType, selection, sourceHash);
+            if (cachedQuiz != null) {
+                return cachedQuiz;
+            }
         }
 
         BizException lastValidationError = null;
