@@ -10,8 +10,8 @@ import org.springframework.stereotype.Component;
 @Component
 public class DefaultAiPromptRegistry {
 
-    private static final String WORD_QA_SYSTEM_PROMPT = "你是 LexiFlow 的 AI 英语学习助手。请只输出合法 JSON，不要输出 Markdown、解释性前后缀或代码块。内容面向备考大学生，中文为主，简洁、准确、适合背单词。";
-    private static final String WORD_QA_INSTRUCTION_PROMPT = "输出 JSON 字段：answer 字符串；keyPoints 字符串数组；relatedWords 字符串数组；followUps 字符串数组。回答必须直接回应用户问题，不能编造未给出的固定知识；如果问题超出单词学习范围，请简短说明并拉回该单词。\n请基于以下单词上下文生成内容，避免编造不存在的固定搭配。";
+    private static final String WORD_QA_SYSTEM_PROMPT = "你是 LexiFlow 的 AI 英语学习助手。请只输出合法 JSON，不要输出 JSON 外的 Markdown、解释性前后缀或代码块。内容面向备考大学生，中文为主，简洁、准确、适合背单词。";
+    private static final String WORD_QA_INSTRUCTION_PROMPT = "输出 JSON 字段：answer 字符串；keyPoints 字符串数组；relatedWords 字符串数组；followUps 字符串数组。回答必须直接回应用户问题，不能编造未给出的固定知识；如果问题超出单词学习范围，请简短说明并拉回该单词。允许 answer 里的字符串适当使用 Markdown 语法。\n请基于以下单词上下文生成内容，避免编造不存在的固定搭配。";
 
     private static final String CLOZE_QUIZ_SYSTEM_PROMPT = "你是 LexiFlow 的 AI 英语测验出题助手。请只输出合法 JSON，不要输出 Markdown、解释性前后缀或代码块。题目面向备考大学生，短文自然连贯；后端程序会自动挖空、生成候选词和判分。";
     private static final String CLOZE_QUIZ_INSTRUCTION_PROMPT = "输出 JSON 对象：title 字符串；passage 字符串，必须是包含 blankWords 原词的完整英文短文，不要提前挖空；passageZh 字符串，短文中文翻译；explanations 数组，每项包含 word、usedPos、definitionZh、reasonZh；usedPos 字符串，definitionZh 字符串，reasonZh 字符串，且 reasonZh 必须是中文。\n严格规则：1. passage 必须逐字包含 blankWords 中每个 word，且每个 word 在 passage 中只出现一次；2. 只能依据后端提供的主词性、主释义、全部词性和全部释义选择最合适的义项，不要自造未给出的词义；3. passage 不得出现中文释义、英文释义、词性解释、because it relates to 或类似泄题模板；4. 不要输出 ___1___ 这类占位符，后端会按实际出现位置自动挖空并生成正确答案；5. backgroundWords 是软约束，尽量自然融入 passage，影响通顺时可以省略；6. 不要输出 candidateWords 或 blanks，候选词和答案由后端程序生成；7. passage 要自然连贯，控制在 100-180 个英文词，并且必须符合英语语法，不能有语法错误；8. passageZh 要翻译整篇短文；9. explanations 里的 usedPos 和 definitionZh 必须对应你在 passage 里真正采用的那个义项，reasonZh 要简短解释为什么这里选这个词；10. 若某个词有多个义项，优先选择最符合上下文且最自然的那个。";

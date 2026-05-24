@@ -124,9 +124,14 @@ public class ClozeAttemptAiReviewService {
                     streamDisplayText(writer, response.displayText());
                     writeEvent(writer, "done", response);
                 } catch (BizException ex) {
-                    String message = StringUtils.hasText(ex.getCustomMessage()) ? ex.getCustomMessage() : "AI 评阅生成失败，请稍后重试";
+                    String message = ex.getErrorCode() == ErrorCode.AI_PUBLIC_QUOTA_EXHAUSTED
+                            ? "今日公共 AI 调用次数已用完"
+                            : StringUtils.hasText(ex.getCustomMessage()) ? ex.getCustomMessage() : "AI 评阅生成失败，请稍后重试";
                     markFailed(review, message);
-                    writeEvent(writer, "error", Map.of("message", message));
+                    writeEvent(writer, "error", Map.of(
+                            "code", ex.getErrorCode().getCode(),
+                            "message", message
+                    ));
                 } catch (Exception ex) {
                     markFailed(review, ex.getMessage());
                     writeEvent(writer, "error", Map.of("message", "AI 评阅生成失败，请稍后重试"));
