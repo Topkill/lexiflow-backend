@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -65,6 +66,21 @@ class AiPromptTemplateServiceTest {
         assertThat(resolved.templateId()).isEqualTo(12L);
         assertThat(resolved.templateName()).isEqualTo("完形模板");
         assertThat(resolved.cacheFingerprint()).startsWith("template:12:");
+    }
+
+    @Test
+    void resolveShouldReuseInMemoryCacheForSameFeature() {
+        AiPromptFeatureBinding binding = new AiPromptFeatureBinding();
+        binding.setFeatureType(AiPromptFeatureType.CLOZE_QUIZ);
+        binding.setTemplateId(12L);
+        AiPromptTemplate template = customTemplate(12L, AiPromptFeatureType.CLOZE_QUIZ, "完形模板");
+        when(bindingMapper.selectOne(any())).thenReturn(binding);
+        when(templateMapper.selectById(12L)).thenReturn(template);
+
+        service.resolve(AiPromptFeatureType.CLOZE_QUIZ);
+        service.resolve(AiPromptFeatureType.CLOZE_QUIZ);
+
+        verify(templateMapper, times(1)).selectById(12L);
     }
 
     @Test

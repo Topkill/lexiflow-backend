@@ -17,6 +17,8 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,6 +31,7 @@ public class AiPromptTemplateService {
     private final AiPromptTemplateMapper templateMapper;
     private final AiPromptFeatureBindingMapper bindingMapper;
     private final DefaultAiPromptRegistry defaultRegistry;
+    private final Map<AiPromptFeatureType, ResolvedAiPromptTemplate> resolvedCache = new ConcurrentHashMap<>();
 
     public List<AiPromptFeatureGroupResponse> listGroups() {
         List<AiPromptTemplate> templates = templateMapper.selectList(new LambdaQueryWrapper<AiPromptTemplate>()
@@ -42,6 +45,10 @@ public class AiPromptTemplateService {
     }
 
     public ResolvedAiPromptTemplate resolve(AiPromptFeatureType featureType) {
+        return resolvedCache.computeIfAbsent(featureType, this::resolveFresh);
+    }
+
+    private ResolvedAiPromptTemplate resolveFresh(AiPromptFeatureType featureType) {
         AiPromptFeatureBinding binding = getBinding(featureType);
         if (binding != null && binding.getTemplateId() != null) {
             AiPromptTemplate template = templateMapper.selectById(binding.getTemplateId());
@@ -71,6 +78,7 @@ public class AiPromptTemplateService {
         template.setDeleted(0);
         template.setVersion(0);
         templateMapper.insert(template);
+        evict(featureTypeOf(request));
         return AiPromptTemplateResponse.from(template, isActive(template));
     }
 
@@ -86,6 +94,7 @@ public class AiPromptTemplateService {
         if (!Boolean.TRUE.equals(template.getEnabled())) {
             clearBindingIfActive(adminUserId, template.getId());
         }
+        evict(template.getFeatureType());
         return AiPromptTemplateResponse.from(template, isActive(template));
     }
 
@@ -104,6 +113,7 @@ public class AiPromptTemplateService {
         copied.setDeleted(0);
         copied.setVersion(0);
         templateMapper.insert(copied);
+        evict(copied.getFeatureType());
         return AiPromptTemplateResponse.from(copied, false);
     }
 
@@ -125,6 +135,7 @@ public class AiPromptTemplateService {
         copied.setDeleted(0);
         copied.setVersion(0);
         templateMapper.insert(copied);
+        evict(copied.getFeatureType());
         return AiPromptTemplateResponse.from(copied, false);
     }
 
@@ -159,6 +170,7 @@ public class AiPromptTemplateService {
         } else {
             bindingMapper.updateById(binding);
         }
+        evict(featureType);
     }
 
     private AiPromptFeatureGroupResponse buildGroup(
@@ -249,6 +261,7 @@ public class AiPromptTemplateService {
                 .eq("id", binding.getId())
                 .set("template_id", null)
                 .set("updated_by", adminUserId));
+        evict(binding.getFeatureType());
     }
 
     private ResolvedAiPromptTemplate resolveBuiltin(AiPromptFeatureType featureType) {
@@ -276,6 +289,16 @@ public class AiPromptTemplateService {
         String base = StringUtils.hasText(sourceName) ? sourceName.trim() : "提示词模板";
         String value = base + " 副本";
         return value.length() <= 128 ? value : value.substring(0, 128);
+    }
+
+    private void evict(AiPromptFeatureType featureType) {
+        if (featureType != null) {
+            resolvedCache.remove(featureType);
+        }
+    }
+
+    private AiPromptFeatureType featureTypeOf(AiPromptTemplateRequest request) {
+        return request == null ? null : request.featureType();
     }
 
     private String sha256(String value) {
