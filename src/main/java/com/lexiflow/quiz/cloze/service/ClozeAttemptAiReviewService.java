@@ -7,6 +7,9 @@ import com.lexiflow.ai.content.domain.AiContentType;
 import com.lexiflow.ai.core.dto.AiChatCompletionResult;
 import com.lexiflow.ai.core.dto.AiPrompt;
 import com.lexiflow.ai.core.service.AiGatewayService;
+import com.lexiflow.ai.prompt.domain.AiPromptFeatureType;
+import com.lexiflow.ai.prompt.service.AiPromptTemplateService;
+import com.lexiflow.ai.prompt.service.ResolvedAiPromptTemplate;
 import com.lexiflow.common.error.ErrorCode;
 import com.lexiflow.common.exception.BizException;
 import com.lexiflow.quiz.cloze.domain.ClozeAttempt;
@@ -44,7 +47,6 @@ import org.springframework.util.StringUtils;
 @RequiredArgsConstructor
 public class ClozeAttemptAiReviewService {
 
-    private static final String SYSTEM_PROMPT = "你是 LexiFlow 的 AI 英语完形填空评阅助手。请只输出合法 JSON，不要输出 Markdown 代码块。评阅要简洁、具体、鼓励但不空泛，面向备考大学生。";
     private static final int STREAM_CHUNK_SIZE = 12;
 
     private final AiGatewayService aiGatewayService;
@@ -53,6 +55,7 @@ public class ClozeAttemptAiReviewService {
     private final ClozeQuizMapper quizMapper;
     private final ClozeQuizBlankMapper blankMapper;
     private final ClozeQuizService clozeQuizService;
+    private final AiPromptTemplateService aiPromptTemplateService;
     private final ObjectMapper objectMapper;
     private final Map<Long, Object> reviewLocks = new ConcurrentHashMap<>();
 
@@ -61,6 +64,13 @@ public class ClozeAttemptAiReviewService {
         if (review == null) {
             return ClozeAttemptAiReviewResponse.none(attemptId);
         }
+        if (review.getStatus() == ClozeAttemptAiReviewStatus.DONE) {
+            ClozeAttempt attempt = getOwnedAttempt(userId, attemptId);
+            ReviewPromptContext context = buildPromptContext(userId, attemptId, attempt);
+            if (!context.sourceHash().equals(review.getSourceHash())) {
+                return ClozeAttemptAiReviewResponse.none(attemptId);
+            }
+        }
         return ClozeAttemptAiReviewResponse.from(review, objectMapper);
     }
 
@@ -68,8 +78,19 @@ public class ClozeAttemptAiReviewService {
         Object lock = reviewLocks.computeIfAbsent(attemptId, ignored -> new Object());
         synchronized (lock) {
             ClozeAttempt attempt = getOwnedAttempt(userId, attemptId);
+            ReviewPromptContext context = buildPromptContext(userId, attemptId, attempt);
+            String sourceJson = context.sourceJson();
+            String sourceHash = context.sourceHash();
+            ResolvedAiPromptTemplate promptTemplate = context.promptTemplate();
+            ClozeAttemptResponse attemptResponse = context.attemptResponse();
+            Map<Long, Integer> blankNoMap = context.blankNoMap();
+
             ClozeAttemptAiReview existingReview = getOwnedReview(userId, attemptId);
-            if (existingReview != null && !regenerate && existingReview.getStatus() == ClozeAttemptAiReviewStatus.DONE && StringUtils.hasText(existingReview.getContentJson())) {
+            if (existingReview != null
+                    && !regenerate
+                    && existingReview.getStatus() == ClozeAttemptAiReviewStatus.DONE
+                    && StringUtils.hasText(existingReview.getContentJson())
+                    && sourceHash.equals(existingReview.getSourceHash())) {
                 ClozeAttemptAiReviewResponse cached = ClozeAttemptAiReviewResponse.from(existingReview, objectMapper);
                 try (OutputStreamWriter writer = new OutputStreamWriter(outputStream, StandardCharsets.UTF_8)) {
                     writeEvent(writer, "status", Map.of("status", "DONE", "message", "已命中缓存"));
@@ -79,18 +100,18 @@ public class ClozeAttemptAiReviewService {
                 return;
             }
 
-            ClozeQuiz quiz = getOwnedQuiz(userId, attempt.getQuizId());
-            List<ClozeQuizBlank> blanks = loadBlanks(attempt.getQuizId());
-            ClozeAttemptResponse attemptResponse = clozeQuizService.getAttempt(userId, attemptId);
-            Map<Long, Integer> blankNoMap = blanks.stream().collect(java.util.stream.Collectors.toMap(ClozeQuizBlank::getId, ClozeQuizBlank::getBlankNo));
-            String sourceJson = toJson(buildSource(quiz, attemptResponse, blankNoMap));
-            String sourceHash = sha256(sourceJson);
-
             ClozeAttemptAiReview review = upsertRunningReview(userId, attempt, sourceHash);
             try (OutputStreamWriter writer = new OutputStreamWriter(outputStream, StandardCharsets.UTF_8)) {
                 writeEvent(writer, "status", Map.of("status", "RUNNING", "message", "正在生成 AI 评阅"));
                 try {
-                    AiPrompt prompt = new AiPrompt(SYSTEM_PROMPT, buildUserPrompt(sourceJson), sourceHash);
+                    AiPrompt prompt = new AiPrompt(
+                            promptTemplate.systemPrompt(),
+                            promptTemplate.instructionPrompt() + "\n" + sourceJson,
+                            sourceHash,
+                            promptTemplate.featureType().name(),
+                            promptTemplate.templateId(),
+                            promptTemplate.templateName()
+                    );
                     AiChatCompletionResult result = aiGatewayService.generateJson(userId, AiContentType.CLOZE, prompt);
                     JsonNode contentNode = normalizeReviewContent(parseJson(result.content()), attemptResponse, blankNoMap);
                     review.setContentJson(toJson(contentNode));
@@ -148,6 +169,17 @@ public class ClozeAttemptAiReviewService {
                 .eq(ClozeQuizBlank::getQuizId, quizId)
                 .orderByAsc(ClozeQuizBlank::getBlankNo)
                 .orderByAsc(ClozeQuizBlank::getId));
+    }
+
+    private ReviewPromptContext buildPromptContext(Long userId, Long attemptId, ClozeAttempt attempt) {
+        ClozeQuiz quiz = getOwnedQuiz(userId, attempt.getQuizId());
+        List<ClozeQuizBlank> blanks = loadBlanks(attempt.getQuizId());
+        ClozeAttemptResponse attemptResponse = clozeQuizService.getAttempt(userId, attemptId);
+        Map<Long, Integer> blankNoMap = blanks.stream().collect(java.util.stream.Collectors.toMap(ClozeQuizBlank::getId, ClozeQuizBlank::getBlankNo));
+        String sourceJson = toJson(buildSource(quiz, attemptResponse, blankNoMap));
+        ResolvedAiPromptTemplate promptTemplate = aiPromptTemplateService.resolve(AiPromptFeatureType.CLOZE_REVIEW);
+        String sourceHash = sha256(sourceJson + "\n#prompt:" + promptTemplate.cacheFingerprint());
+        return new ReviewPromptContext(sourceJson, sourceHash, promptTemplate, attemptResponse, blankNoMap);
     }
 
     @Transactional
@@ -212,12 +244,6 @@ public class ClozeAttemptAiReviewService {
             return item;
         }).toList());
         return source;
-    }
-
-    private String buildUserPrompt(String sourceJson) {
-        String schema = "输出 JSON 对象：overall 字符串；mistakeTags 字符串数组；strengths 字符串数组；weaknesses 数组，每项包含 tag、blankNos、comment；suggestions 字符串数组；blankReviews 数组，每项包含 blankNo、comment、tip。全部用中文，不要输出 Markdown 代码块。";
-        String rules = "要求：1. overall 先给本次整体评价，简洁但具体；2. mistakeTags 只保留 2-4 个最主要的错因标签；3. strengths 写 2-3 条亮点；4. weaknesses 只总结影响较大的问题，并标出相关空格序号；5. suggestions 写 2-4 条可执行的学习建议；6. blankReviews 只写答错的空，分别说明错在哪里和下次怎么想；7. 只能依据后端提供的原英文短文、作答结果、本题采用词性、本题采用中文释义、后端已有中文选择原因，以及错题的全部词性释义来分析，不要编造题目外信息；8. 不要提用户 ID、题目标题或中文翻译；9. 关键结论可以用 **加粗**；10. 允许使用 Markdown 语法适当排版，关键结论和英文词可以组合写成 **`resume`** 这种嵌套强调；11. 英文词可以用 `resume` 这种反引号包裹；12. 语言自然，适合备考大学生。";
-        return schema + "\n" + rules + "\n" + sourceJson;
     }
 
     private JsonNode normalizeReviewContent(JsonNode content, ClozeAttemptResponse attemptResponse, Map<Long, Integer> blankNoMap) {
@@ -339,5 +365,14 @@ public class ClozeAttemptAiReviewService {
 
     private String safe(String value) {
         return value == null ? "" : value;
+    }
+
+    private record ReviewPromptContext(
+            String sourceJson,
+            String sourceHash,
+            ResolvedAiPromptTemplate promptTemplate,
+            ClozeAttemptResponse attemptResponse,
+            Map<Long, Integer> blankNoMap
+    ) {
     }
 }

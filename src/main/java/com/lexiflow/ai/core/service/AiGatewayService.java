@@ -29,10 +29,10 @@ public class AiGatewayService {
         long startNanos = System.nanoTime();
         try {
             AiChatCompletionResult result = openAiCompatibleClient.chatJson(config, prompt.systemPrompt(), prompt.userPrompt());
-            saveLog(userId, contentType, prompt.requestHash(), config, result, latencyMs(startNanos), null, null);
+            saveLog(userId, contentType, prompt, config, result, latencyMs(startNanos), null, null);
             return result;
         } catch (AiClientException ex) {
-            saveLog(userId, contentType, prompt.requestHash(), config, null, latencyMs(startNanos), ex.getErrorCode(), ex.getMessage());
+            saveLog(userId, contentType, prompt, config, null, latencyMs(startNanos), ex.getErrorCode(), ex.getMessage());
             throw new BizException(ErrorCode.AI_CALL_FAILED, "AI 调用失败，请稍后重试");
         }
     }
@@ -40,7 +40,7 @@ public class AiGatewayService {
     private void saveLog(
             Long userId,
             AiContentType contentType,
-            String requestHash,
+            AiPrompt prompt,
             AiRuntimeConfig config,
             AiChatCompletionResult result,
             int latencyMs,
@@ -53,7 +53,10 @@ public class AiGatewayService {
         log.setContentType(contentType);
         log.setModelName(config.modelName());
         log.setApiBaseUrl(config.apiBaseUrl());
-        log.setRequestHash(requestHash);
+        log.setRequestHash(prompt == null ? null : prompt.requestHash());
+        log.setPromptFeatureType(prompt == null ? null : prompt.promptFeatureType());
+        log.setPromptTemplateId(prompt == null ? null : prompt.promptTemplateId());
+        log.setPromptTemplateName(prompt == null ? null : prompt.promptTemplateName());
         log.setStatus(errorCode == null ? AiCallStatus.SUCCESS : AiCallStatus.FAILED);
         log.setPromptTokens(result == null ? 0 : result.promptTokens());
         log.setCompletionTokens(result == null ? 0 : result.completionTokens());

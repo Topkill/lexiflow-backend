@@ -11,6 +11,9 @@ import com.lexiflow.ai.core.dto.AiChatCompletionResult;
 import com.lexiflow.ai.core.dto.AiPrompt;
 import com.lexiflow.ai.core.service.AiGatewayService;
 import com.lexiflow.ai.core.util.AiJsonUtils;
+import com.lexiflow.ai.prompt.domain.AiPromptFeatureType;
+import com.lexiflow.ai.prompt.service.AiPromptTemplateService;
+import com.lexiflow.ai.prompt.service.ResolvedAiPromptTemplate;
 import com.lexiflow.common.error.ErrorCode;
 import com.lexiflow.common.exception.BizException;
 import com.lexiflow.user.domain.UserSettings;
@@ -42,6 +45,7 @@ public class WordAiContentService {
     private final WordMapper wordMapper;
     private final UserService userService;
     private final ObjectMapper objectMapper;
+    private final AiPromptTemplateService aiPromptTemplateService;
 
     @Transactional
     public WordAiContentResponse generateWordContent(Long userId, Long wordbookId, Long wordId, AiContentType contentType, boolean regenerate) {
@@ -61,7 +65,12 @@ public class WordAiContentService {
         Word word = getEnabledWord(wordbookId, wordId);
         UserSettings settings = userService.getOrCreateSettings(userId);
         String sourceJson = buildSourceJson(contentType, wordbook, word, settings, question);
-        String sourceHash = sha256(sourceJson);
+        ResolvedAiPromptTemplate promptTemplate = contentType == AiContentType.WORD_QA
+                ? aiPromptTemplateService.resolve(AiPromptFeatureType.WORD_QA)
+                : null;
+        String sourceHash = promptTemplate == null
+                ? sha256(sourceJson)
+                : sha256(sourceJson + "\n#prompt:" + promptTemplate.cacheFingerprint());
         String cacheKey = buildCacheKey(contentType, wordbookId, wordId, sourceHash);
 
         if (!regenerate) {
@@ -73,7 +82,7 @@ public class WordAiContentService {
             }
         }
 
-        AiPrompt prompt = buildPrompt(contentType, sourceJson, sourceHash);
+        AiPrompt prompt = buildPrompt(contentType, sourceJson, sourceHash, promptTemplate);
         AiChatCompletionResult result = aiGatewayService.generateJson(userId, contentType, prompt);
         JsonNode content = parseJson(result.content());
         upsertCache(contentType, cacheKey, sourceHash, wordId, wordbookId, content);
@@ -129,7 +138,17 @@ public class WordAiContentService {
         }
     }
 
-    private AiPrompt buildPrompt(AiContentType contentType, String sourceJson, String sourceHash) {
+    private AiPrompt buildPrompt(AiContentType contentType, String sourceJson, String sourceHash, ResolvedAiPromptTemplate promptTemplate) {
+        if (promptTemplate != null) {
+            return new AiPrompt(
+                    promptTemplate.systemPrompt(),
+                    promptTemplate.instructionPrompt() + "\n" + sourceJson,
+                    sourceHash,
+                    promptTemplate.featureType().name(),
+                    promptTemplate.templateId(),
+                    promptTemplate.templateName()
+            );
+        }
         String schema = switch (contentType) {
             case EXPLANATION -> "输出 JSON 字段：brief 字符串；usage 字符串数组；confusingWords 字符串数组；scenes 字符串数组。";
             case EXAMPLES -> "输出 JSON 字段：simple、medium、examStyle 三个对象；每个对象包含 sentence 英文例句和 translation 中文翻译。";

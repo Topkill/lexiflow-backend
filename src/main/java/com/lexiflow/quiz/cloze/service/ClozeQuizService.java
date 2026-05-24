@@ -12,6 +12,9 @@ import com.lexiflow.ai.core.dto.AiChatCompletionResult;
 import com.lexiflow.ai.core.dto.AiPrompt;
 import com.lexiflow.ai.core.service.AiGatewayService;
 import com.lexiflow.ai.core.util.AiJsonUtils;
+import com.lexiflow.ai.prompt.domain.AiPromptFeatureType;
+import com.lexiflow.ai.prompt.service.AiPromptTemplateService;
+import com.lexiflow.ai.prompt.service.ResolvedAiPromptTemplate;
 import com.lexiflow.async.domain.AsyncTask;
 import com.lexiflow.async.domain.AsyncTaskType;
 import com.lexiflow.async.service.AsyncTaskService;
@@ -77,7 +80,6 @@ import org.springframework.util.StringUtils;
 @RequiredArgsConstructor
 public class ClozeQuizService {
 
-    private static final String SYSTEM_PROMPT = "你是 LexiFlow 的 AI 英语测验出题助手。请只输出合法 JSON，不要输出 Markdown、解释性前后缀或代码块。题目面向备考大学生，短文自然连贯；后端程序会自动挖空、生成候选词和判分。";
     private static final int COMPLETED_GROUP_MAX_BLANK_COUNT = 10;
     private static final List<String> DEFINITION_TEXT_FIELDS = List.of("cn", "definition", "definitionZh", "zh", "chinese", "meaning");
     private static final int MAX_GENERATE_ATTEMPTS = 2;
@@ -97,6 +99,7 @@ public class ClozeQuizService {
     private final WrongWordMapper wrongWordMapper;
     private final ObjectMapper objectMapper;
     private final SpacedRepetitionService spacedRepetitionService;
+    private final AiPromptTemplateService aiPromptTemplateService;
 
     public CreateClozeTaskResponse createClozeTask(Long userId, CreateClozeTaskRequest request) {
         DailyTask dailyTask = getOwnedDailyTask(userId, request.dailyTaskId());
@@ -281,7 +284,8 @@ public class ClozeQuizService {
         if (selection.targetWords().isEmpty() || selection.blankWords().isEmpty()) {
             throw new BizException(ErrorCode.BAD_REQUEST, "今日任务暂无可用于生成完形填空的目标词");
         }
-        String sourceHash = buildClozeSourceHash(userId, dailyTask, wordbookId, sourceType, selection);
+        ResolvedAiPromptTemplate promptTemplate = aiPromptTemplateService.resolve(AiPromptFeatureType.CLOZE_QUIZ);
+        String sourceHash = buildClozeSourceHash(userId, dailyTask, wordbookId, sourceType, selection, promptTemplate);
         if (!regenerate) {
             ClozeQuiz cachedQuiz = tryCreateQuizFromCache(userId, dailyTask, wordbookId, asyncTaskId, sourceType, selection, sourceHash);
             if (cachedQuiz != null) {
@@ -291,7 +295,7 @@ public class ClozeQuizService {
 
         BizException lastValidationError = null;
         for (int attempt = 1; attempt <= MAX_GENERATE_ATTEMPTS; attempt++) {
-            AiPrompt prompt = buildPrompt(dailyTask, wordbookId, sourceType, selection, attempt, lastValidationError == null ? null : lastValidationError.getCustomMessage());
+            AiPrompt prompt = buildPrompt(dailyTask, wordbookId, sourceType, selection, attempt, lastValidationError == null ? null : lastValidationError.getCustomMessage(), sourceHash, promptTemplate);
             try {
                 AiChatCompletionResult result = aiGatewayService.generateJson(userId, AiContentType.CLOZE, prompt);
                 JsonNode content = parseJson(result.content());
@@ -454,7 +458,7 @@ public class ClozeQuizService {
         }
     }
 
-    private String buildClozeSourceHash(Long userId, DailyTask dailyTask, Long wordbookId, ClozeSourceType sourceType, ClozeWordSelection selection) {
+    private String buildClozeSourceHash(Long userId, DailyTask dailyTask, Long wordbookId, ClozeSourceType sourceType, ClozeWordSelection selection, ResolvedAiPromptTemplate promptTemplate) {
         Map<String, Object> source = new LinkedHashMap<>();
         source.put("generatorVersion", "programmatic-blank-v1");
         source.put("userId", String.valueOf(userId));
@@ -463,6 +467,7 @@ public class ClozeQuizService {
         source.put("sourceType", sourceType.name());
         source.put("targetWordIds", selection.targetWords().stream().map(Word::getId).map(String::valueOf).toList());
         source.put("blankWordIds", selection.blankWords().stream().map(Word::getId).map(String::valueOf).toList());
+        source.put("promptFingerprint", promptTemplate.cacheFingerprint());
         return sha256(toJson(source));
     }
 
@@ -493,7 +498,7 @@ public class ClozeQuizService {
         return quiz;
     }
 
-    private AiPrompt buildPrompt(DailyTask dailyTask, Long wordbookId, ClozeSourceType sourceType, ClozeWordSelection selection, int attempt, String previousError) {
+    private AiPrompt buildPrompt(DailyTask dailyTask, Long wordbookId, ClozeSourceType sourceType, ClozeWordSelection selection, int attempt, String previousError, String sourceHash, ResolvedAiPromptTemplate promptTemplate) {
         Map<String, Object> context = new LinkedHashMap<>();
         context.put("dailyTaskId", String.valueOf(dailyTask.getId()));
         context.put("sourceType", sourceType.name());
@@ -506,10 +511,15 @@ public class ClozeQuizService {
             context.put("previousValidationError", previousError);
         }
         String sourceJson = toJson(context);
-        String schema = "输出 JSON 对象：title 字符串；passage 字符串，必须是包含 blankWords 原词的完整英文短文，不要提前挖空；passageZh 字符串，短文中文翻译；explanations 数组，每项包含 word、usedPos、definitionZh、reasonZh；usedPos 字符串，definitionZh 字符串，reasonZh 字符串，且 reasonZh 必须是中文。";
-        String rules = "严格规则：1. passage 必须逐字包含 blankWords 中每个 word，且每个 word 在 passage 中只出现一次；2. 只能依据后端提供的主词性、主释义、全部词性和全部释义选择最合适的义项，不要自造未给出的词义；3. passage 不得出现中文释义、英文释义、词性解释、because it relates to 或类似泄题模板；4. 不要输出 ___1___ 这类占位符，后端会按实际出现位置自动挖空并生成正确答案；5. backgroundWords 是软约束，尽量自然融入 passage，影响通顺时可以省略；6. 不要输出 candidateWords 或 blanks，候选词和答案由后端程序生成；7. passage 要自然连贯，控制在 100-180 个英文词，并且必须符合英语语法，不能有语法错误；8. passageZh 要翻译整篇短文；9. explanations 里的 usedPos 和 definitionZh 必须对应你在 passage 里真正采用的那个义项，reasonZh 要简短解释为什么这里选这个词；10. 若某个词有多个义项，优先选择最符合上下文且最自然的那个。";
-        String userPrompt = schema + "\n" + rules + "\n" + sourceJson;
-        return new AiPrompt(SYSTEM_PROMPT, userPrompt, sha256(sourceJson));
+        String userPrompt = promptTemplate.instructionPrompt() + "\n" + sourceJson;
+        return new AiPrompt(
+                promptTemplate.systemPrompt(),
+                userPrompt,
+                sourceHash,
+                promptTemplate.featureType().name(),
+                promptTemplate.templateId(),
+                promptTemplate.templateName()
+        );
     }
 
     private List<Map<String, Object>> toPromptWords(List<Word> words) {

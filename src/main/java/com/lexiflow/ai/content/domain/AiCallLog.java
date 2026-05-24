@@ -24,6 +24,9 @@ public class AiCallLog {
     private String modelName;
     private String apiBaseUrl;
     private String requestHash;
+    private String promptFeatureType;
+    private Long promptTemplateId;
+    private String promptTemplateName;
     private AiCallStatus status;
     private Integer promptTokens;
     private Integer completionTokens;
