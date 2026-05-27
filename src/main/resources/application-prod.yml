@@ -1,0 +1,69 @@
+server:
+  forward-headers-strategy: framework
+  compression:
+    enabled: true
+
+spring:
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    # url: ${LEXIFLOW_DB_URL}
+    url: jdbc:mysql://${LEXIFLOW_DB_HOST:localhost}:${LEXIFLOW_DB_PORT:3306}/${LEXIFLOW_DB_NAME:lexiflow}?serverTimezone=Asia/Shanghai&useSSL=false
+    username: ${LEXIFLOW_DB_USERNAME}
+    password: ${LEXIFLOW_DB_PASSWORD}
+    hikari:
+      maximum-pool-size: ${LEXIFLOW_DB_POOL_MAX_SIZE:20}
+      minimum-idle: ${LEXIFLOW_DB_POOL_MIN_IDLE:5}
+      connection-timeout: ${LEXIFLOW_DB_CONNECTION_TIMEOUT:30000}
+      validation-timeout: ${LEXIFLOW_DB_VALIDATION_TIMEOUT:5000}
+      max-lifetime: ${LEXIFLOW_DB_MAX_LIFETIME:1800000}
+  data:
+    redis:
+      host: ${LEXIFLOW_REDIS_HOST:localhost}
+      port: ${LEXIFLOW_REDIS_PORT:6379}
+      password: ${LEXIFLOW_REDIS_PASSWORD:}
+      database: ${LEXIFLOW_REDIS_DATABASE:0}
+      timeout: ${LEXIFLOW_REDIS_TIMEOUT:3s}
+  rabbitmq:
+    host: ${LEXIFLOW_RABBITMQ_HOST:localhost}
+    port: ${LEXIFLOW_RABBITMQ_PORT:5672}
+    username: ${LEXIFLOW_RABBITMQ_USERNAME:guest}
+    password: ${LEXIFLOW_RABBITMQ_PASSWORD:guest}
+    virtual-host: ${LEXIFLOW_RABBITMQ_VIRTUAL_HOST:/}
+
+mybatis-plus:
+  configuration:
+    log-impl: org.apache.ibatis.logging.nologging.NoLoggingImpl
+
+knife4j:
+  enable: false
+
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
+
+lexiflow:
+  security:
+    jwt-secret: ${LEXIFLOW_JWT_SECRET}
+    access-token-ttl-minutes: ${LEXIFLOW_ACCESS_TOKEN_TTL_MINUTES:120}
+    refresh-token-ttl-days: ${LEXIFLOW_REFRESH_TOKEN_TTL_DAYS:14}
+  crypto:
+    api-key-secret: ${LEXIFLOW_API_KEY_SECRET}
+
+logging:
+  file:
+    name: ${LEXIFLOW_LOG_FILE:logs/lexiflow-backend.log}
+  logback:
+    rollingpolicy:
+      file-name-pattern: ${LEXIFLOW_LOG_FILE_PATTERN:logs/lexiflow-backend.%d{yyyy-MM-dd}.%i.log.gz}
+      max-file-size: ${LEXIFLOW_LOG_MAX_FILE_SIZE:100MB}
+      max-history: ${LEXIFLOW_LOG_MAX_HISTORY:30}
+      total-size-cap: ${LEXIFLOW_LOG_TOTAL_SIZE_CAP:3GB}
+      clean-history-on-start: false
+  level:
+    root: info
+    com.lexiflow: info
+    org.springframework.security: warn
+    org.mybatis: warn
+    com.baomidou.mybatisplus: warn

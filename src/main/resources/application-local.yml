@@ -18,6 +18,31 @@ spring:
     password: guest
     virtual-host: /
 
+mybatis-plus:
+  configuration:
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+
+knife4j:
+  enable: true
+  setting:
+    language: zh_cn
+
+springdoc:
+  api-docs:
+    enabled: true
+  swagger-ui:
+    enabled: true
+  group-configs:
+    - group: default
+      paths-to-match: /api/**
+      packages-to-scan: com.lexiflow
+
+lexiflow:
+  security:
+    jwt-secret: change-me-to-a-strong-secret-at-least-32-bytes
+  crypto:
+    api-key-secret: change-me-32-bytes-secret-for-api-key
+
 logging:
   level:
     com.lexiflow: debug
