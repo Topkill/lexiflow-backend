@@ -19,6 +19,7 @@ public class AiPromptFeatureBinding {
     private Long id;
 
     private AiPromptFeatureType featureType;
+    private Long wordbookId;
     private Long templateId;
     private Long updatedBy;
     @TableField(fill = FieldFill.INSERT)

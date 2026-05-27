@@ -72,7 +72,7 @@ public class WordAiContentService {
             Word word = getEnabledWord(wordbookId, wordId);
             UserSettings settings = userService.getOrCreateSettings(userId);
             String sourceJson = buildSourceJson(AiContentType.WORD_QA, wordbook, word, settings, question.trim());
-            ResolvedAiPromptTemplate promptTemplate = aiPromptTemplateService.resolve(AiPromptFeatureType.WORD_QA);
+            ResolvedAiPromptTemplate promptTemplate = aiPromptTemplateService.resolve(AiPromptFeatureType.WORD_QA, wordbookId);
             String sourceHash = sha256(sourceJson + "\n#prompt:" + promptTemplate.cacheFingerprint());
             String cacheKey = buildCacheKey(AiContentType.WORD_QA, wordbookId, wordId, sourceHash);
 
@@ -175,7 +175,7 @@ public class WordAiContentService {
         UserSettings settings = userService.getOrCreateSettings(userId);
         String sourceJson = buildSourceJson(contentType, wordbook, word, settings, question);
         ResolvedAiPromptTemplate promptTemplate = contentType == AiContentType.WORD_QA
-                ? aiPromptTemplateService.resolve(AiPromptFeatureType.WORD_QA)
+                ? aiPromptTemplateService.resolve(AiPromptFeatureType.WORD_QA, wordbookId)
                 : null;
         String sourceHash = promptTemplate == null
                 ? sha256(sourceJson)

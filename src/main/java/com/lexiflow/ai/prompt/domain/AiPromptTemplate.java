@@ -20,6 +20,7 @@ public class AiPromptTemplate {
     private Long id;
 
     private AiPromptFeatureType featureType;
+    private Long wordbookId;
     private String name;
     private String systemPrompt;
     private String instructionPrompt;

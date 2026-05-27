@@ -284,7 +284,7 @@ public class ClozeQuizService {
         if (selection.targetWords().isEmpty() || selection.blankWords().isEmpty()) {
             throw new BizException(ErrorCode.BAD_REQUEST, "今日任务暂无可用于生成完形填空的目标词");
         }
-        ResolvedAiPromptTemplate promptTemplate = aiPromptTemplateService.resolve(AiPromptFeatureType.CLOZE_QUIZ);
+        ResolvedAiPromptTemplate promptTemplate = aiPromptTemplateService.resolve(AiPromptFeatureType.CLOZE_QUIZ, wordbookId);
         String sourceHash = buildClozeSourceHash(userId, dailyTask, wordbookId, sourceType, selection, promptTemplate);
         if (!regenerate) {
             ClozeQuiz cachedQuiz = tryCreateQuizFromCache(userId, dailyTask, wordbookId, asyncTaskId, sourceType, selection, sourceHash);

@@ -21,6 +21,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -35,8 +36,10 @@ public class AdminAiPromptController {
 
     @Operation(summary = "AI 提示词模板分组列表")
     @GetMapping("/prompt-templates")
-    public ApiResponse<List<AiPromptFeatureGroupResponse>> listPromptTemplates() {
-        return ApiResponse.success(aiPromptTemplateService.listGroups());
+    public ApiResponse<List<AiPromptFeatureGroupResponse>> listPromptTemplates(
+            @RequestParam(required = false, defaultValue = "0") Long wordbookId
+    ) {
+        return ApiResponse.success(aiPromptTemplateService.listGroups(wordbookId));
     }
 
     @Operation(summary = "新增 AI 提示词模板")
@@ -56,14 +59,20 @@ public class AdminAiPromptController {
 
     @Operation(summary = "复制自定义 AI 提示词模板")
     @PostMapping("/prompt-templates/{templateId}/copy")
-    public ApiResponse<AiPromptTemplateResponse> copyPromptTemplate(@PathVariable @Positive Long templateId) {
-        return ApiResponse.success(aiPromptTemplateService.copyTemplate(AuthContext.currentUserId(), templateId));
+    public ApiResponse<AiPromptTemplateResponse> copyPromptTemplate(
+            @PathVariable @Positive Long templateId,
+            @RequestParam(required = false) Long wordbookId
+    ) {
+        return ApiResponse.success(aiPromptTemplateService.copyTemplate(AuthContext.currentUserId(), templateId, wordbookId));
     }
 
     @Operation(summary = "复制内置 AI 提示词模板")
     @PostMapping("/prompt-templates/builtin/{featureType}/copy")
-    public ApiResponse<AiPromptTemplateResponse> copyBuiltinPromptTemplate(@PathVariable AiPromptFeatureType featureType) {
-        return ApiResponse.success(aiPromptTemplateService.copyBuiltin(AuthContext.currentUserId(), featureType));
+    public ApiResponse<AiPromptTemplateResponse> copyBuiltinPromptTemplate(
+            @PathVariable AiPromptFeatureType featureType,
+            @RequestParam(required = false, defaultValue = "0") Long wordbookId
+    ) {
+        return ApiResponse.success(aiPromptTemplateService.copyBuiltin(AuthContext.currentUserId(), featureType, wordbookId));
     }
 
     @Operation(summary = "删除自定义 AI 提示词模板")

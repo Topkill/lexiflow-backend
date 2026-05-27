@@ -182,7 +182,7 @@ public class ClozeAttemptAiReviewService {
         ClozeAttemptResponse attemptResponse = clozeQuizService.getAttempt(userId, attemptId);
         Map<Long, Integer> blankNoMap = blanks.stream().collect(java.util.stream.Collectors.toMap(ClozeQuizBlank::getId, ClozeQuizBlank::getBlankNo));
         String sourceJson = toJson(buildSource(quiz, attemptResponse, blankNoMap));
-        ResolvedAiPromptTemplate promptTemplate = aiPromptTemplateService.resolve(AiPromptFeatureType.CLOZE_REVIEW);
+        ResolvedAiPromptTemplate promptTemplate = aiPromptTemplateService.resolve(AiPromptFeatureType.CLOZE_REVIEW, quiz.getWordbookId());
         String sourceHash = sha256(sourceJson + "\n#prompt:" + promptTemplate.cacheFingerprint());
         return new ReviewPromptContext(sourceJson, sourceHash, promptTemplate, attemptResponse, blankNoMap);
     }

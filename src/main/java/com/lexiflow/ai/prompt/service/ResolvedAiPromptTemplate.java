@@ -4,6 +4,7 @@ import com.lexiflow.ai.prompt.domain.AiPromptFeatureType;
 
 public record ResolvedAiPromptTemplate(
         AiPromptFeatureType featureType,
+        Long wordbookId,
         Long templateId,
         String templateName,
         String systemPrompt,
