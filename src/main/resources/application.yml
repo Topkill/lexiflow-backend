@@ -44,3 +44,16 @@ lexiflow:
   security:
     access-token-ttl-minutes: 120
     refresh-token-ttl-days: 14
+  cors:
+    allowed-origins: []
+    allowed-origin-patterns: []
+    allowed-methods: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
+    allowed-headers: [Authorization, Content-Type, X-CSRF-Token]
+    exposed-headers: [Content-Disposition]
+    allow-credentials: true
+    max-age: 3600
+  auth:
+    cookie:
+      secure: false
+      same-site: Lax
+      path: /

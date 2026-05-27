@@ -44,12 +44,20 @@ springdoc:
     enabled: false
 
 lexiflow:
+  cors:
+    allowed-origins: ${LEXIFLOW_CORS_ALLOWED_ORIGINS:}
+    allowed-origin-patterns: ${LEXIFLOW_CORS_ALLOWED_ORIGIN_PATTERNS:}
   security:
     jwt-secret: ${LEXIFLOW_JWT_SECRET}
     access-token-ttl-minutes: ${LEXIFLOW_ACCESS_TOKEN_TTL_MINUTES:120}
     refresh-token-ttl-days: ${LEXIFLOW_REFRESH_TOKEN_TTL_DAYS:14}
   crypto:
     api-key-secret: ${LEXIFLOW_API_KEY_SECRET}
+  auth:
+    cookie:
+      secure: ${LEXIFLOW_AUTH_COOKIE_SECURE:true}
+      same-site: ${LEXIFLOW_AUTH_COOKIE_SAME_SITE:None}
+      path: ${LEXIFLOW_AUTH_COOKIE_PATH:/}
 
 logging:
   file:

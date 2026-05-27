@@ -11,9 +11,9 @@ import com.lexiflow.common.api.ApiResponse;
 import com.lexiflow.common.error.ErrorCode;
 import com.lexiflow.common.exception.BizException;
 import com.lexiflow.common.util.ServletUtils;
+import com.lexiflow.infra.properties.AuthCookieProperties;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
@@ -36,6 +36,7 @@ public class AuthController {
     private static final String REFRESH_TOKEN_COOKIE = "refresh_token";
 
     private final AuthService authService;
+    private final AuthCookieProperties authCookieProperties;
 
     @Operation(summary = "邮箱注册")
     @PostMapping("/register")
@@ -67,12 +68,7 @@ public class AuthController {
     @Operation(summary = "退出登录")
     @PostMapping("/logout")
     public ApiResponse<Void> logout(HttpServletResponse response) {
-        Cookie cookie = new Cookie(REFRESH_TOKEN_COOKIE, null);
-        cookie.setHttpOnly(true);
-        cookie.setSecure(false);
-        cookie.setPath("/");
-        cookie.setMaxAge(0);
-        response.addCookie(cookie);
+        response.addHeader(HttpHeaders.SET_COOKIE, buildRefreshCookie("", 0).toString());
         return ApiResponse.success();
     }
 
@@ -85,9 +81,9 @@ public class AuthController {
     private ResponseCookie buildRefreshCookie(String token, long maxAgeSeconds) {
         return ResponseCookie.from(REFRESH_TOKEN_COOKIE, token)
                 .httpOnly(true)
-                .secure(false)
-                .sameSite("Lax")
-                .path("/")
+                .secure(authCookieProperties.secure())
+                .sameSite(authCookieProperties.sameSite())
+                .path(authCookieProperties.path())
                 .maxAge(maxAgeSeconds)
                 .build();
     }
