@@ -60,6 +60,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -81,6 +82,8 @@ import org.springframework.util.StringUtils;
 public class ClozeQuizService {
 
     private static final int COMPLETED_GROUP_MAX_BLANK_COUNT = 10;
+    private static final int MIN_BACKGROUND_WORD_COUNT = 5;
+    private static final int MAX_BACKGROUND_WORD_COUNT = 10;
     private static final List<String> DEFINITION_TEXT_FIELDS = List.of("cn", "definition", "definitionZh", "zh", "chinese", "meaning");
     private static final int MAX_GENERATE_ATTEMPTS = 2;
 
@@ -315,37 +318,153 @@ public class ClozeQuizService {
     }
 
     private ClozeWordSelection selectClozeWords(Long userId, DailyTask dailyTask, Long wordbookId, ClozeSourceType sourceType, int targetWordCount) {
-        if (sourceType == ClozeSourceType.COMPLETED_GROUP) {
-            return selectCompletedGroupWords(userId, dailyTask, targetWordCount);
+        return switch (sourceType) {
+            case COMPLETED_GROUP -> selectCompletedGroupWords(userId, dailyTask, targetWordCount);
+            case TODAY_NEW -> selectTodayNewWords(userId, dailyTask, targetWordCount);
+            case WRONG_WORDS -> selectWrongWords(userId, dailyTask, wordbookId, targetWordCount);
+            case MIXED -> selectMixedWords(userId, dailyTask, wordbookId, targetWordCount);
+        };
+    }
+
+    private ClozeWordSelection selectTodayNewWords(Long userId, DailyTask dailyTask, int targetWordCount) {
+        List<Long> newWordIds = loadDailyTaskWordIds(userId, dailyTask.getId(), DailyTaskItemType.NEW);
+        List<Long> reviewWordIds = loadDailyTaskWordIds(userId, dailyTask.getId(), DailyTaskItemType.REVIEW);
+        List<Long> blankWordIds = randomSample(newWordIds, targetWordCount);
+        appendRandomUnique(blankWordIds, reviewWordIds, targetWordCount);
+        if (blankWordIds.size() < targetWordCount) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "今日新词和复习词不足，无法生成 " + targetWordCount + " 个空");
         }
-        LinkedHashSet<Long> wordIds = new LinkedHashSet<>();
-        if (sourceType == ClozeSourceType.TODAY_NEW || sourceType == ClozeSourceType.MIXED) {
-            dailyTaskItemMapper.selectList(new LambdaQueryWrapper<DailyTaskItem>()
-                            .eq(DailyTaskItem::getDailyTaskId, dailyTask.getId())
-                            .eq(DailyTaskItem::getItemType, DailyTaskItemType.NEW)
-                            .orderByAsc(DailyTaskItem::getSequenceNo)
-                            .orderByAsc(DailyTaskItem::getId))
-                    .stream()
-                    .map(DailyTaskItem::getWordId)
-                    .forEach(wordIds::add);
+        List<Long> backgroundCandidateIds = concatWordIds(newWordIds, reviewWordIds);
+        return buildSelection(blankWordIds, backgroundCandidateIds, targetWordCount, "今日新词和复习词不足，无法生成 " + targetWordCount + " 个空");
+    }
+
+    private ClozeWordSelection selectWrongWords(Long userId, DailyTask dailyTask, Long wordbookId, int targetWordCount) {
+        List<Long> wrongWordIds = loadUnresolvedWrongWordIds(userId, wordbookId);
+        if (distinctWordIds(wrongWordIds).size() < targetWordCount) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "未解决错词不足，无法生成 " + targetWordCount + " 个空");
         }
-        if (sourceType == ClozeSourceType.WRONG_WORDS || sourceType == ClozeSourceType.MIXED) {
-            wrongWordMapper.selectList(new LambdaQueryWrapper<WrongWord>()
-                            .eq(WrongWord::getUserId, userId)
-                            .eq(WrongWord::getWordbookId, wordbookId)
-                            .eq(WrongWord::getResolved, false)
-                            .orderByDesc(WrongWord::getWrongCount)
-                            .orderByDesc(WrongWord::getLastWrongAt))
-                    .stream()
-                    .map(WrongWord::getWordId)
-                    .forEach(wordIds::add);
+        List<Long> blankWordIds = randomSample(wrongWordIds, targetWordCount);
+        List<Long> backgroundCandidateIds = concatWordIds(
+                wrongWordIds,
+                loadDailyTaskWordIds(userId, dailyTask.getId(), DailyTaskItemType.NEW),
+                loadDailyTaskWordIds(userId, dailyTask.getId(), DailyTaskItemType.REVIEW)
+        );
+        return buildSelection(blankWordIds, backgroundCandidateIds, targetWordCount, "未解决错词不足，无法生成 " + targetWordCount + " 个空");
+    }
+
+    private ClozeWordSelection selectMixedWords(Long userId, DailyTask dailyTask, Long wordbookId, int targetWordCount) {
+        List<Long> newWordIds = loadDailyTaskWordIds(userId, dailyTask.getId(), DailyTaskItemType.NEW);
+        List<Long> wrongWordIds = loadUnresolvedWrongWordIds(userId, wordbookId);
+        List<Long> reviewWordIds = loadDailyTaskWordIds(userId, dailyTask.getId(), DailyTaskItemType.REVIEW);
+        if (distinctWordIds(concatWordIds(newWordIds, wrongWordIds)).size() < targetWordCount) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "今日新词和错词不足，无法生成 " + targetWordCount + " 个空");
         }
-        List<Long> limitedIds = wordIds.stream().limit(targetWordCount).toList();
-        if (limitedIds.isEmpty()) {
-            return new ClozeWordSelection(List.of(), List.of());
+
+        int newQuota = (int) Math.ceil(targetWordCount * 0.6d);
+        int wrongQuota = targetWordCount - newQuota;
+        List<Long> blankWordIds = randomSample(newWordIds, newQuota);
+        appendRandomUnique(blankWordIds, wrongWordIds, newQuota + wrongQuota);
+        appendRandomUnique(blankWordIds, newWordIds, targetWordCount);
+        appendRandomUnique(blankWordIds, wrongWordIds, targetWordCount);
+        if (blankWordIds.size() < targetWordCount) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "今日新词和错词不足，无法生成 " + targetWordCount + " 个空");
         }
-        List<Word> words = findWordsKeepingOrder(limitedIds);
-        return new ClozeWordSelection(words, words);
+
+        List<Long> backgroundCandidateIds = concatWordIds(newWordIds, wrongWordIds, reviewWordIds);
+        return buildSelection(blankWordIds, backgroundCandidateIds, targetWordCount, "今日新词和错词不足，无法生成 " + targetWordCount + " 个空");
+    }
+
+    private List<Long> loadDailyTaskWordIds(Long userId, Long dailyTaskId, DailyTaskItemType itemType) {
+        return dailyTaskItemMapper.selectList(new LambdaQueryWrapper<DailyTaskItem>()
+                        .eq(DailyTaskItem::getDailyTaskId, dailyTaskId)
+                        .eq(DailyTaskItem::getUserId, userId)
+                        .eq(DailyTaskItem::getItemType, itemType)
+                        .orderByAsc(DailyTaskItem::getSequenceNo)
+                        .orderByAsc(DailyTaskItem::getId))
+                .stream()
+                .map(DailyTaskItem::getWordId)
+                .filter(Objects::nonNull)
+                .toList();
+    }
+
+    private List<Long> loadUnresolvedWrongWordIds(Long userId, Long wordbookId) {
+        return wrongWordMapper.selectList(new LambdaQueryWrapper<WrongWord>()
+                        .eq(WrongWord::getUserId, userId)
+                        .eq(WrongWord::getWordbookId, wordbookId)
+                        .eq(WrongWord::getResolved, false)
+                        .orderByAsc(WrongWord::getId))
+                .stream()
+                .map(WrongWord::getWordId)
+                .filter(Objects::nonNull)
+                .toList();
+    }
+
+    private ClozeWordSelection buildSelection(List<Long> blankWordIds, List<Long> backgroundCandidateIds, int targetWordCount, String insufficientMessage) {
+        List<Word> blankWords = findWordsKeepingOrder(blankWordIds);
+        if (blankWords.size() < targetWordCount) {
+            throw new BizException(ErrorCode.BAD_REQUEST, insufficientMessage);
+        }
+        List<Long> backgroundWordIds = selectBackgroundWordIds(backgroundCandidateIds, blankWordIds);
+        List<Word> backgroundWords = findWordsKeepingOrder(backgroundWordIds);
+        return new ClozeWordSelection(concatWords(blankWords, backgroundWords), blankWords, backgroundWords);
+    }
+
+    private List<Long> selectBackgroundWordIds(List<Long> candidateWordIds, List<Long> blankWordIds) {
+        Set<Long> blankIdSet = new LinkedHashSet<>(blankWordIds);
+        List<Long> candidates = distinctWordIds(candidateWordIds).stream()
+                .filter(wordId -> !blankIdSet.contains(wordId))
+                .toList();
+        return randomSample(candidates, randomBackgroundLimit(candidates.size()));
+    }
+
+    private int randomBackgroundLimit(int candidateCount) {
+        if (candidateCount <= MIN_BACKGROUND_WORD_COUNT) {
+            return candidateCount;
+        }
+        int max = Math.min(MAX_BACKGROUND_WORD_COUNT, candidateCount);
+        return MIN_BACKGROUND_WORD_COUNT + (int) Math.floor(Math.random() * (max - MIN_BACKGROUND_WORD_COUNT + 1));
+    }
+
+    @SafeVarargs
+    private final List<Long> concatWordIds(List<Long>... wordIdGroups) {
+        List<Long> wordIds = new ArrayList<>();
+        for (List<Long> group : wordIdGroups) {
+            wordIds.addAll(group);
+        }
+        return wordIds;
+    }
+
+    private List<Word> concatWords(List<Word> first, List<Word> second) {
+        List<Word> words = new ArrayList<>(first);
+        words.addAll(second);
+        return words;
+    }
+
+    private List<Long> distinctWordIds(List<Long> wordIds) {
+        return wordIds.stream()
+                .filter(Objects::nonNull)
+                .collect(Collectors.collectingAndThen(Collectors.toCollection(LinkedHashSet::new), ArrayList::new));
+    }
+
+    private List<Long> randomSample(List<Long> wordIds, int limit) {
+        if (limit <= 0) {
+            return new ArrayList<>();
+        }
+        List<Long> candidates = distinctWordIds(wordIds);
+        Collections.shuffle(candidates);
+        return new ArrayList<>(candidates.subList(0, Math.min(limit, candidates.size())));
+    }
+
+    private void appendRandomUnique(List<Long> selectedWordIds, List<Long> candidateWordIds, int limit) {
+        Set<Long> selected = new LinkedHashSet<>(selectedWordIds);
+        for (Long candidateWordId : randomSample(candidateWordIds, candidateWordIds.size())) {
+            if (selectedWordIds.size() >= limit) {
+                return;
+            }
+            if (selected.add(candidateWordId)) {
+                selectedWordIds.add(candidateWordId);
+            }
+        }
     }
 
     private ClozeWordSelection selectCompletedGroupWords(Long userId, DailyTask dailyTask, int targetWordCount) {
@@ -1048,8 +1167,12 @@ public class ClozeQuizService {
     private record DefinitionGroup(String pos, List<String> definitions) {
     }
 
-    private record ClozeWordSelection(List<Word> targetWords, List<Word> blankWords) {
-        private List<Word> backgroundWords() {
+    private record ClozeWordSelection(List<Word> targetWords, List<Word> blankWords, List<Word> backgroundWords) {
+        private ClozeWordSelection(List<Word> targetWords, List<Word> blankWords) {
+            this(targetWords, blankWords, defaultBackgroundWords(targetWords, blankWords));
+        }
+
+        private static List<Word> defaultBackgroundWords(List<Word> targetWords, List<Word> blankWords) {
             Set<Long> blankWordIds = blankWords.stream().map(Word::getId).collect(Collectors.toSet());
             return targetWords.stream().filter(word -> !blankWordIds.contains(word.getId())).toList();
         }
