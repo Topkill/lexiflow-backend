@@ -9,6 +9,7 @@ public record ResolvedAiPromptTemplate(
         String templateName,
         String systemPrompt,
         String instructionPrompt,
+        String outputSchemaJson,
         boolean builtIn,
         String cacheFingerprint
 ) {

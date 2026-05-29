@@ -7,6 +7,7 @@ record DefaultAiPromptDefinition(
         String templateKey,
         String name,
         String systemPrompt,
-        String instructionPrompt
+        String instructionPrompt,
+        String outputSchemaJson
 ) {
 }

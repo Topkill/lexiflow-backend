@@ -346,6 +346,7 @@ CREATE TABLE IF NOT EXISTS `ai_prompt_template` (
   `name` VARCHAR(128) NOT NULL COMMENT '模板名称',
   `system_prompt` MEDIUMTEXT NOT NULL COMMENT '系统提示词',
   `instruction_prompt` MEDIUMTEXT NOT NULL COMMENT '规则提示词',
+  `output_schema_json` JSON NULL COMMENT '输出 JSON 结构',
   `enabled` TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否启用',
   `source_template_id` INT NULL COMMENT '复制来源模板 ID',
   `source_builtin_key` VARCHAR(64) NULL COMMENT '复制来源内置模板键',

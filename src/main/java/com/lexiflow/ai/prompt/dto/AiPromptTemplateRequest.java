@@ -13,6 +13,7 @@ public record AiPromptTemplateRequest(
         @Schema(description = "模板名称") @NotBlank @Size(max = 128) String name,
         @Schema(description = "系统提示词") @NotBlank @Size(max = 12000) String systemPrompt,
         @Schema(description = "规则提示词") @NotBlank @Size(max = 20000) String instructionPrompt,
+        @Schema(description = "输出 JSON 结构") @Size(max = 20000) String outputSchemaJson,
         @Schema(description = "是否启用") @NotNull Boolean enabled
 ) {
 }

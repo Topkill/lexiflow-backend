@@ -15,6 +15,7 @@ public record AiPromptTemplateResponse(
         @Schema(description = "模板名称") String name,
         @Schema(description = "系统提示词") String systemPrompt,
         @Schema(description = "规则提示词") String instructionPrompt,
+        @Schema(description = "输出 JSON 结构") String outputSchemaJson,
         @Schema(description = "是否内置默认模板") Boolean builtIn,
         @Schema(description = "是否可编辑") Boolean editable,
         @Schema(description = "是否可复制") Boolean copyable,
@@ -26,6 +27,10 @@ public record AiPromptTemplateResponse(
         @Schema(description = "更新时间") LocalDateTime updatedAt
 ) {
     public static AiPromptTemplateResponse from(AiPromptTemplate template, boolean active) {
+        return from(template, active, template.getOutputSchemaJson());
+    }
+
+    public static AiPromptTemplateResponse from(AiPromptTemplate template, boolean active, String outputSchemaJson) {
         return new AiPromptTemplateResponse(
                 template.getId() == null ? null : String.valueOf(template.getId()),
                 template.getId() == null ? "builtin:" + template.getSourceBuiltinKey() : "template:" + template.getId(),
@@ -35,6 +40,7 @@ public record AiPromptTemplateResponse(
                 template.getName(),
                 template.getSystemPrompt(),
                 template.getInstructionPrompt(),
+                outputSchemaJson,
                 false,
                 true,
                 true,
@@ -47,7 +53,7 @@ public record AiPromptTemplateResponse(
         );
     }
 
-    public static AiPromptTemplateResponse builtin(AiPromptFeatureType featureType, String name, String systemPrompt, String instructionPrompt, boolean active, String templateKey) {
+    public static AiPromptTemplateResponse builtin(AiPromptFeatureType featureType, String name, String systemPrompt, String instructionPrompt, String outputSchemaJson, boolean active, String templateKey) {
         return new AiPromptTemplateResponse(
                 null,
                 templateKey,
@@ -57,6 +63,7 @@ public record AiPromptTemplateResponse(
                 name,
                 systemPrompt,
                 instructionPrompt,
+                outputSchemaJson,
                 true,
                 false,
                 true,

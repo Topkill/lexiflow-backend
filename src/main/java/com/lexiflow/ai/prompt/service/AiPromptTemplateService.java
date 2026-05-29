@@ -36,6 +36,7 @@ public class AiPromptTemplateService {
     private final AiPromptFeatureBindingMapper bindingMapper;
     private final DefaultAiPromptRegistry defaultRegistry;
     private final WordbookMapper wordbookMapper;
+    private final AiPromptOutputSchemaService outputSchemaService;
     private final Map<String, ResolvedAiPromptTemplate> resolvedCache = new ConcurrentHashMap<>();
 
     public List<AiPromptFeatureGroupResponse> listGroups() {
@@ -93,6 +94,7 @@ public class AiPromptTemplateService {
                         template.getName(),
                         template.getSystemPrompt(),
                         template.getInstructionPrompt(),
+                        outputSchemaService.resolveSchemaJson(featureType, template.getOutputSchemaJson()),
                         false,
                         customFingerprint(template)
                 );
@@ -112,7 +114,7 @@ public class AiPromptTemplateService {
         template.setVersion(0);
         templateMapper.insert(template);
         evict(featureTypeOf(request));
-        return AiPromptTemplateResponse.from(template, isActive(template));
+        return responseFrom(template, isActive(template));
     }
 
     @Transactional
@@ -132,7 +134,7 @@ public class AiPromptTemplateService {
             clearBindingIfActive(adminUserId, template.getId());
         }
         evict(template.getFeatureType());
-        return AiPromptTemplateResponse.from(template, isActive(template));
+        return responseFrom(template, isActive(template));
     }
 
     @Transactional
@@ -150,6 +152,7 @@ public class AiPromptTemplateService {
         copied.setName(copyName(source.getName()));
         copied.setSystemPrompt(source.getSystemPrompt());
         copied.setInstructionPrompt(source.getInstructionPrompt());
+        copied.setOutputSchemaJson(outputSchemaService.resolveSchemaJson(source.getFeatureType(), source.getOutputSchemaJson()));
         copied.setEnabled(true);
         copied.setSourceTemplateId(source.getId());
         copied.setCreatedBy(adminUserId);
@@ -158,7 +161,7 @@ public class AiPromptTemplateService {
         copied.setVersion(0);
         templateMapper.insert(copied);
         evict(copied.getFeatureType());
-        return AiPromptTemplateResponse.from(copied, false);
+        return responseFrom(copied, false);
     }
 
     @Transactional
@@ -179,6 +182,7 @@ public class AiPromptTemplateService {
         copied.setName(copyName(builtin.name()));
         copied.setSystemPrompt(builtin.systemPrompt());
         copied.setInstructionPrompt(builtin.instructionPrompt());
+        copied.setOutputSchemaJson(builtin.outputSchemaJson());
         copied.setEnabled(true);
         copied.setSourceBuiltinKey(builtin.templateKey());
         copied.setCreatedBy(adminUserId);
@@ -187,7 +191,7 @@ public class AiPromptTemplateService {
         copied.setVersion(0);
         templateMapper.insert(copied);
         evict(copied.getFeatureType());
-        return AiPromptTemplateResponse.from(copied, false);
+        return responseFrom(copied, false);
     }
 
     @Transactional
@@ -264,13 +268,14 @@ public class AiPromptTemplateService {
                 builtin.name(),
                 builtin.systemPrompt(),
                 builtin.instructionPrompt(),
+                builtin.outputSchemaJson(),
                 usingDefault,
                 builtin.templateKey()
         );
         List<AiPromptTemplateResponse> templates = allTemplates.stream()
                 .filter(template -> template.getFeatureType() == featureType)
                 .filter(template -> normalizeWordbookId(template.getWordbookId()).equals(wordbookId))
-                .map(template -> AiPromptTemplateResponse.from(template, activeTemplateId != null && activeTemplateId.equals(template.getId())))
+                .map(template -> responseFrom(template, activeTemplateId != null && activeTemplateId.equals(template.getId())))
                 .toList();
         return new AiPromptFeatureGroupResponse(
                 featureType,
@@ -279,8 +284,16 @@ public class AiPromptTemplateService {
                 usingDefault,
                 activeTemplateId == null ? null : String.valueOf(activeTemplateId),
                 builtinResponse,
-                inheritedTemplate == null ? null : AiPromptTemplateResponse.from(inheritedTemplate, true),
+                inheritedTemplate == null ? null : responseFrom(inheritedTemplate, true),
                 templates
+        );
+    }
+
+    private AiPromptTemplateResponse responseFrom(AiPromptTemplate template, boolean active) {
+        return AiPromptTemplateResponse.from(
+                template,
+                active,
+                outputSchemaService.resolveSchemaJson(template.getFeatureType(), template.getOutputSchemaJson())
         );
     }
 
@@ -343,6 +356,7 @@ public class AiPromptTemplateService {
         template.setName(request.name().trim());
         template.setSystemPrompt(request.systemPrompt().trim());
         template.setInstructionPrompt(request.instructionPrompt().trim());
+        template.setOutputSchemaJson(outputSchemaService.resolveSchemaJson(request.featureType(), request.outputSchemaJson()));
         template.setEnabled(Boolean.TRUE.equals(request.enabled()));
     }
 
@@ -380,8 +394,9 @@ public class AiPromptTemplateService {
                 builtin.name(),
                 builtin.systemPrompt(),
                 builtin.instructionPrompt(),
+                builtin.outputSchemaJson(),
                 true,
-                "builtin:" + featureType.name() + ":" + sha256(builtin.systemPrompt() + "\n" + builtin.instructionPrompt()).substring(0, 16)
+                "builtin:" + featureType.name() + ":" + sha256(builtin.systemPrompt() + "\n" + builtin.instructionPrompt() + "\n" + builtin.outputSchemaJson()).substring(0, 16)
         );
     }
 
@@ -390,7 +405,7 @@ public class AiPromptTemplateService {
         return "template:" + template.getId()
                 + ":wordbook:" + normalizeWordbookId(template.getWordbookId())
                 + ":" + updatedAt
-                + ":" + sha256(template.getSystemPrompt() + "\n" + template.getInstructionPrompt()).substring(0, 16);
+                + ":" + sha256(template.getSystemPrompt() + "\n" + template.getInstructionPrompt() + "\n" + outputSchemaService.resolveSchemaJson(template.getFeatureType(), template.getOutputSchemaJson())).substring(0, 16);
     }
 
     private String copyName(String sourceName) {

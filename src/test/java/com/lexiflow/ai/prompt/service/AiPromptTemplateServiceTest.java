@@ -9,6 +9,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lexiflow.ai.prompt.domain.AiPromptFeatureBinding;
 import com.lexiflow.ai.prompt.domain.AiPromptFeatureType;
 import com.lexiflow.ai.prompt.domain.AiPromptTemplate;
@@ -40,10 +41,12 @@ class AiPromptTemplateServiceTest {
     private WordbookMapper wordbookMapper;
 
     private AiPromptTemplateService service;
+    private AiPromptOutputSchemaService outputSchemaService;
 
     @BeforeEach
     void setUp() {
-        service = new AiPromptTemplateService(templateMapper, bindingMapper, new DefaultAiPromptRegistry(), wordbookMapper);
+        outputSchemaService = new AiPromptOutputSchemaService(new ObjectMapper());
+        service = new AiPromptTemplateService(templateMapper, bindingMapper, new DefaultAiPromptRegistry(outputSchemaService), wordbookMapper, outputSchemaService);
     }
 
     @Test
@@ -55,6 +58,7 @@ class AiPromptTemplateServiceTest {
         assertThat(resolved.builtIn()).isTrue();
         assertThat(resolved.templateId()).isNull();
         assertThat(resolved.systemPrompt()).contains("LexiFlow");
+        assertThat(resolved.outputSchemaJson()).contains("\"answer\"");
         assertThat(resolved.cacheFingerprint()).startsWith("builtin:WORD_QA:");
     }
 
@@ -73,6 +77,7 @@ class AiPromptTemplateServiceTest {
         assertThat(resolved.builtIn()).isFalse();
         assertThat(resolved.templateId()).isEqualTo(12L);
         assertThat(resolved.templateName()).isEqualTo("完形模板");
+        assertThat(resolved.outputSchemaJson()).contains("\"passage\"");
         assertThat(resolved.cacheFingerprint()).startsWith("template:12:");
     }
 
@@ -167,6 +172,7 @@ class AiPromptTemplateServiceTest {
         assertThat(copied.getFeatureType()).isEqualTo(AiPromptFeatureType.WORD_QA);
         assertThat(copied.getName()).contains("副本");
         assertThat(copied.getSourceBuiltinKey()).isEqualTo("builtin:WORD_QA");
+        assertThat(copied.getOutputSchemaJson()).contains("\"answer\"");
         assertThat(copied.getCreatedBy()).isEqualTo(7L);
         assertThat(copied.getEnabled()).isTrue();
     }
@@ -204,6 +210,58 @@ class AiPromptTemplateServiceTest {
 
         verify(templateMapper).insert(captor.capture());
         assertThat(captor.getValue().getWordbookId()).isEqualTo(2L);
+        assertThat(captor.getValue().getOutputSchemaJson()).contains("\"answer\"");
+    }
+
+    @Test
+    void createTemplateShouldRejectSchemaWithoutRequiredField() {
+        String schema = """
+                {
+                  "keyPoints": [],
+                  "relatedWords": [],
+                  "followUps": []
+                }
+                """;
+
+        assertThatThrownBy(() -> service.createTemplate(7L, templateRequest(0L, schema)))
+                .isInstanceOf(BizException.class)
+                .hasMessageContaining("answer");
+
+        verify(templateMapper, never()).insert(any(AiPromptTemplate.class));
+    }
+
+    @Test
+    void createTemplateShouldRejectChangedDefaultFieldType() {
+        String schema = """
+                {
+                  "answer": [],
+                  "keyPoints": [],
+                  "relatedWords": [],
+                  "followUps": []
+                }
+                """;
+
+        assertThatThrownBy(() -> service.createTemplate(7L, templateRequest(0L, schema)))
+                .isInstanceOf(BizException.class)
+                .hasMessageContaining("类型不正确");
+
+        verify(templateMapper, never()).insert(any(AiPromptTemplate.class));
+    }
+
+    @Test
+    void createTemplateShouldRejectLegacyFieldSchema() {
+        String schema = """
+                {"fields":[
+                  {"key":"answer","label":"回答","type":"markdown","required":true},
+                  {"key":"keyPoints","label":"要点","type":"stringList","required":false}
+                ]}
+                """;
+
+        assertThatThrownBy(() -> service.createTemplate(7L, templateRequest(0L, schema)))
+                .isInstanceOf(BizException.class)
+                .hasMessageContaining("answer");
+
+        verify(templateMapper, never()).insert(any(AiPromptTemplate.class));
     }
 
     @Test
@@ -257,12 +315,17 @@ class AiPromptTemplateServiceTest {
     }
 
     private AiPromptTemplateRequest templateRequest(Long wordbookId) {
+        return templateRequest(wordbookId, null);
+    }
+
+    private AiPromptTemplateRequest templateRequest(Long wordbookId, String outputSchemaJson) {
         return new AiPromptTemplateRequest(
                 AiPromptFeatureType.WORD_QA,
                 wordbookId,
                 "词书专用模板",
                 "system",
                 "instruction",
+                outputSchemaJson,
                 true
         );
     }

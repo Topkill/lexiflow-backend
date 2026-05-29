@@ -24,6 +24,7 @@ public class AiPromptTemplate {
     private String name;
     private String systemPrompt;
     private String instructionPrompt;
+    private String outputSchemaJson;
     private Boolean enabled;
     private Long sourceTemplateId;
     private String sourceBuiltinKey;
