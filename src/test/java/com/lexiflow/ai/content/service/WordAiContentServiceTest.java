@@ -1,0 +1,211 @@
+package com.lexiflow.ai.content.service;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.lexiflow.ai.content.domain.AiContentType;
+import com.lexiflow.ai.content.mapper.AiContentCacheMapper;
+import com.lexiflow.ai.core.client.AiStreamDeltaHandler;
+import com.lexiflow.ai.core.dto.AiChatCompletionResult;
+import com.lexiflow.ai.core.service.AiGatewayService;
+import com.lexiflow.ai.prompt.domain.AiPromptFeatureType;
+import com.lexiflow.ai.prompt.service.AiPromptOutputSchemaService;
+import com.lexiflow.ai.prompt.service.AiPromptTemplateService;
+import com.lexiflow.ai.prompt.service.ResolvedAiPromptTemplate;
+import com.lexiflow.user.domain.TargetExam;
+import com.lexiflow.user.domain.UserSettings;
+import com.lexiflow.user.service.UserService;
+import com.lexiflow.wordbook.domain.Word;
+import com.lexiflow.wordbook.domain.Wordbook;
+import com.lexiflow.wordbook.domain.WordbookType;
+import com.lexiflow.wordbook.mapper.WordMapper;
+import com.lexiflow.wordbook.service.WordbookService;
+import java.io.ByteArrayOutputStream;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Method;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
+import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
+
+class WordAiContentServiceTest {
+
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @Test
+    void wordQaSourceJsonShouldOnlyExposeMinimalContext() throws Exception {
+        WordAiContentService service = new WordAiContentService(
+                mock(AiContentCacheMapper.class),
+                mock(AiGatewayService.class),
+                mock(WordbookService.class),
+                mock(WordMapper.class),
+                mock(UserService.class),
+                objectMapper,
+                mock(AiPromptTemplateService.class),
+                mock(AiPromptOutputSchemaService.class)
+        );
+        Word word = new Word();
+        word.setWord("namely");
+        word.setTrans("[{\"pos\":\"adv.\",\"cn\":\"即，也就是\"}]");
+        word.setSentences("[{\"c\":\"A district should serve its clientele, namely students.\"}]");
+        word.setSynos("[{\"ws\":[\"i.e.\"]}]");
+        word.setRelWords("{\"root\":\"keen\"}");
+        word.setPrimaryDefinition("即，也就是");
+        UserSettings settings = new UserSettings();
+        settings.setTargetExam(TargetExam.CET4);
+
+        String sourceJson = ReflectionTestUtils.invokeMethod(
+                service,
+                "buildSourceJson",
+                AiContentType.WORD_QA,
+                null,
+                word,
+                settings,
+                "这个词是什么意思？"
+        );
+        JsonNode source = objectMapper.readTree(sourceJson);
+
+        assertThat(source.fieldNames()).toIterable()
+                .containsExactly("question", "targetExam", "word", "trans");
+        assertThat(source.path("question").asText()).isEqualTo("这个词是什么意思？");
+        assertThat(source.path("targetExam").asText()).isEqualTo("CET4");
+        assertThat(source.path("word").asText()).isEqualTo("namely");
+        assertThat(source.path("trans").asText()).contains("即，也就是");
+        assertThat(source.has("contentType")).isFalse();
+        assertThat(source.has("wordbook")).isFalse();
+        assertThat(source.has("wordbookScope")).isFalse();
+        assertThat(source.toString()).doesNotContain("sentences", "synos", "relWords", "primaryDefinition");
+    }
+
+    @Test
+    void streamWordQuestionShouldKeepStreamingAfterAnswerNewlines() throws Exception {
+        AiContentCacheMapper cacheMapper = mock(AiContentCacheMapper.class);
+        AiGatewayService gatewayService = mock(AiGatewayService.class);
+        WordbookService wordbookService = mock(WordbookService.class);
+        WordMapper wordMapper = mock(WordMapper.class);
+        UserService userService = mock(UserService.class);
+        AiPromptTemplateService promptTemplateService = mock(AiPromptTemplateService.class);
+        AiPromptOutputSchemaService outputSchemaService = new AiPromptOutputSchemaService(objectMapper);
+        WordAiContentService service = new WordAiContentService(
+                cacheMapper,
+                gatewayService,
+                wordbookService,
+                wordMapper,
+                userService,
+                objectMapper,
+                promptTemplateService,
+                outputSchemaService
+        );
+        Wordbook wordbook = new Wordbook();
+        wordbook.setId(1L);
+        wordbook.setName("CET4");
+        wordbook.setType(WordbookType.CET4);
+        wordbook.setDifficultyLevel(4);
+        Word word = new Word();
+        word.setId(67L);
+        word.setWordbookId(1L);
+        word.setWord("plentiful");
+        word.setTrans("[{\"pos\":\"adj.\",\"cn\":\"丰富的，众多的\"}]");
+        UserSettings settings = new UserSettings();
+        settings.setTargetExam(TargetExam.CET4);
+        String schemaJson = wordQaSchemaWithExamples(outputSchemaService);
+        ResolvedAiPromptTemplate template = new ResolvedAiPromptTemplate(
+                AiPromptFeatureType.WORD_QA,
+                1L,
+                null,
+                "默认 AI 问答提示词",
+                "system",
+                "instruction",
+                schemaJson,
+                true,
+                "fingerprint"
+        );
+        String aiJson = """
+                {"answer":"**plentiful** 是形容词。\\n\\n例句：\\n- It is plentiful.","keyPoints":["点一","点二"],"relatedWords":["plenty (大量)"],"followUps":["继续问？"],"examples":["例一","例二"]}
+                """.trim();
+
+        when(wordbookService.getEnabledWordbook(1L)).thenReturn(wordbook);
+        when(wordMapper.selectOne(any())).thenReturn(word);
+        when(userService.getOrCreateSettings(9L)).thenReturn(settings);
+        when(promptTemplateService.resolve(AiPromptFeatureType.WORD_QA, 1L)).thenReturn(template);
+        when(gatewayService.generateJsonStream(eq(9L), eq(AiContentType.WORD_QA), any(), any()))
+                .thenAnswer(invocation -> {
+                    AiStreamDeltaHandler handler = invocation.getArgument(3);
+                    for (int index = 0; index < aiJson.length(); index += 5) {
+                        handler.onDelta(aiJson.substring(index, Math.min(index + 5, aiJson.length())));
+                    }
+                    return new AiChatCompletionResult(aiJson, 0, 0, 0);
+                });
+
+        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+        service.streamWordQuestion(9L, 1L, 67L, "plentiful 是什么意思？", true, outputStream);
+        String response = outputStream.toString(StandardCharsets.UTF_8);
+
+        assertThat(response).contains("event: chunk");
+        assertThat(response).contains("event: field_item");
+        assertThat(response).contains("\"field\":\"keyPoints\"");
+        assertThat(response).contains("\"field\":\"relatedWords\"");
+        assertThat(response).contains("\"field\":\"followUps\"");
+        assertThat(response).contains("\"field\":\"examples\"");
+        assertThat(response).contains("\"outputSchema\"");
+        assertThat(response).contains("event: done");
+    }
+
+    @Test
+    void wordQaStreamExtractorShouldEmitAnswerAndArrayItems() throws Exception {
+        Class<?> extractorClass = Class.forName(WordAiContentService.class.getName() + "$WordQaJsonStreamExtractor");
+        Constructor<?> constructor = extractorClass.getDeclaredConstructor(JsonNode.class, ObjectMapper.class);
+        constructor.setAccessible(true);
+        AiPromptOutputSchemaService outputSchemaService = new AiPromptOutputSchemaService(objectMapper);
+        JsonNode outputSchema = objectMapper.readTree(wordQaSchemaWithExamples(outputSchemaService));
+        Object extractor = constructor.newInstance(outputSchema, objectMapper);
+        Method append = extractorClass.getDeclaredMethod("append", String.class);
+        append.setAccessible(true);
+
+        String json = """
+                {"answer":"第一段\\n\\n- 第二段","keyPoints":["点一","点二"],"relatedWords":["namely (即)"],"followUps":["继续问？"],"examples":["例一"]}
+                """.trim();
+        StringBuilder answer = new StringBuilder();
+        List<String> items = new ArrayList<>();
+        for (int index = 0; index < json.length(); index += 4) {
+            Object delta = append.invoke(extractor, json.substring(index, Math.min(index + 4, json.length())));
+            Method answerMethod = delta.getClass().getDeclaredMethod("answer");
+            Method itemsMethod = delta.getClass().getDeclaredMethod("items");
+            answerMethod.setAccessible(true);
+            itemsMethod.setAccessible(true);
+            answer.append((String) answerMethod.invoke(delta));
+            @SuppressWarnings("unchecked")
+            List<Object> fieldItems = (List<Object>) itemsMethod.invoke(delta);
+            for (Object item : fieldItems) {
+                Method fieldMethod = item.getClass().getDeclaredMethod("field");
+                Method itemMethod = item.getClass().getDeclaredMethod("item");
+                fieldMethod.setAccessible(true);
+                itemMethod.setAccessible(true);
+                JsonNode itemNode = (JsonNode) itemMethod.invoke(item);
+                items.add(fieldMethod.invoke(item) + ":" + itemNode.asText());
+            }
+        }
+
+        assertThat(answer.toString()).isEqualTo("第一段\n\n- 第二段");
+        assertThat(items).containsExactly(
+                "keyPoints:点一",
+                "keyPoints:点二",
+                "relatedWords:namely (即)",
+                "followUps:继续问？",
+                "examples:例一"
+        );
+    }
+
+    private String wordQaSchemaWithExamples(AiPromptOutputSchemaService outputSchemaService) throws Exception {
+        ObjectNode schema = (ObjectNode) objectMapper.readTree(outputSchemaService.defaultSchemaJson(AiPromptFeatureType.WORD_QA));
+        schema.set("examples", objectMapper.createArrayNode());
+        return objectMapper.writeValueAsString(schema);
+    }
+}

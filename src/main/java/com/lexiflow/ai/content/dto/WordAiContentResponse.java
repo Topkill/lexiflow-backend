@@ -10,9 +10,14 @@ public record WordAiContentResponse(
         @Schema(description = "AI 内容类型", example = "EXPLANATION") AiContentType contentType,
         @Schema(description = "单词 ID") String wordId,
         @Schema(description = "词库 ID") String wordbookId,
-        @Schema(description = "结构化内容") JsonNode content
+        @Schema(description = "结构化内容") JsonNode content,
+        @Schema(description = "输出 JSON 结构") JsonNode outputSchema
 ) {
     public static WordAiContentResponse of(boolean cacheHit, AiContentType contentType, Long wordId, Long wordbookId, JsonNode content) {
-        return new WordAiContentResponse(cacheHit, contentType, String.valueOf(wordId), String.valueOf(wordbookId), content);
+        return of(cacheHit, contentType, wordId, wordbookId, content, null);
+    }
+
+    public static WordAiContentResponse of(boolean cacheHit, AiContentType contentType, Long wordId, Long wordbookId, JsonNode content, JsonNode outputSchema) {
+        return new WordAiContentResponse(cacheHit, contentType, String.valueOf(wordId), String.valueOf(wordbookId), content, outputSchema);
     }
 }
