@@ -300,7 +300,7 @@ public class ClozeQuizService {
 
         BizException lastValidationError = null;
         for (int attempt = 1; attempt <= MAX_GENERATE_ATTEMPTS; attempt++) {
-            AiPrompt prompt = buildPrompt(dailyTask, wordbookId, sourceType, selection, attempt, lastValidationError == null ? null : lastValidationError.getCustomMessage(), sourceHash, promptTemplate);
+            AiPrompt prompt = buildPrompt(sourceType, selection, sourceHash, promptTemplate);
             try {
                 AiChatCompletionResult result = aiGatewayService.generateJson(userId, AiContentType.CLOZE, prompt);
                 JsonNode content = parseJson(result.content());
@@ -619,24 +619,17 @@ public class ClozeQuizService {
         return quiz;
     }
 
-    private AiPrompt buildPrompt(DailyTask dailyTask, Long wordbookId, ClozeSourceType sourceType, ClozeWordSelection selection, int attempt, String previousError, String sourceHash, ResolvedAiPromptTemplate promptTemplate) {
+    private AiPrompt buildPrompt(ClozeSourceType sourceType, ClozeWordSelection selection, String sourceHash, ResolvedAiPromptTemplate promptTemplate) {
         Map<String, Object> context = new LinkedHashMap<>();
-        context.put("dailyTaskId", String.valueOf(dailyTask.getId()));
         context.put("sourceType", sourceType.name());
-        context.put("wordbookId", String.valueOf(wordbookId));
         context.put("blankWords", toPromptWords(selection.blankWords()));
         context.put("backgroundWords", toPromptWords(selection.backgroundWords()));
         context.put("blankCount", selection.blankWords().size());
-        context.put("attempt", attempt);
-        if (StringUtils.hasText(previousError)) {
-            context.put("previousValidationError", previousError);
-        }
         String sourceJson = toJson(context);
         String userPrompt = "本次出题上下文如下：\n"
                 + "- blankWords：必须逐字出现在 passage 中，后端会自动挖空这些词。\n"
                 + "- backgroundWords：背景词，可以自然融入短文，不强制全部使用。\n"
-                + "- blankCount：目标挖空数量。\n"
-                + "- previousValidationError：如果存在，表示上一次生成未通过校验，本次必须修正该问题。\n\n"
+                + "- blankCount：目标挖空数量。\n\n"
                 + sourceJson
                 + "\n\n请基于上述上下文生成完形填空原文。\n\n"
                 + promptTemplate.instructionPrompt()
@@ -656,7 +649,6 @@ public class ClozeQuizService {
         return words.stream()
                 .map(word -> {
                     Map<String, Object> item = new LinkedHashMap<>();
-                    item.put("wordId", String.valueOf(word.getId()));
                     item.put("word", word.getWord());
                     item.put("primaryPos", safe(word.getPrimaryPos()));
                     item.put("primaryDefinition", safe(word.getPrimaryDefinition()));
