@@ -13,11 +13,12 @@ public record ClozeAttemptAiReviewResponse(
         @Schema(description = "状态") String status,
         @Schema(description = "是否命中缓存") Boolean cacheHit,
         @Schema(description = "评阅内容") JsonNode content,
+        @Schema(description = "输出 JSON 结构") JsonNode outputSchema,
         @Schema(description = "打字机展示文本") String displayText,
         @Schema(description = "错误信息") String errorMessage
 ) {
     public static ClozeAttemptAiReviewResponse none(Long attemptId) {
-        return new ClozeAttemptAiReviewResponse(null, String.valueOf(attemptId), "NONE", false, null, "", null);
+        return new ClozeAttemptAiReviewResponse(null, String.valueOf(attemptId), "NONE", false, null, null, "", null);
     }
 
     public static ClozeAttemptAiReviewResponse from(ClozeAttemptAiReview review, ObjectMapper objectMapper) {
@@ -26,6 +27,10 @@ public record ClozeAttemptAiReviewResponse(
     }
 
     public static ClozeAttemptAiReviewResponse of(ClozeAttemptAiReview review, JsonNode contentNode) {
+        return of(review, contentNode, null);
+    }
+
+    public static ClozeAttemptAiReviewResponse of(ClozeAttemptAiReview review, JsonNode contentNode, JsonNode outputSchema) {
         boolean cacheHit = review.getStatus() == ClozeAttemptAiReviewStatus.DONE && contentNode != null;
         return new ClozeAttemptAiReviewResponse(
                 review.getId() == null ? null : String.valueOf(review.getId()),
@@ -33,6 +38,7 @@ public record ClozeAttemptAiReviewResponse(
                 review.getStatus() == null ? "RUNNING" : review.getStatus().name(),
                 cacheHit,
                 contentNode,
+                outputSchema,
                 ClozeAttemptAiReviewDisplayFormatter.format(contentNode),
                 review.getErrorMessage()
         );

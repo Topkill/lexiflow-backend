@@ -13,6 +13,7 @@ import com.lexiflow.ai.core.dto.AiPrompt;
 import com.lexiflow.ai.core.service.AiGatewayService;
 import com.lexiflow.ai.core.util.AiJsonUtils;
 import com.lexiflow.ai.prompt.domain.AiPromptFeatureType;
+import com.lexiflow.ai.prompt.service.AiPromptOutputSchemaService;
 import com.lexiflow.ai.prompt.service.AiPromptTemplateService;
 import com.lexiflow.ai.prompt.service.ResolvedAiPromptTemplate;
 import com.lexiflow.async.domain.AsyncTask;
@@ -103,6 +104,7 @@ public class ClozeQuizService {
     private final ObjectMapper objectMapper;
     private final SpacedRepetitionService spacedRepetitionService;
     private final AiPromptTemplateService aiPromptTemplateService;
+    private final AiPromptOutputSchemaService outputSchemaService;
 
     public CreateClozeTaskResponse createClozeTask(Long userId, CreateClozeTaskRequest request) {
         DailyTask dailyTask = getOwnedDailyTask(userId, request.dailyTaskId());
@@ -630,7 +632,16 @@ public class ClozeQuizService {
             context.put("previousValidationError", previousError);
         }
         String sourceJson = toJson(context);
-        String userPrompt = promptTemplate.instructionPrompt() + "\n" + sourceJson;
+        String userPrompt = "本次出题上下文如下：\n"
+                + "- blankWords：必须逐字出现在 passage 中，后端会自动挖空这些词。\n"
+                + "- backgroundWords：背景词，可以自然融入短文，不强制全部使用。\n"
+                + "- blankCount：目标挖空数量。\n"
+                + "- previousValidationError：如果存在，表示上一次生成未通过校验，本次必须修正该问题。\n\n"
+                + sourceJson
+                + "\n\n请基于上述上下文生成完形填空原文。\n\n"
+                + promptTemplate.instructionPrompt()
+                + "\n\n"
+                + outputSchemaService.buildOutputFormatPrompt(promptTemplate.outputSchemaJson());
         return new AiPrompt(
                 promptTemplate.systemPrompt(),
                 userPrompt,

@@ -8,6 +8,7 @@ import com.lexiflow.ai.core.dto.AiChatCompletionResult;
 import com.lexiflow.ai.core.dto.AiPrompt;
 import com.lexiflow.ai.core.service.AiGatewayService;
 import com.lexiflow.ai.prompt.domain.AiPromptFeatureType;
+import com.lexiflow.ai.prompt.service.AiPromptOutputSchemaService;
 import com.lexiflow.ai.prompt.service.AiPromptTemplateService;
 import com.lexiflow.ai.prompt.service.ResolvedAiPromptTemplate;
 import com.lexiflow.common.error.ErrorCode;
@@ -56,6 +57,7 @@ public class ClozeAttemptAiReviewService {
     private final ClozeQuizBlankMapper blankMapper;
     private final ClozeQuizService clozeQuizService;
     private final AiPromptTemplateService aiPromptTemplateService;
+    private final AiPromptOutputSchemaService outputSchemaService;
     private final ObjectMapper objectMapper;
     private final Map<Long, Object> reviewLocks = new ConcurrentHashMap<>();
 
@@ -71,7 +73,7 @@ public class ClozeAttemptAiReviewService {
                 return ClozeAttemptAiReviewResponse.none(attemptId);
             }
         }
-        return ClozeAttemptAiReviewResponse.from(review, objectMapper);
+        return ClozeAttemptAiReviewResponse.of(review, parseContent(review.getContentJson()), outputSchemaService.schemaNode(buildPromptContext(userId, attemptId, getOwnedAttempt(userId, attemptId)).promptTemplate().outputSchemaJson()));
     }
 
     public void streamReview(Long userId, Long attemptId, boolean regenerate, OutputStream outputStream) throws IOException {
@@ -91,7 +93,7 @@ public class ClozeAttemptAiReviewService {
                     && existingReview.getStatus() == ClozeAttemptAiReviewStatus.DONE
                     && StringUtils.hasText(existingReview.getContentJson())
                     && sourceHash.equals(existingReview.getSourceHash())) {
-                ClozeAttemptAiReviewResponse cached = ClozeAttemptAiReviewResponse.from(existingReview, objectMapper);
+                ClozeAttemptAiReviewResponse cached = ClozeAttemptAiReviewResponse.of(existingReview, parseContent(existingReview.getContentJson()), outputSchemaService.schemaNode(promptTemplate.outputSchemaJson()));
                 try (OutputStreamWriter writer = new OutputStreamWriter(outputStream, StandardCharsets.UTF_8)) {
                     writeEvent(writer, "status", Map.of("status", "DONE", "message", "已命中缓存"));
                     streamDisplayText(writer, cached.displayText());
@@ -106,7 +108,7 @@ public class ClozeAttemptAiReviewService {
                 try {
                     AiPrompt prompt = new AiPrompt(
                             promptTemplate.systemPrompt(),
-                            promptTemplate.instructionPrompt() + "\n" + sourceJson,
+                            buildManagedPrompt(promptTemplate, sourceJson),
                             sourceHash,
                             promptTemplate.featureType().name(),
                             promptTemplate.templateId(),
@@ -120,7 +122,7 @@ public class ClozeAttemptAiReviewService {
                     review.setErrorMessage(null);
                     reviewMapper.updateById(review);
 
-                    ClozeAttemptAiReviewResponse response = ClozeAttemptAiReviewResponse.of(review, contentNode);
+                    ClozeAttemptAiReviewResponse response = ClozeAttemptAiReviewResponse.of(review, contentNode, outputSchemaService.schemaNode(promptTemplate.outputSchemaJson()));
                     streamDisplayText(writer, response.displayText());
                     writeEvent(writer, "done", response);
                 } catch (BizException ex) {
@@ -259,6 +261,26 @@ public class ClozeAttemptAiReviewService {
         return objectMapper.valueToTree(buildFallbackContent(attemptResponse, blankNoMap));
     }
 
+    private String buildManagedPrompt(ResolvedAiPromptTemplate promptTemplate, String sourceJson) {
+        return "以下是本次完形填空作答上下文 JSON：\n"
+                + sourceJson
+                + "\n\n"
+                + promptTemplate.instructionPrompt()
+                + "\n\n"
+                + outputSchemaService.buildOutputFormatPrompt(promptTemplate.outputSchemaJson());
+    }
+
+    private JsonNode parseContent(String contentJson) {
+        if (!StringUtils.hasText(contentJson)) {
+            return null;
+        }
+        try {
+            return objectMapper.readTree(contentJson);
+        } catch (Exception ex) {
+            return null;
+        }
+    }
+
     private ClozeAttemptAiReviewContentResponse buildFallbackContent(ClozeAttemptResponse attemptResponse, Map<Long, Integer> blankNoMap) {
         List<Integer> wrongBlankNos = new ArrayList<>();
         List<String> strengths = new ArrayList<>();
@@ -315,9 +337,13 @@ public class ClozeAttemptAiReviewService {
         writer.write(event);
         writer.write('\n');
         writer.write("data: ");
-        writer.write(toJson(data));
+        writer.write(toSseDataJson(data));
         writer.write("\n\n");
         writer.flush();
+    }
+
+    private String toSseDataJson(Object data) {
+        return toJson(data);
     }
 
     private void sleepQuietly(long millis) {
