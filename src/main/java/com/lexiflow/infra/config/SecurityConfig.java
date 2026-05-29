@@ -5,6 +5,7 @@ import com.lexiflow.auth.security.JwtAuthenticationFilter;
 import com.lexiflow.common.api.ApiResponse;
 import com.lexiflow.common.error.ErrorCode;
 import com.lexiflow.infra.properties.CorsProperties;
+import jakarta.servlet.DispatcherType;
 import jakarta.servlet.http.HttpServletResponse;
 import java.util.List;
 import java.util.Objects;
@@ -44,6 +45,8 @@ public class SecurityConfig {
                 .logout(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
+                        .dispatcherTypeMatchers(DispatcherType.ERROR, DispatcherType.ASYNC).permitAll()
+                        .requestMatchers("/error").permitAll()
                         .requestMatchers(
                                 "/api/v1/ping",
                                 "/api/v1/auth/register",
@@ -100,6 +103,9 @@ public class SecurityConfig {
     }
 
     private void writeErrorResponse(HttpServletResponse response, int status, ErrorCode errorCode) throws java.io.IOException {
+        if (response.isCommitted()) {
+            return;
+        }
         response.setStatus(status);
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         response.setCharacterEncoding("UTF-8");

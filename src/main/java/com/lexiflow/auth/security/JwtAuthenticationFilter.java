@@ -2,6 +2,7 @@ package com.lexiflow.auth.security;
 
 import com.lexiflow.user.domain.User;
 import com.lexiflow.user.service.UserService;
+import jakarta.servlet.DispatcherType;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -23,6 +24,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtTokenService jwtTokenService;
     private final UserService userService;
+
+    @Override
+    protected boolean shouldNotFilter(HttpServletRequest request) {
+        DispatcherType dispatcherType = request.getDispatcherType();
+        return dispatcherType == DispatcherType.ERROR || dispatcherType == DispatcherType.ASYNC;
+    }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
