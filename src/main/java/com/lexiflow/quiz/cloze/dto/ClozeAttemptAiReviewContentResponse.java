@@ -13,7 +13,8 @@ public record ClozeAttemptAiReviewContentResponse(
         @Schema(description = "亮点") List<String> strengths,
         @Schema(description = "薄弱点") List<ClozeAttemptAiReviewWeaknessResponse> weaknesses,
         @Schema(description = "学习建议") List<String> suggestions,
-        @Schema(description = "逐空点评") List<ClozeAttemptAiReviewBlankReviewResponse> blankReviews
+        @Schema(description = "逐空点评") List<ClozeAttemptAiReviewBlankReviewResponse> blankReviews,
+        @Schema(description = "语法小知识") String grammarTip
 ) {
     public static ClozeAttemptAiReviewContentResponse from(JsonNode node) {
         if (node == null || node.isMissingNode() || node.isNull()) {
@@ -25,15 +26,17 @@ public record ClozeAttemptAiReviewContentResponse(
         List<ClozeAttemptAiReviewWeaknessResponse> weaknesses = normalizeWeaknesses(node.path("weaknesses"));
         List<String> suggestions = normalizeTexts(node.path("suggestions"));
         List<ClozeAttemptAiReviewBlankReviewResponse> blankReviews = normalizeBlankReviews(node.path("blankReviews"));
+        String grammarTip = normalize(node.path("grammarTip").asText(""));
         if (!StringUtils.hasText(overall)
                 && mistakeTags.isEmpty()
                 && strengths.isEmpty()
                 && weaknesses.isEmpty()
                 && suggestions.isEmpty()
-                && blankReviews.isEmpty()) {
+                && blankReviews.isEmpty()
+                && !StringUtils.hasText(grammarTip)) {
             return null;
         }
-        return new ClozeAttemptAiReviewContentResponse(overall, mistakeTags, strengths, weaknesses, suggestions, blankReviews);
+        return new ClozeAttemptAiReviewContentResponse(overall, mistakeTags, strengths, weaknesses, suggestions, blankReviews, grammarTip);
     }
 
     private static List<String> normalizeTexts(JsonNode node) {

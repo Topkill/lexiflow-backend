@@ -319,7 +319,8 @@ public class ClozeAttemptAiReviewService {
                 strengths,
                 List.of(ClozeAttemptAiReviewWeaknessResponse.of("词义辨析", wrongBlankNos, "个别空格的中文释义判断还不够稳定。")),
                 suggestions,
-                blankReviews
+                blankReviews,
+                ""
         );
     }
 

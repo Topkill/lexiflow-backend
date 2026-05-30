@@ -72,6 +72,13 @@ public final class ClozeAttemptAiReviewDisplayFormatter {
                 }
             }
         }
+
+        String grammarTip = content.path("grammarTip").asText("");
+        if (StringUtils.hasText(grammarTip)) {
+            appendBlankLine(builder);
+            appendSectionHeading(builder, "语法小知识");
+            appendLine(builder, displayText(grammarTip));
+        }
         return builder.toString().trim();
     }
 

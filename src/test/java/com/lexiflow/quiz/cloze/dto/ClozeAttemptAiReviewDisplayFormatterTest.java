@@ -36,7 +36,8 @@ class ClozeAttemptAiReviewDisplayFormatterTest {
                       "comment": "你把resume用成了名词，但这里需要形容词修饰director。",
                       "tip": "先看后面的名词，判断前面需要什么词性。"
                     }
-                  ]
+                  ],
+                  "grammarTip": "形容词通常放在名词前，用来说明这个名词的特点。"
                 }
                 """;
 
@@ -48,9 +49,11 @@ class ClozeAttemptAiReviewDisplayFormatterTest {
         assertThat(text).contains("## 需要注意");
         assertThat(text).contains("## 学习建议");
         assertThat(text).contains("## 逐空提醒");
+        assertThat(text).contains("## 语法小知识");
         assertThat(text).contains("### 第3空");
         assertThat(text).contains("将形容词 artistic 与动词 resume 互换");
         assertThat(text).contains("形容词修饰 director");
+        assertThat(text).contains("形容词通常放在名词前");
         assertThat(text).doesNotContain("AI评阅");
     }
 }

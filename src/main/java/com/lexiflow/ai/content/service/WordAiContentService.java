@@ -300,7 +300,7 @@ public class WordAiContentService {
             case EXPLANATION -> "输出 JSON 字段：brief 字符串；usage 字符串数组；confusingWords 字符串数组；scenes 字符串数组。";
             case EXAMPLES -> "输出 JSON 字段：simple、medium、examStyle 三个对象；每个对象包含 sentence 英文例句和 translation 中文翻译。";
             case MNEMONIC -> "输出 JSON 字段：association 字符串；rootsAffixes 字符串；pitfalls 字符串数组。";
-            case WORD_QA -> "输出 JSON 字段：answer 字符串；keyPoints 字符串数组；relatedWords 字符串数组；followUps 字符串数组。回答必须直接回应用户问题，不能编造未给出的固定知识；如果问题超出单词学习范围，请简短说明并拉回该单词。允许 answer 里的字符串适当使用 Markdown 语法。";
+            case WORD_QA -> "输出 JSON 字段：answer 字符串；keyPoints 字符串数组；relatedWords 字符串数组；followUps 字符串数组；grammarTip 字符串。回答必须直接回应用户问题，不能编造未给出的固定知识；如果问题超出单词学习范围，请简短说明并拉回该单词。grammarTip 最后补充一条零基础英语语法小知识，优先相关，否则由你自由生成。允许 answer 和 grammarTip 里的字符串适当使用 Markdown 语法。";
             default -> throw new BizException(ErrorCode.BAD_REQUEST, "不支持的 AI 单词内容类型");
         };
         String userPrompt = schema + "\n请基于以下单词上下文生成内容，避免编造不存在的固定搭配。\n" + sourceJson;

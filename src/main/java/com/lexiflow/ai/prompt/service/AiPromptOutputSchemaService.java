@@ -38,6 +38,7 @@ public class AiPromptOutputSchemaService {
                 schema.set("keyPoints", objectMapper.createArrayNode());
                 schema.set("relatedWords", objectMapper.createArrayNode());
                 schema.set("followUps", objectMapper.createArrayNode());
+                schema.put("grammarTip", "");
             }
             case CLOZE_QUIZ -> {
                 schema.put("title", "");
@@ -66,6 +67,7 @@ public class AiPromptOutputSchemaService {
                 blankReview.put("blankNo", 0);
                 blankReview.put("comment", "");
                 blankReview.put("tip", "");
+                schema.put("grammarTip", "");
             }
             default -> throw new BizException(ErrorCode.BAD_REQUEST, "不支持的 AI 功能类型");
         }
@@ -97,6 +99,9 @@ public class AiPromptOutputSchemaService {
             normalized.set(key, entry.getValue());
         });
         enrichFeatureSchema(featureType, normalized);
+        if (normalized.size() > MAX_FIELDS) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "输出 JSON 字段数量不能超过 " + MAX_FIELDS);
+        }
 
         for (RequiredFieldSpec spec : requiredSpecs(featureType)) {
             JsonNode value = normalized.get(spec.key());
@@ -112,9 +117,21 @@ public class AiPromptOutputSchemaService {
     }
 
     private void enrichFeatureSchema(AiPromptFeatureType featureType, ObjectNode normalized) {
-        if (featureType != AiPromptFeatureType.CLOZE_QUIZ) {
-            return;
+        switch (featureType) {
+            case WORD_QA, CLOZE_REVIEW -> enrichGrammarTip(normalized);
+            case CLOZE_QUIZ -> enrichClozeQuizSchema(normalized);
+            default -> {
+            }
         }
+    }
+
+    private void enrichGrammarTip(ObjectNode normalized) {
+        if (!normalized.has("grammarTip")) {
+            normalized.put("grammarTip", "");
+        }
+    }
+
+    private void enrichClozeQuizSchema(ObjectNode normalized) {
         JsonNode explanations = normalized.get("explanations");
         if (explanations == null || !explanations.isArray() || explanations.isEmpty() || !explanations.get(0).isObject()) {
             return;
@@ -206,7 +223,8 @@ public class AiPromptOutputSchemaService {
                 new RequiredFieldSpec("answer", JsonValueKind.STRING),
                 new RequiredFieldSpec("keyPoints", JsonValueKind.ARRAY),
                 new RequiredFieldSpec("relatedWords", JsonValueKind.ARRAY),
-                new RequiredFieldSpec("followUps", JsonValueKind.ARRAY)
+                new RequiredFieldSpec("followUps", JsonValueKind.ARRAY),
+                new RequiredFieldSpec("grammarTip", JsonValueKind.STRING)
         ));
         fields.put(AiPromptFeatureType.CLOZE_QUIZ, List.of(
                 new RequiredFieldSpec("title", JsonValueKind.STRING),
@@ -220,7 +238,8 @@ public class AiPromptOutputSchemaService {
                 new RequiredFieldSpec("strengths", JsonValueKind.ARRAY),
                 new RequiredFieldSpec("weaknesses", JsonValueKind.ARRAY, Set.of("tag", "blankNos", "comment")),
                 new RequiredFieldSpec("suggestions", JsonValueKind.ARRAY),
-                new RequiredFieldSpec("blankReviews", JsonValueKind.ARRAY, Set.of("blankNo", "comment", "tip"))
+                new RequiredFieldSpec("blankReviews", JsonValueKind.ARRAY, Set.of("blankNo", "comment", "tip")),
+                new RequiredFieldSpec("grammarTip", JsonValueKind.STRING)
         ));
         return fields;
     }
