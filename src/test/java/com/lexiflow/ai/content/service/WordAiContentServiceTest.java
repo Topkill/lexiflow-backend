@@ -34,6 +34,11 @@ import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.TransactionStatus;
+import org.springframework.transaction.support.SimpleTransactionStatus;
+import org.springframework.transaction.support.TransactionTemplate;
 
 class WordAiContentServiceTest {
 
@@ -49,7 +54,8 @@ class WordAiContentServiceTest {
                 mock(UserService.class),
                 objectMapper,
                 mock(AiPromptTemplateService.class),
-                mock(AiPromptOutputSchemaService.class)
+                mock(AiPromptOutputSchemaService.class),
+                transactionTemplate()
         );
         Word word = new Word();
         word.setWord("namely");
@@ -101,7 +107,8 @@ class WordAiContentServiceTest {
                 userService,
                 objectMapper,
                 promptTemplateService,
-                outputSchemaService
+                outputSchemaService,
+                transactionTemplate()
         );
         Wordbook wordbook = new Wordbook();
         wordbook.setId(1L);
@@ -207,5 +214,22 @@ class WordAiContentServiceTest {
         ObjectNode schema = (ObjectNode) objectMapper.readTree(outputSchemaService.defaultSchemaJson(AiPromptFeatureType.WORD_QA));
         schema.set("examples", objectMapper.createArrayNode());
         return objectMapper.writeValueAsString(schema);
+    }
+
+    private static TransactionTemplate transactionTemplate() {
+        return new TransactionTemplate(new PlatformTransactionManager() {
+            @Override
+            public TransactionStatus getTransaction(TransactionDefinition definition) {
+                return new SimpleTransactionStatus();
+            }
+
+            @Override
+            public void commit(TransactionStatus status) {
+            }
+
+            @Override
+            public void rollback(TransactionStatus status) {
+            }
+        });
     }
 }

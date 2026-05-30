@@ -38,8 +38,9 @@ import java.util.Map;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
 @RequiredArgsConstructor
@@ -57,13 +58,12 @@ public class WordAiContentService {
     private final ObjectMapper objectMapper;
     private final AiPromptTemplateService aiPromptTemplateService;
     private final AiPromptOutputSchemaService outputSchemaService;
+    private final TransactionTemplate transactionTemplate;
 
-    @Transactional
     public WordAiContentResponse generateWordContent(Long userId, Long wordbookId, Long wordId, AiContentType contentType, boolean regenerate) {
         return generateWordContent(userId, wordbookId, wordId, contentType, null, regenerate);
     }
 
-    @Transactional
     public WordAiContentResponse generateWordQuestion(Long userId, Long wordbookId, Long wordId, String question, boolean regenerate) {
         if (question == null || question.isBlank()) {
             throw new BizException(ErrorCode.BAD_REQUEST, "问题不能为空");
@@ -89,8 +89,7 @@ public class WordAiContentService {
             if (!regenerate) {
                 AiContentCache cache = findUsableCache(AiContentType.WORD_QA, cacheKey);
                 if (cache != null) {
-                    cache.setHitCount((cache.getHitCount() == null ? 0 : cache.getHitCount()) + 1);
-                    aiContentCacheMapper.updateById(cache);
+                    incrementCacheHit(cache);
                     JsonNode content = parseJson(cache.getContentJson());
                     writeEvent(writer, "status", buildWordQaStatusPayload("CACHE_HIT", "已命中缓存", outputSchema));
                     streamCachedAnswer(writer, content);
@@ -198,8 +197,7 @@ public class WordAiContentService {
         if (!regenerate) {
             AiContentCache cache = findUsableCache(contentType, cacheKey);
             if (cache != null) {
-                cache.setHitCount((cache.getHitCount() == null ? 0 : cache.getHitCount()) + 1);
-                aiContentCacheMapper.updateById(cache);
+                incrementCacheHit(cache);
                 JsonNode outputSchema = promptTemplate == null ? null : outputSchemaService.schemaNode(promptTemplate.outputSchemaJson());
                 return WordAiContentResponse.of(true, contentType, wordId, wordbookId, parseJson(cache.getContentJson()), outputSchema);
             }
@@ -235,31 +233,52 @@ public class WordAiContentService {
                 .last("LIMIT 1"));
     }
 
+    private void incrementCacheHit(AiContentCache cache) {
+        transactionTemplate.executeWithoutResult(status -> {
+            cache.setHitCount((cache.getHitCount() == null ? 0 : cache.getHitCount()) + 1);
+            aiContentCacheMapper.updateById(cache);
+        });
+    }
+
     private void upsertCache(AiContentType contentType, String cacheKey, String sourceHash, Long wordId, Long wordbookId, JsonNode content) {
-        AiContentCache cache = aiContentCacheMapper.selectOne(new LambdaQueryWrapper<AiContentCache>()
+        transactionTemplate.executeWithoutResult(status -> {
+            AiContentCache cache = findCacheByKey(contentType, cacheKey);
+            if (cache == null) {
+                cache = new AiContentCache();
+                cache.setContentType(contentType);
+                cache.setCacheKey(cacheKey);
+                cache.setUserId(null);
+                cache.setWordId(wordId);
+                cache.setWordbookId(wordbookId);
+                cache.setSourceHash(sourceHash);
+                cache.setHitCount(0);
+                cache.setDeleted(0);
+                fillCacheContent(cache, content);
+                try {
+                    aiContentCacheMapper.insert(cache);
+                    return;
+                } catch (DuplicateKeyException ignored) {
+                    return;
+                }
+            }
+            fillCacheContent(cache, content);
+            aiContentCacheMapper.updateById(cache);
+        });
+    }
+
+    private AiContentCache findCacheByKey(AiContentType contentType, String cacheKey) {
+        return aiContentCacheMapper.selectOne(new LambdaQueryWrapper<AiContentCache>()
                 .eq(AiContentCache::getContentType, contentType)
                 .eq(AiContentCache::getCacheKey, cacheKey)
+                .eq(AiContentCache::getDeleted, 0)
                 .last("LIMIT 1"));
-        if (cache == null) {
-            cache = new AiContentCache();
-            cache.setContentType(contentType);
-            cache.setCacheKey(cacheKey);
-            cache.setUserId(null);
-            cache.setWordId(wordId);
-            cache.setWordbookId(wordbookId);
-            cache.setSourceHash(sourceHash);
-            cache.setHitCount(0);
-            cache.setDeleted(0);
-        }
+    }
+
+    private void fillCacheContent(AiContentCache cache, JsonNode content) {
         cache.setContentJson(toJson(content));
         cache.setMarkdownContent(null);
         cache.setModelName(null);
         cache.setExpiresAt(null);
-        if (cache.getId() == null) {
-            aiContentCacheMapper.insert(cache);
-        } else {
-            aiContentCacheMapper.updateById(cache);
-        }
     }
 
     private AiPrompt buildPrompt(AiContentType contentType, String sourceJson, String sourceHash, ResolvedAiPromptTemplate promptTemplate) {

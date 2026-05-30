@@ -74,8 +74,10 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StringUtils;
 
 @Service
@@ -105,6 +107,7 @@ public class ClozeQuizService {
     private final SpacedRepetitionService spacedRepetitionService;
     private final AiPromptTemplateService aiPromptTemplateService;
     private final AiPromptOutputSchemaService outputSchemaService;
+    private final TransactionTemplate transactionTemplate;
 
     public CreateClozeTaskResponse createClozeTask(Long userId, CreateClozeTaskRequest request) {
         DailyTask dailyTask = getOwnedDailyTask(userId, request.dailyTaskId());
@@ -283,7 +286,6 @@ public class ClozeQuizService {
                 .collect(Collectors.toMap(Word::getId, Function.identity()));
     }
 
-    @Transactional
     protected ClozeQuiz generateQuiz(Long userId, DailyTask dailyTask, Long wordbookId, Long asyncTaskId, ClozeSourceType sourceType, int targetWordCount, boolean regenerate) {
         ClozeWordSelection selection = selectClozeWords(userId, dailyTask, wordbookId, sourceType, targetWordCount);
         if (selection.targetWords().isEmpty() || selection.blankWords().isEmpty()) {
@@ -305,8 +307,7 @@ public class ClozeQuizService {
                 AiChatCompletionResult result = aiGatewayService.generateJson(userId, AiContentType.CLOZE, prompt);
                 JsonNode content = parseJson(result.content());
                 validateGeneratedContent(content, selection);
-                upsertClozeCache(userId, wordbookId, sourceHash, content);
-                return saveQuiz(userId, dailyTask, wordbookId, asyncTaskId, sourceType, selection, content);
+                return saveGeneratedQuiz(userId, dailyTask, wordbookId, asyncTaskId, sourceType, selection, sourceHash, content);
             } catch (BizException ex) {
                 if (ex.getErrorCode() != ErrorCode.AI_CALL_FAILED) {
                     throw ex;
@@ -316,7 +317,7 @@ public class ClozeQuizService {
         }
         JsonNode fallbackContent = buildFallbackContent(selection, lastValidationError);
         validateGeneratedContent(fallbackContent, selection);
-        return saveQuiz(userId, dailyTask, wordbookId, asyncTaskId, sourceType, selection, fallbackContent);
+        return saveQuizInTransaction(userId, dailyTask, wordbookId, asyncTaskId, sourceType, selection, fallbackContent);
     }
 
     private ClozeWordSelection selectClozeWords(Long userId, DailyTask dailyTask, Long wordbookId, ClozeSourceType sourceType, int targetWordCount) {
@@ -544,20 +545,30 @@ public class ClozeQuizService {
         try {
             JsonNode content = parseJson(cache.getContentJson());
             validateGeneratedContent(content, selection);
-            cache.setHitCount((cache.getHitCount() == null ? 0 : cache.getHitCount()) + 1);
-            aiContentCacheMapper.updateById(cache);
-            return saveQuiz(userId, dailyTask, wordbookId, asyncTaskId, sourceType, selection, content);
+            return transactionTemplate.execute(status -> {
+                cache.setHitCount((cache.getHitCount() == null ? 0 : cache.getHitCount()) + 1);
+                aiContentCacheMapper.updateById(cache);
+                return saveQuiz(userId, dailyTask, wordbookId, asyncTaskId, sourceType, selection, content);
+            });
         } catch (BizException ex) {
             return null;
         }
     }
 
+    private ClozeQuiz saveGeneratedQuiz(Long userId, DailyTask dailyTask, Long wordbookId, Long asyncTaskId, ClozeSourceType sourceType, ClozeWordSelection selection, String sourceHash, JsonNode content) {
+        return transactionTemplate.execute(status -> {
+            upsertClozeCache(userId, wordbookId, sourceHash, content);
+            return saveQuiz(userId, dailyTask, wordbookId, asyncTaskId, sourceType, selection, content);
+        });
+    }
+
+    private ClozeQuiz saveQuizInTransaction(Long userId, DailyTask dailyTask, Long wordbookId, Long asyncTaskId, ClozeSourceType sourceType, ClozeWordSelection selection, JsonNode content) {
+        return transactionTemplate.execute(status -> saveQuiz(userId, dailyTask, wordbookId, asyncTaskId, sourceType, selection, content));
+    }
+
     private void upsertClozeCache(Long userId, Long wordbookId, String sourceHash, JsonNode content) {
         String cacheKey = clozeCacheKey(sourceHash);
-        AiContentCache cache = aiContentCacheMapper.selectOne(new LambdaQueryWrapper<AiContentCache>()
-                .eq(AiContentCache::getContentType, AiContentType.CLOZE)
-                .eq(AiContentCache::getCacheKey, cacheKey)
-                .last("LIMIT 1"));
+        AiContentCache cache = findClozeCacheByKey(cacheKey);
         if (cache == null) {
             cache = new AiContentCache();
             cache.setContentType(AiContentType.CLOZE);
@@ -567,16 +578,31 @@ public class ClozeQuizService {
             cache.setSourceHash(sourceHash);
             cache.setHitCount(0);
             cache.setDeleted(0);
+            fillClozeCacheContent(cache, content);
+            try {
+                aiContentCacheMapper.insert(cache);
+                return;
+            } catch (DuplicateKeyException ignored) {
+                return;
+            }
         }
+        fillClozeCacheContent(cache, content);
+        aiContentCacheMapper.updateById(cache);
+    }
+
+    private AiContentCache findClozeCacheByKey(String cacheKey) {
+        return aiContentCacheMapper.selectOne(new LambdaQueryWrapper<AiContentCache>()
+                .eq(AiContentCache::getContentType, AiContentType.CLOZE)
+                .eq(AiContentCache::getCacheKey, cacheKey)
+                .eq(AiContentCache::getDeleted, 0)
+                .last("LIMIT 1"));
+    }
+
+    private void fillClozeCacheContent(AiContentCache cache, JsonNode content) {
         cache.setContentJson(toJson(content));
         cache.setMarkdownContent(null);
         cache.setModelName(null);
         cache.setExpiresAt(null);
-        if (cache.getId() == null) {
-            aiContentCacheMapper.insert(cache);
-        } else {
-            aiContentCacheMapper.updateById(cache);
-        }
     }
 
     private String buildClozeSourceHash(Long userId, DailyTask dailyTask, Long wordbookId, ClozeSourceType sourceType, ClozeWordSelection selection, ResolvedAiPromptTemplate promptTemplate) {
