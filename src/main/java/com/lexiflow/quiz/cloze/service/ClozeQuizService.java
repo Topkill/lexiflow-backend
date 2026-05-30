@@ -3,8 +3,6 @@ package com.lexiflow.quiz.cloze.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.lexiflow.ai.content.domain.AiContentCache;
 import com.lexiflow.ai.content.domain.AiContentType;
 import com.lexiflow.ai.content.mapper.AiContentCacheMapper;
@@ -315,9 +313,9 @@ public class ClozeQuizService {
                 lastValidationError = ex;
             }
         }
-        JsonNode fallbackContent = buildFallbackContent(selection, lastValidationError);
-        validateGeneratedContent(fallbackContent, selection);
-        return saveQuizInTransaction(userId, dailyTask, wordbookId, asyncTaskId, sourceType, selection, fallbackContent);
+        throw lastValidationError == null
+                ? new BizException(ErrorCode.AI_CALL_FAILED, "AI 完形填空生成失败，请稍后重试")
+                : lastValidationError;
     }
 
     private ClozeWordSelection selectClozeWords(Long userId, DailyTask dailyTask, Long wordbookId, ClozeSourceType sourceType, int targetWordCount) {
@@ -816,47 +814,6 @@ public class ClozeQuizService {
         LinkedHashSet<String> words = new LinkedHashSet<>();
         targetWords.stream().map(Word::getWord).filter(StringUtils::hasText).forEach(words::add);
         return words.stream().toList();
-    }
-
-    private JsonNode buildFallbackContent(ClozeWordSelection selection, BizException lastError) {
-        ObjectNode root = objectMapper.createObjectNode();
-        root.put("title", "LexiFlow 本组单词完形练习");
-        root.put("passage", buildFallbackPassage(selection));
-        root.put("passageZh", "系统已根据本组单词生成可继续练习的兜底题。"
-                + (lastError == null || !StringUtils.hasText(lastError.getCustomMessage()) ? "" : "最近一次原因：" + lastError.getCustomMessage()));
-
-        ArrayNode explanations = root.putArray("explanations");
-        for (Word word : selection.blankWords()) {
-            ObjectNode explanation = explanations.addObject();
-            explanation.put("word", word.getWord());
-            ClozeExplanationDetail fallback = fallbackExplanationDetail(word);
-            explanation.put("usedPos", fallback.usedPos());
-            explanation.put("definitionZh", fallback.definitionZh());
-            explanation.put("reasonZh", fallback.reasonZh());
-        }
-        return root;
-    }
-
-    private String buildFallbackPassage(ClozeWordSelection selection) {
-        StringBuilder passage = new StringBuilder();
-        passage.append("A student prepared for a busy week by making practical decisions. ");
-        for (Word word : selection.blankWords()) {
-            passage.append("The report used ")
-                    .append(word.getWord())
-                    .append(" to describe one important part of the situation")
-                    .append(". ");
-        }
-        List<Word> backgroundWords = selection.backgroundWords();
-        if (!backgroundWords.isEmpty()) {
-            passage.append("The wider context also mentioned ");
-            passage.append(backgroundWords.stream()
-                    .map(Word::getWord)
-                    .filter(StringUtils::hasText)
-                    .limit(6)
-                    .collect(Collectors.joining(", ")));
-            passage.append(" during the discussion.");
-        }
-        return passage.toString();
     }
 
     private ClozeExplanationDetail fallbackExplanationDetail(Word word) {
