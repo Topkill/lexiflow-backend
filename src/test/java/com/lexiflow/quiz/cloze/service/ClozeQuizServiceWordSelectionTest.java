@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lexiflow.ai.content.mapper.AiContentCacheMapper;
 import com.lexiflow.ai.core.service.AiGatewayService;
@@ -168,6 +169,34 @@ class ClozeQuizServiceWordSelectionTest {
                 .hasMessageContaining("今日新词和错词不足");
     }
 
+    @Test
+    void programmaticDraftShouldUseMatchedSurfaceFormAsAnswer() throws Exception {
+        when(objectMapper.writeValueAsString(any())).thenReturn("{}");
+        Word word = word(1, "resemble");
+        JsonNode content = new ObjectMapper().readTree("""
+                {
+                  "passage": "The new situation resembles an old problem.",
+                  "explanations": [
+                    {
+                      "word": "resemble",
+                      "usedForm": "resembles",
+                      "usedPos": "v.",
+                      "definitionZh": "像",
+                      "reasonZh": "这里表示情况像旧问题。"
+                    }
+                  ]
+                }
+                """);
+
+        Object draft = ReflectionTestUtils.invokeMethod(service, "buildProgrammaticClozeDraft", content, clozeSelection(word));
+
+        String maskedPassage = recordValue(draft, "passage");
+        assertThat(maskedPassage).isEqualTo("The new situation ___1___ an old problem.");
+        List<?> blanks = recordValue(draft, "blanks");
+        assertThat(blanks).hasSize(1);
+        assertThat(((com.lexiflow.quiz.cloze.domain.ClozeQuizBlank) blanks.get(0)).getAnswerWord()).isEqualTo("resembles");
+    }
+
     private void mockWordLookup() {
         when(wordMapper.selectBatchIds(anyCollection())).thenAnswer(invocation -> {
             Collection<?> wordIds = invocation.getArgument(0);
@@ -189,12 +218,35 @@ class ClozeQuizServiceWordSelectionTest {
         );
     }
 
+    private Object clozeSelection(Word... words) {
+        try {
+            Class<?> selectionClass = Class.forName("com.lexiflow.quiz.cloze.service.ClozeQuizService$ClozeWordSelection");
+            java.lang.reflect.Constructor<?> constructor = selectionClass.getDeclaredConstructor(List.class, List.class);
+            constructor.setAccessible(true);
+            List<Word> selectedWords = List.of(words);
+            return constructor.newInstance(selectedWords, selectedWords);
+        } catch (ReflectiveOperationException ex) {
+            throw new IllegalStateException(ex);
+        }
+    }
+
     @SuppressWarnings("unchecked")
     private List<Long> wordIds(Object selection, String accessor) {
         try {
             Method method = selection.getClass().getDeclaredMethod(accessor);
             method.setAccessible(true);
             return ((List<Word>) method.invoke(selection)).stream().map(Word::getId).toList();
+        } catch (ReflectiveOperationException ex) {
+            throw new IllegalStateException(ex);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private <T> T recordValue(Object record, String accessor) {
+        try {
+            Method method = record.getClass().getDeclaredMethod(accessor);
+            method.setAccessible(true);
+            return (T) method.invoke(record);
         } catch (ReflectiveOperationException ex) {
             throw new IllegalStateException(ex);
         }
@@ -234,9 +286,13 @@ class ClozeQuizServiceWordSelectionTest {
     }
 
     private Word word(long id) {
+        return word(id, "word" + id);
+    }
+
+    private Word word(long id, String text) {
         Word word = new Word();
         word.setId(id);
-        word.setWord("word" + id);
+        word.setWord(text);
         return word;
     }
 }

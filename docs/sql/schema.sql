@@ -477,7 +477,7 @@ CREATE TABLE IF NOT EXISTS `cloze_quiz_blank` (
   `word_id` INT NOT NULL COMMENT '对应单词 ID',
   `answer_word` VARCHAR(128) NOT NULL COMMENT '标准答案',
   `hint` VARCHAR(255) NULL COMMENT '预留字段：当前不使用',
-  `explanation` VARCHAR(1024) NULL COMMENT '单空解析 JSON：usedPos、definitionZh、reasonZh',
+  `explanation` VARCHAR(1024) NULL COMMENT '单空解析 JSON：usedForm、usedPos、definitionZh、reasonZh',
   `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
   `updated_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
   `deleted` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '逻辑删除，0 未删除，1 已删除',

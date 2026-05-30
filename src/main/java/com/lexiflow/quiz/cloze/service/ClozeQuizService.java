@@ -647,7 +647,7 @@ public class ClozeQuizService {
         quiz.setSourceType(sourceType);
         quiz.setTitle(content.path("title").asText("LexiFlow Cloze Practice"));
         quiz.setPassage(draft.passage());
-        quiz.setCandidateWords(toJson(normalizeCandidateWords(selection.blankWords())));
+        quiz.setCandidateWords(toJson(normalizeCandidateWordsFromBlanks(draft.blanks())));
         quiz.setTargetWordIds(toJson(selection.targetWords().stream().map(word -> String.valueOf(word.getId())).toList()));
         quiz.setExplanation(content.path("passageZh").asText(null));
         quiz.setDeleted(0);
@@ -667,7 +667,7 @@ public class ClozeQuizService {
         context.put("blankCount", selection.blankWords().size());
         String sourceJson = toJson(context);
         String userPrompt = "本次出题上下文如下：\n"
-                + "- blankWords：必须逐字出现在 passage 中，后端会自动挖空这些词。\n"
+                + "- blankWords：必须以原词或常见词形变化出现在 passage 中；explanations 里必须为每个 word 返回 usedForm，未变形时 usedForm 等于原词。\n"
                 + "- backgroundWords：背景词，可以自然融入短文，不强制全部使用。\n"
                 + "- blankCount：目标挖空数量。\n\n"
                 + sourceJson
@@ -725,25 +725,34 @@ public class ClozeQuizService {
         String passage = content.path("passage").asText("");
         validateGeneratedPassageText(passage);
 
+        Map<String, ClozeExplanationDetail> explanationMap = buildExplanationMap(content);
         Set<String> normalizedBlankWords = new LinkedHashSet<>();
+        Set<String> normalizedAnswerWords = new LinkedHashSet<>();
         List<WordOccurrence> occurrences = new ArrayList<>();
         for (Word word : selection.blankWords()) {
             String normalized = normalizeAnswer(word.getWord());
             if (!StringUtils.hasText(normalized) || !normalizedBlankWords.add(normalized)) {
                 throw new BizException(ErrorCode.AI_CALL_FAILED, "AI 完形填空挖空词重复或为空");
             }
-            List<WordOccurrence> matches = findWordOccurrences(passage, word);
+            ClozeExplanationDetail explanation = explanationMap.get(normalized);
+            String usedForm = resolveUsedForm(word, explanation);
+            validateUsedForm(word, usedForm);
+            List<WordOccurrence> matches = findWordOccurrences(passage, word, usedForm);
             if (matches.isEmpty()) {
-                throw new BizException(ErrorCode.AI_CALL_FAILED, "AI 完形填空文章未包含挖空词：" + word.getWord());
+                throw new BizException(ErrorCode.AI_CALL_FAILED, "AI 完形填空文章未包含 usedForm：" + word.getWord() + " -> " + usedForm);
             }
             if (matches.size() > 1) {
-                throw new BizException(ErrorCode.AI_CALL_FAILED, "AI 完形填空文章重复出现挖空词：" + word.getWord());
+                throw new BizException(ErrorCode.AI_CALL_FAILED, "AI 完形填空文章重复出现 usedForm：" + word.getWord() + " -> " + usedForm);
             }
-            occurrences.add(matches.get(0));
+            WordOccurrence occurrence = matches.get(0);
+            String normalizedAnswer = normalizeAnswer(occurrence.answerWord());
+            if (!StringUtils.hasText(normalizedAnswer) || !normalizedAnswerWords.add(normalizedAnswer)) {
+                throw new BizException(ErrorCode.AI_CALL_FAILED, "AI 完形填空挖空答案重复或为空：" + occurrence.answerWord());
+            }
+            occurrences.add(occurrence);
         }
 
         occurrences.sort((left, right) -> Integer.compare(left.start(), right.start()));
-        Map<String, ClozeExplanationDetail> explanationMap = buildExplanationMap(content);
         StringBuilder maskedPassage = new StringBuilder();
         List<ClozeQuizBlank> blanks = new ArrayList<>();
         int cursor = 0;
@@ -760,9 +769,10 @@ public class ClozeQuizService {
             ClozeQuizBlank blank = new ClozeQuizBlank();
             blank.setBlankNo(blankNo);
             blank.setWordId(word.getId());
-            blank.setAnswerWord(word.getWord());
+            blank.setAnswerWord(occurrence.answerWord());
             blank.setHint(null);
-            ClozeExplanationDetail explanation = explanationMap.getOrDefault(normalizeAnswer(word.getWord()), fallbackExplanationDetail(word));
+            ClozeExplanationDetail explanation = explanationMap.get(normalizeAnswer(word.getWord()));
+            explanation = explanation == null ? fallbackExplanationDetail(word) : explanation;
             blank.setExplanation(toJson(explanation));
             blank.setDeleted(0);
             blanks.add(blank);
@@ -770,6 +780,25 @@ public class ClozeQuizService {
         }
         maskedPassage.append(passage.substring(cursor));
         return new ProgrammaticClozeDraft(maskedPassage.toString(), blanks);
+    }
+
+    private String resolveUsedForm(Word word, ClozeExplanationDetail explanation) {
+        if (explanation != null && StringUtils.hasText(explanation.usedForm())) {
+            return explanation.usedForm().trim();
+        }
+        return word == null ? "" : safe(word.getWord()).trim();
+    }
+
+    private void validateUsedForm(Word word, String usedForm) {
+        if (!StringUtils.hasText(usedForm)) {
+            throw new BizException(ErrorCode.AI_CALL_FAILED, "AI 完形填空 usedForm 为空：" + (word == null ? "" : word.getWord()));
+        }
+        if (containsCjk(usedForm)) {
+            throw new BizException(ErrorCode.AI_CALL_FAILED, "AI 完形填空 usedForm 包含中文：" + usedForm);
+        }
+        if (Pattern.compile("\\s").matcher(usedForm).find()) {
+            throw new BizException(ErrorCode.AI_CALL_FAILED, "AI 完形填空 usedForm 只能是单个词：" + usedForm);
+        }
     }
 
     private void validateGeneratedPassageText(String passage) {
@@ -788,14 +817,14 @@ public class ClozeQuizService {
         }
     }
 
-    private List<WordOccurrence> findWordOccurrences(String text, Word word) {
-        if (!StringUtils.hasText(text) || word == null || !StringUtils.hasText(word.getWord())) {
+    private List<WordOccurrence> findWordOccurrences(String text, Word word, String usedForm) {
+        if (!StringUtils.hasText(text) || word == null || !StringUtils.hasText(usedForm)) {
             return List.of();
         }
-        Matcher matcher = wordPattern(word.getWord()).matcher(text);
+        Matcher matcher = wordPattern(usedForm).matcher(text);
         List<WordOccurrence> occurrences = new ArrayList<>();
         while (matcher.find()) {
-            occurrences.add(new WordOccurrence(word, matcher.start(), matcher.end()));
+            occurrences.add(new WordOccurrence(word, text.substring(matcher.start(), matcher.end()), matcher.start(), matcher.end()));
         }
         return occurrences;
     }
@@ -816,19 +845,20 @@ public class ClozeQuizService {
         }
         for (JsonNode explanationNode : explanationsNode) {
             String word = explanationNode.path("word").asText("");
+            String usedForm = explanationNode.path("usedForm").asText("");
             String usedPos = explanationNode.path("usedPos").asText("");
             String definitionZh = explanationNode.path("definitionZh").asText("");
             String reasonZh = explanationNode.path("reasonZh").asText("");
-            if (StringUtils.hasText(word) && StringUtils.hasText(reasonZh)) {
-                explanations.put(normalizeAnswer(word), new ClozeExplanationDetail(usedPos, definitionZh, reasonZh));
+            if (StringUtils.hasText(word)) {
+                explanations.put(normalizeAnswer(word), new ClozeExplanationDetail(usedForm, usedPos, definitionZh, reasonZh));
             }
         }
         return explanations;
     }
 
-    private List<String> normalizeCandidateWords(List<Word> targetWords) {
+    private List<String> normalizeCandidateWordsFromBlanks(List<ClozeQuizBlank> blanks) {
         LinkedHashSet<String> words = new LinkedHashSet<>();
-        targetWords.stream().map(Word::getWord).filter(StringUtils::hasText).forEach(words::add);
+        blanks.stream().map(ClozeQuizBlank::getAnswerWord).filter(StringUtils::hasText).forEach(words::add);
         return words.stream().toList();
     }
 
@@ -843,20 +873,25 @@ public class ClozeQuizService {
         } else {
             reasonZh = "这里语义上需要本组目标词。";
         }
-        return new ClozeExplanationDetail(usedPos, definitionZh, reasonZh);
+        return new ClozeExplanationDetail(word == null ? "" : safe(word.getWord()), usedPos, definitionZh, reasonZh);
     }
 
     private ClozeExplanationDetail resolveExplanationDetail(ClozeQuizBlank blank, Word word) {
         String rawExplanation = blank == null ? "" : safe(blank.getExplanation());
+        String usedForm = blank == null ? "" : safe(blank.getAnswerWord());
         String definitionZh = resolveChineseDefinition(word);
         String usedPos = resolvePrimaryPos(word);
         String reasonZh = "";
 
         JsonNode node = readJsonNodeOrNull(rawExplanation);
         if (node != null && node.isObject()) {
+            String parsedUsedForm = node.path("usedForm").asText("");
             String parsedUsedPos = node.path("usedPos").asText("");
             String parsedDefinition = node.path("definitionZh").asText("");
             String parsedReason = node.path("reasonZh").asText("");
+            if (StringUtils.hasText(parsedUsedForm)) {
+                usedForm = parsedUsedForm;
+            }
             if (StringUtils.hasText(parsedUsedPos)) {
                 usedPos = parsedUsedPos;
             }
@@ -871,7 +906,7 @@ public class ClozeQuizService {
         if (!StringUtils.hasText(reasonZh)) {
             reasonZh = fallbackExplanationDetail(word).reasonZh();
         }
-        return new ClozeExplanationDetail(usedPos, definitionZh, reasonZh);
+        return new ClozeExplanationDetail(usedForm, usedPos, definitionZh, reasonZh);
     }
 
     private JsonNode readJsonNodeOrNull(String value) {
@@ -1160,10 +1195,10 @@ public class ClozeQuizService {
     private record ProgrammaticClozeDraft(String passage, List<ClozeQuizBlank> blanks) {
     }
 
-    private record WordOccurrence(Word word, int start, int end) {
+    private record WordOccurrence(Word word, String answerWord, int start, int end) {
     }
 
-    private record ClozeExplanationDetail(String usedPos, String definitionZh, String reasonZh) {
+    private record ClozeExplanationDetail(String usedForm, String usedPos, String definitionZh, String reasonZh) {
     }
 
     private record DefinitionGroup(String pos, List<String> definitions) {

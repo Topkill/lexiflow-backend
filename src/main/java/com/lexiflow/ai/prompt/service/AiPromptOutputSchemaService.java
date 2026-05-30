@@ -46,6 +46,7 @@ public class AiPromptOutputSchemaService {
                 ArrayNode explanations = schema.putArray("explanations");
                 ObjectNode explanation = explanations.addObject();
                 explanation.put("word", "");
+                explanation.put("usedForm", "");
                 explanation.put("usedPos", "");
                 explanation.put("definitionZh", "");
                 explanation.put("reasonZh", "");
@@ -95,6 +96,7 @@ public class AiPromptOutputSchemaService {
             }
             normalized.set(key, entry.getValue());
         });
+        enrichFeatureSchema(featureType, normalized);
 
         for (RequiredFieldSpec spec : requiredSpecs(featureType)) {
             JsonNode value = normalized.get(spec.key());
@@ -107,6 +109,20 @@ public class AiPromptOutputSchemaService {
             validateNestedFields(spec, value);
         }
         return toJson(normalized);
+    }
+
+    private void enrichFeatureSchema(AiPromptFeatureType featureType, ObjectNode normalized) {
+        if (featureType != AiPromptFeatureType.CLOZE_QUIZ) {
+            return;
+        }
+        JsonNode explanations = normalized.get("explanations");
+        if (explanations == null || !explanations.isArray() || explanations.isEmpty() || !explanations.get(0).isObject()) {
+            return;
+        }
+        ObjectNode explanation = (ObjectNode) explanations.get(0);
+        if (!explanation.has("usedForm")) {
+            explanation.put("usedForm", "");
+        }
     }
 
     public String buildOutputFormatPrompt(String outputSchemaJson) {
@@ -196,7 +212,7 @@ public class AiPromptOutputSchemaService {
                 new RequiredFieldSpec("title", JsonValueKind.STRING),
                 new RequiredFieldSpec("passage", JsonValueKind.STRING),
                 new RequiredFieldSpec("passageZh", JsonValueKind.STRING),
-                new RequiredFieldSpec("explanations", JsonValueKind.ARRAY, Set.of("word", "usedPos", "definitionZh", "reasonZh"))
+                new RequiredFieldSpec("explanations", JsonValueKind.ARRAY, Set.of("word", "usedForm", "usedPos", "definitionZh", "reasonZh"))
         ));
         fields.put(AiPromptFeatureType.CLOZE_REVIEW, List.of(
                 new RequiredFieldSpec("overall", JsonValueKind.STRING),
