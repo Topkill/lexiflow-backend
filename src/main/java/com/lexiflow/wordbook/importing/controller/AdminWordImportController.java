@@ -7,6 +7,7 @@ import com.lexiflow.wordbook.importing.domain.WordImportDuplicateStrategy;
 import com.lexiflow.wordbook.importing.dto.WordImportErrorQueryRequest;
 import com.lexiflow.wordbook.importing.dto.WordImportErrorResponse;
 import com.lexiflow.wordbook.importing.dto.WordImportJsonUrlRequest;
+import com.lexiflow.wordbook.importing.dto.WordImportTaskQueryRequest;
 import com.lexiflow.wordbook.importing.dto.WordImportTaskResponse;
 import com.lexiflow.wordbook.importing.dto.WordImportTemplateResponse;
 import com.lexiflow.wordbook.importing.service.WordImportService;
@@ -64,6 +65,12 @@ public class AdminWordImportController {
             @Valid @RequestBody WordImportJsonUrlRequest request
     ) {
         return ApiResponse.success(wordImportService.importWordsFromJsonUrl(AuthContext.currentUserId(), wordbookId, request));
+    }
+
+    @Operation(summary = "分页查询导入任务")
+    @GetMapping("/imports")
+    public ApiResponse<PageResponse<WordImportTaskResponse>> pageTasks(@Valid @ModelAttribute WordImportTaskQueryRequest request) {
+        return ApiResponse.success(wordImportService.pageTasks(request));
     }
 
     @Operation(summary = "查询导入任务详情")

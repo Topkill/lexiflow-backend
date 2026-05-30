@@ -16,6 +16,7 @@ import com.lexiflow.wordbook.importing.domain.WordImportTask;
 import com.lexiflow.wordbook.importing.dto.WordImportErrorQueryRequest;
 import com.lexiflow.wordbook.importing.dto.WordImportJsonUrlRequest;
 import com.lexiflow.wordbook.importing.dto.WordImportErrorResponse;
+import com.lexiflow.wordbook.importing.dto.WordImportTaskQueryRequest;
 import com.lexiflow.wordbook.importing.dto.WordImportTaskResponse;
 import com.lexiflow.wordbook.importing.dto.WordImportTemplateResponse;
 import com.lexiflow.wordbook.importing.mapper.WordImportErrorMapper;
@@ -165,6 +166,23 @@ public class WordImportService {
             throw new BizException(ErrorCode.NOT_FOUND, "导入任务不存在");
         }
         return WordImportTaskResponse.from(task);
+    }
+
+    public PageResponse<WordImportTaskResponse> pageTasks(WordImportTaskQueryRequest request) {
+        WordImportTaskQueryRequest safeRequest = request == null ? new WordImportTaskQueryRequest(null, null, null) : request;
+        LambdaQueryWrapper<WordImportTask> wrapper = new LambdaQueryWrapper<WordImportTask>()
+                .orderByDesc(WordImportTask::getCreatedAt)
+                .orderByDesc(WordImportTask::getId);
+        if (safeRequest.wordbookId() != null) {
+            wrapper.eq(WordImportTask::getWordbookId, safeRequest.wordbookId());
+        }
+        Page<WordImportTask> page = wordImportTaskMapper.selectPage(Page.of(safeRequest.safePage(), safeRequest.safeSize()), wrapper);
+        return PageResponse.of(
+                page.getRecords().stream().map(WordImportTaskResponse::from).toList(),
+                page.getTotal(),
+                page.getCurrent(),
+                page.getSize()
+        );
     }
 
     public PageResponse<WordImportErrorResponse> pageErrors(Long importTaskId, WordImportErrorQueryRequest request) {
