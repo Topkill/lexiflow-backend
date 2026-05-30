@@ -127,6 +127,43 @@
 - 后续方向：单机阶段可加本地内存缓存，管理员改配置时清缓存。
 - 多实例方向：使用 Redis 缓存，或 Redis Pub/Sub 通知各实例清本地缓存。
 - 注意：配置缓存和每日额度计数是两件事，额度统计后续可单独演进为每日额度表或 Redis 计数。
+
+## 业务状态机精简评估
+
+- 当前状态：项目里多张业务表使用 3-5 个状态值，整体还在可控范围内，但需要区分“真实生命周期状态”和“可以按字段或日期推导出的展示状态”。
+
+> 可以保留的：
+>
+> `word_import_task.status = PENDING/RUNNING/SUCCESS/PARTIAL_SUCCESS/FAILED`
+> 这个合理，`PARTIAL_SUCCESS` 有业务意义，不能简单用 `SUCCESS/FAILED` 替代。
+>
+> `async_task.status = PENDING/RUNNING/SUCCESS/FAILED`
+> 标准异步任务状态，合理。
+>
+> `cloze_attempt_ai_review.status = RUNNING/DONE/FAILED`
+> 也合理。不过如果它本质已经挂在 `async_task` 上，后面可以考虑只保留业务结果状态，避免双状态源。
+>
+> `user_word_state.mastery_status = NEW/LEARNING/REVIEWING/MASTERED/DIFFICULT`
+> 这个不是普通任务状态，是学习算法状态，五个值可以接受。
+>
+> 需要再想想的：
+>
+> `study_plan.status = ACTIVE/PAUSED/COMPLETED/ENDED`
+> 这里最容易语义重叠。`COMPLETED` 是“学完自动完成”，`ENDED` 是“用户手动结束/废弃”，如果你确实要区分这两种结局，就保留；如果前端和统计不区分，建议简化成 `ACTIVE/PAUSED/ENDED`，完成可由 `learned_count >= total_words` 推导。
+>
+> `daily_task.status = PENDING/DONE/EXPIRED`
+> `EXPIRED` 如果只是根据 `task_date < today && not done` 推导出来，可以不存，查询时算。只有当你需要“某天被系统正式结算为过期”这种历史状态，才值得存。
+>
+> `daily_task_item.status = PENDING/DONE/SKIPPED`
+> `SKIPPED` 如果现在没有跳过功能，就属于预留状态。预留不是大问题，但会让状态机看起来比实际复杂。可以先保留 `PENDING/DONE`，等真的做跳过再加。
+>
+> 我的建议：其他可以先保留,值得整理的是 `study_plan.status`、`daily_task.status`、`daily_task_item.status` 这三个。不要为了“状态少”强行删，优先删那些没有明确写入路径、前端没有展示差异、统计也不区分的状态。
+
+- 暂不调整：`word_import_task.status`、`async_task.status`、`cloze_attempt_ai_review.status`、`user_word_state.mastery_status` 当前都有明确业务含义，先保持现状。
+- 重点观察：`study_plan.status` 的 `COMPLETED` 和 `ENDED` 是否真的需要长期区分；如果前端、统计和运营不区分“自然完成”和“手动结束”，后续可考虑合并。
+- 重点观察：`daily_task.status` 的 `EXPIRED` 是否需要落库；如果只是由 `task_date < today && status != DONE` 推导，可以改成查询或前端展示状态。
+- 重点观察：`daily_task_item.status` 的 `SKIPPED` 是否有实际跳过功能；如果长期没有写入路径，可以先移除或等跳过功能上线时再补。
+- 后续原则：不为了减少枚举数量而强行删状态；只清理没有写入路径、没有展示差异、统计也不区分的状态值。
   
 ## Other
 `frontend/lexiflow-frontend/src/views/app/StudyCardView.vue:1335-1374` 这里一开始就塞进了一个空的 aiResult，但 catch 里没有把它清掉。结果是额度不足时，前端虽然会弹出“今日公共 AI 调用次数已用完”，对话框里却会从骨架页切成一个空白结果面板，而不是保持“还没有提问”或错误态。这个是实际可见的 UI 问题。

@@ -7,7 +7,7 @@ USE `lexiflow`;
 
 SET NAMES utf8mb4;
 
--- Default admin user
+-- Default admin user , password is "12345aaa"
 INSERT INTO `users` (
   `id`, `email`, `password_hash`, `nickname`, `avatar_url`, `role`, `status`,
   `created_at`, `updated_at`, `deleted`
