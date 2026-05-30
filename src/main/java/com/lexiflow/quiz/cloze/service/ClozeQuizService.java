@@ -298,7 +298,8 @@ public class ClozeQuizService {
             }
         }
 
-        BizException lastValidationError = null;
+        BizException lastGenerationError = null;
+        List<String> attemptErrors = new ArrayList<>();
         for (int attempt = 1; attempt <= MAX_GENERATE_ATTEMPTS; attempt++) {
             AiPrompt prompt = buildPrompt(sourceType, selection, sourceHash, promptTemplate);
             try {
@@ -310,12 +311,27 @@ public class ClozeQuizService {
                 if (ex.getErrorCode() != ErrorCode.AI_CALL_FAILED) {
                     throw ex;
                 }
-                lastValidationError = ex;
+                lastGenerationError = ex;
+                attemptErrors.add("第 " + attempt + " 次：" + generationErrorMessage(ex));
             }
         }
-        throw lastValidationError == null
+        throw lastGenerationError == null
                 ? new BizException(ErrorCode.AI_CALL_FAILED, "AI 完形填空生成失败，请稍后重试")
-                : lastValidationError;
+                : new BizException(ErrorCode.AI_CALL_FAILED, buildGenerateFailureMessage(attemptErrors, lastGenerationError));
+    }
+
+    private String buildGenerateFailureMessage(List<String> attemptErrors, BizException fallbackError) {
+        List<String> messages = attemptErrors.stream()
+                .filter(StringUtils::hasText)
+                .toList();
+        if (messages.isEmpty()) {
+            return fallbackError.getCustomMessage();
+        }
+        return "AI 完形填空生成失败：" + String.join("；", messages);
+    }
+
+    private String generationErrorMessage(BizException ex) {
+        return StringUtils.hasText(ex.getCustomMessage()) ? ex.getCustomMessage() : ex.getErrorCode().getMessage();
     }
 
     private ClozeWordSelection selectClozeWords(Long userId, DailyTask dailyTask, Long wordbookId, ClozeSourceType sourceType, int targetWordCount) {
