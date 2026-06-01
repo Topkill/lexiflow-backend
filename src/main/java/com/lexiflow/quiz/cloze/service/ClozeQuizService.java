@@ -741,9 +741,6 @@ public class ClozeQuizService {
             if (matches.isEmpty()) {
                 throw new BizException(ErrorCode.AI_CALL_FAILED, "AI 完形填空文章未包含 usedForm：" + word.getWord() + " -> " + usedForm);
             }
-            if (matches.size() > 1) {
-                throw new BizException(ErrorCode.AI_CALL_FAILED, "AI 完形填空文章重复出现 usedForm：" + word.getWord() + " -> " + usedForm);
-            }
             WordOccurrence occurrence = matches.get(0);
             String normalizedAnswer = normalizeAnswer(occurrence.answerWord());
             if (!StringUtils.hasText(normalizedAnswer) || !normalizedAnswerWords.add(normalizedAnswer)) {

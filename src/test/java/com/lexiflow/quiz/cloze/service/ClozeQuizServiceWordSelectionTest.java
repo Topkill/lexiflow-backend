@@ -197,6 +197,34 @@ class ClozeQuizServiceWordSelectionTest {
         assertThat(((com.lexiflow.quiz.cloze.domain.ClozeQuizBlank) blanks.get(0)).getAnswerWord()).isEqualTo("resembles");
     }
 
+    @Test
+    void programmaticDraftShouldBlankFirstOccurrenceWhenUsedFormRepeats() throws Exception {
+        when(objectMapper.writeValueAsString(any())).thenReturn("{}");
+        Word word = word(1, "headline");
+        JsonNode content = new ObjectMapper().readTree("""
+                {
+                  "passage": "Newspaper **headlines** often amplify negativity. Yet the stories behind these headlines reveal deeper layers.",
+                  "explanations": [
+                    {
+                      "word": "headline",
+                      "usedForm": "headlines",
+                      "usedPos": "n.",
+                      "definitionZh": "头条新闻",
+                      "reasonZh": "这里表示报纸头条。"
+                    }
+                  ]
+                }
+                """);
+
+        Object draft = ReflectionTestUtils.invokeMethod(service, "buildProgrammaticClozeDraft", content, clozeSelection(word));
+
+        String maskedPassage = recordValue(draft, "passage");
+        assertThat(maskedPassage).isEqualTo("Newspaper **___1___** often amplify negativity. Yet the stories behind these headlines reveal deeper layers.");
+        List<?> blanks = recordValue(draft, "blanks");
+        assertThat(blanks).hasSize(1);
+        assertThat(((com.lexiflow.quiz.cloze.domain.ClozeQuizBlank) blanks.get(0)).getAnswerWord()).isEqualTo("headlines");
+    }
+
     private void mockWordLookup() {
         when(wordMapper.selectBatchIds(anyCollection())).thenAnswer(invocation -> {
             Collection<?> wordIds = invocation.getArgument(0);
