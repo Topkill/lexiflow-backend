@@ -113,7 +113,7 @@ public class WordAiContentService {
                         writeEvent(writer, "status", buildWordQaStatusPayload("CACHE_HIT", "已命中缓存", outputSchema));
                         streamCachedAnswer(writer, content);
                         streamWordQaFieldItems(writer, content, outputSchema);
-                        writeEvent(writer, "done", WordAiContentResponse.of(true, AiContentType.WORD_QA, wordId, wordbookId, content, outputSchema));
+                        writeEvent(writer, "done", WordAiContentResponse.of(true, AiContentType.WORD_QA, cached.getId(), wordId, wordbookId, content, outputSchema));
                         return;
                     }
                 }
@@ -133,7 +133,7 @@ public class WordAiContentService {
                 JsonNode savedContent = parseJson(qa.getContentJson());
                 asyncTaskService.markSuccess(task.getId(), qa.getId(), "AI 问答生成完成");
                 taskFinished = true;
-                writeEvent(writer, "done", WordAiContentResponse.of(false, AiContentType.WORD_QA, wordId, wordbookId, savedContent, outputSchema));
+                writeEvent(writer, "done", WordAiContentResponse.of(false, AiContentType.WORD_QA, qa.getId(), wordId, wordbookId, savedContent, outputSchema));
             }
         } catch (Exception ex) {
             if (task != null && !taskFinished) {
@@ -226,7 +226,7 @@ public class WordAiContentService {
                     if (cached != null) {
                         incrementWordQaHit(cached);
                         asyncTaskService.markSuccess(task.getId(), cached.getId(), "AI 问答命中缓存");
-                        return WordAiContentResponse.of(true, AiContentType.WORD_QA, wordId, wordbookId, parseJson(cached.getContentJson()), outputSchema);
+                        return WordAiContentResponse.of(true, AiContentType.WORD_QA, cached.getId(), wordId, wordbookId, parseJson(cached.getContentJson()), outputSchema);
                     }
                 }
 
@@ -236,7 +236,7 @@ public class WordAiContentService {
                 WordAiQa qa = saveWordQaResult(userId, wordId, wordbookId, question, sourceHash, cacheKey, content, outputSchema);
                 JsonNode savedContent = parseJson(qa.getContentJson());
                 asyncTaskService.markSuccess(task.getId(), qa.getId(), "AI 问答生成完成");
-                return WordAiContentResponse.of(false, AiContentType.WORD_QA, wordId, wordbookId, savedContent, outputSchema);
+                return WordAiContentResponse.of(false, AiContentType.WORD_QA, qa.getId(), wordId, wordbookId, savedContent, outputSchema);
             }
         } catch (BizException ex) {
             markWordQaTaskFailed(task, ex);

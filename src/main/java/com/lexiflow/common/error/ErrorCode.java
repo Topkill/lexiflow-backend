@@ -28,6 +28,7 @@ public enum ErrorCode {
 
     WRONG_WORD_NOT_FOUND(31001, "错词不存在", 404),
     FAVORITE_WORD_NOT_FOUND(31002, "收藏词不存在", 404),
+    STUDY_NOTE_NOT_FOUND(31003, "学习笔记不存在", 404),
 
     AI_CONFIG_UNAVAILABLE(40001, "AI 配置不可用", 400),
     AI_PUBLIC_QUOTA_EXHAUSTED(40002, "公共 AI 调用配额不足", 429),

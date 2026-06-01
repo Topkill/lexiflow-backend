@@ -154,6 +154,11 @@ class WordAiContentServiceTest {
         AsyncTask task = new AsyncTask();
         task.setId(88L);
         when(asyncTaskService.createTask(eq(9L), any(), any())).thenReturn(task);
+        when(wordAiQaMapper.insert(any(WordAiQa.class))).thenAnswer(invocation -> {
+            WordAiQa qa = invocation.getArgument(0);
+            qa.setId(123L);
+            return 1;
+        });
         when(gatewayService.generateJsonStream(eq(9L), eq(AiContentType.WORD_QA), any(), any(), eq(88L)))
                 .thenAnswer(invocation -> {
                     AiStreamDeltaHandler handler = invocation.getArgument(3);
@@ -174,6 +179,7 @@ class WordAiContentServiceTest {
         assertThat(response).contains("\"field\":\"followUps\"");
         assertThat(response).contains("\"field\":\"examples\"");
         assertThat(response).contains("\"outputSchema\"");
+        assertThat(response).contains("\"resultId\":\"123\"");
         assertThat(response).contains("event: done");
     }
 
@@ -239,6 +245,7 @@ class WordAiContentServiceTest {
         WordAiContentResponse response = service.generateWordQuestion(9L, 1L, 67L, "plentiful 是什么意思？", false);
 
         assertThat(response.cacheHit()).isTrue();
+        assertThat(response.resultId()).isEqualTo("99");
         assertThat(response.content().path("answer").asText()).isEqualTo("缓存回答");
         assertThat(cached.getHitCount()).isEqualTo(3);
         verify(gatewayService, never()).generateJson(any(), any(), any(), any());
