@@ -6,7 +6,7 @@ import com.lexiflow.ai.content.domain.AiContentType;
 import com.lexiflow.ai.content.mapper.AiCallLogMapper;
 import com.lexiflow.ai.core.client.AiClientException;
 import com.lexiflow.ai.core.client.AiStreamDeltaHandler;
-import com.lexiflow.ai.core.client.OpenAiCompatibleClient;
+import com.lexiflow.ai.core.client.SpringAiChatClient;
 import com.lexiflow.ai.core.dto.AiChatCompletionResult;
 import com.lexiflow.ai.core.dto.AiPrompt;
 import com.lexiflow.ai.core.dto.AiRuntimeConfig;
@@ -21,7 +21,7 @@ public class AiGatewayService {
 
     private final AiConfigResolver aiConfigResolver;
     private final AiQuotaService aiQuotaService;
-    private final OpenAiCompatibleClient openAiCompatibleClient;
+    private final SpringAiChatClient springAiChatClient;
     private final AiCallLogMapper aiCallLogMapper;
 
     public AiChatCompletionResult generateJson(Long userId, AiContentType contentType, AiPrompt prompt) {
@@ -29,7 +29,7 @@ public class AiGatewayService {
         aiQuotaService.checkQuota(userId, config);
         long startNanos = System.nanoTime();
         try {
-            AiChatCompletionResult result = openAiCompatibleClient.chatJson(config, prompt.systemPrompt(), prompt.userPrompt());
+            AiChatCompletionResult result = springAiChatClient.chatJson(config, prompt.systemPrompt(), prompt.userPrompt());
             saveLog(userId, contentType, prompt, config, result, latencyMs(startNanos), null, null);
             return result;
         } catch (AiClientException ex) {
@@ -43,7 +43,7 @@ public class AiGatewayService {
         aiQuotaService.checkQuota(userId, config);
         long startNanos = System.nanoTime();
         try {
-            AiChatCompletionResult result = openAiCompatibleClient.chatJsonStream(config, prompt.systemPrompt(), prompt.userPrompt(), deltaHandler);
+            AiChatCompletionResult result = springAiChatClient.chatJsonStream(config, prompt.systemPrompt(), prompt.userPrompt(), deltaHandler);
             saveLog(userId, contentType, prompt, config, result, latencyMs(startNanos), null, null);
             return result;
         } catch (AiClientException ex) {
