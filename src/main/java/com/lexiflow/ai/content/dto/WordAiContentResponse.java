@@ -7,7 +7,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 @Schema(description = "AI 单词短内容响应")
 public record WordAiContentResponse(
         @Schema(description = "是否命中缓存", example = "true") Boolean cacheHit,
-        @Schema(description = "AI 内容类型", example = "EXPLANATION") AiContentType contentType,
+        @Schema(description = "AI 内容类型", example = "WORD_QA") AiContentType contentType,
         @Schema(description = "单词 ID") String wordId,
         @Schema(description = "词库 ID") String wordbookId,
         @Schema(description = "结构化内容") JsonNode content,

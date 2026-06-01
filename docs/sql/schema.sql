@@ -375,34 +375,34 @@ CREATE TABLE IF NOT EXISTS `ai_prompt_feature_binding` (
   KEY `idx_ai_prompt_binding_template` (`template_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='AI 功能当前提示词绑定表';
 
-CREATE TABLE IF NOT EXISTS `ai_content_cache` (
-  `id` INT NOT NULL AUTO_INCREMENT COMMENT '缓存 ID',
-  `content_type` VARCHAR(32) NOT NULL COMMENT 'AI 内容类型：EXPLANATION、EXAMPLES、MNEMONIC、WORD_QA、CLOZE、REPORT',
-  `cache_key` VARCHAR(255) NOT NULL COMMENT '缓存 key，后端按类型和上下文生成',
-  `user_id` INT NULL COMMENT '个性化缓存所属用户，通用缓存为空',
-  `word_id` INT NULL COMMENT '关联单词',
-  `wordbook_id` INT NULL COMMENT '关联词库',
-  `source_hash` VARCHAR(128) NOT NULL COMMENT '输入上下文 hash',
-  `content_json` JSON NOT NULL COMMENT '结构化内容',
-  `markdown_content` MEDIUMTEXT NULL COMMENT '可展示 Markdown',
-  `model_name` VARCHAR(128) NULL COMMENT '生成模型',
-  `expires_at` DATETIME(3) NULL COMMENT '过期时间，空表示长期有效',
+CREATE TABLE IF NOT EXISTS `word_ai_qa` (
+  `id` INT NOT NULL AUTO_INCREMENT COMMENT '问答结果 ID',
+  `created_by_user_id` INT NULL COMMENT '首次生成用户 ID，跨用户缓存命中时仅作来源记录',
+  `word_id` INT NOT NULL COMMENT '单词 ID',
+  `wordbook_id` INT NOT NULL COMMENT '词库 ID',
+  `question` VARCHAR(512) NOT NULL COMMENT '用户问题',
+  `source_hash` CHAR(64) NOT NULL COMMENT '输入上下文 hash',
+  `cache_key` VARCHAR(255) NOT NULL COMMENT '缓存 key，后端按单词、问题和提示词生成',
+  `content_json` JSON NOT NULL COMMENT 'AI 问答结构化内容',
+  `output_schema_json` JSON NULL COMMENT '输出 JSON 结构',
+  `cache_active` TINYINT(1) NULL DEFAULT 1 COMMENT '当前可命中缓存，1 是，NULL 历史版本',
   `hit_count` INT NOT NULL DEFAULT 0 COMMENT '命中次数',
   `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
   `updated_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
   `deleted` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '逻辑删除，0 未删除，1 已删除',
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_ai_cache_key` (`content_type`, `cache_key`, `deleted`),
-  KEY `idx_ai_cache_word` (`word_id`, `content_type`),
-  KEY `idx_ai_cache_user` (`user_id`, `content_type`),
-  KEY `idx_ai_cache_expires` (`expires_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='AI 内容缓存表';
+  UNIQUE KEY `uk_word_ai_qa_active_cache` (`cache_key`, `cache_active`, `deleted`),
+  KEY `idx_word_ai_qa_word` (`wordbook_id`, `word_id`),
+  KEY `idx_word_ai_qa_creator_time` (`created_by_user_id`, `created_at`),
+  KEY `idx_word_ai_qa_source` (`source_hash`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='AI 单词问答结果表';
 
 CREATE TABLE IF NOT EXISTS `ai_call_log` (
   `id` BIGINT NOT NULL COMMENT '日志 ID',
+  `async_task_id` INT NULL COMMENT '关联异步任务 ID，非异步 AI 调用为空',
   `user_id` INT NULL COMMENT '调用用户，系统任务可为空',
   `config_scope` VARCHAR(32) NOT NULL DEFAULT 'PUBLIC' COMMENT 'AI 配置来源：PUBLIC、PRIVATE',
-  `content_type` VARCHAR(32) NOT NULL COMMENT 'AI 内容类型：EXPLANATION、EXAMPLES、MNEMONIC、WORD_QA、CLOZE、REPORT',
+  `content_type` VARCHAR(32) NOT NULL COMMENT 'AI 内容类型：WORD_QA、CLOZE、CLOZE_REVIEW、REPORT',
   `model_name` VARCHAR(128) NOT NULL COMMENT '模型名称',
   `api_base_url` VARCHAR(512) NULL COMMENT 'Base URL，不含 Key',
   `request_hash` VARCHAR(128) NULL COMMENT '请求摘要 hash',
@@ -418,6 +418,7 @@ CREATE TABLE IF NOT EXISTS `ai_call_log` (
   `error_message` VARCHAR(1024) NULL COMMENT '错误摘要',
   `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
   PRIMARY KEY (`id`),
+  KEY `idx_ai_call_async_task` (`async_task_id`),
   KEY `idx_ai_call_user_time` (`user_id`, `created_at`),
   KEY `idx_ai_call_quota` (`user_id`, `config_scope`, `created_at`),
   KEY `idx_ai_call_type_time` (`content_type`, `created_at`),
@@ -429,12 +430,12 @@ CREATE TABLE IF NOT EXISTS `ai_call_log` (
 CREATE TABLE IF NOT EXISTS `async_task` (
   `id` INT NOT NULL AUTO_INCREMENT COMMENT '任务 ID',
   `user_id` INT NULL COMMENT '发起用户',
-  `task_type` VARCHAR(32) NOT NULL COMMENT '任务类型：AI_CLOZE、AI_REPORT',
+  `task_type` VARCHAR(32) NOT NULL COMMENT '任务类型：AI_WORD_QA、AI_CLOZE、AI_CLOZE_REVIEW、AI_REPORT',
   `status` VARCHAR(32) NOT NULL DEFAULT 'PENDING' COMMENT '任务状态：PENDING、RUNNING、SUCCESS、FAILED',
   `progress` INT NOT NULL DEFAULT 0 COMMENT '进度，0-100',
   `message` VARCHAR(512) NULL COMMENT '当前提示',
   `request_json` JSON NULL COMMENT '任务请求参数，去除敏感信息',
-  `result_id` INT NULL COMMENT '结果 ID',
+  `result_id` INT NULL COMMENT '结果 ID：AI_WORD_QA 对应 word_ai_qa.id，AI_CLOZE 对应 cloze_quiz.id，AI_CLOZE_REVIEW 对应 cloze_attempt_ai_review.id',
   `error_code` VARCHAR(128) NULL COMMENT '错误码',
   `error_message` VARCHAR(1024) NULL COMMENT '错误摘要',
   `retry_count` INT NOT NULL DEFAULT 0 COMMENT '重试次数',
@@ -445,7 +446,8 @@ CREATE TABLE IF NOT EXISTS `async_task` (
   PRIMARY KEY (`id`),
   KEY `idx_async_task_user_time` (`user_id`, `created_at`),
   KEY `idx_async_task_type_status` (`task_type`, `status`),
-  KEY `idx_async_task_status_time` (`status`, `created_at`)
+  KEY `idx_async_task_status_time` (`status`, `created_at`),
+  KEY `idx_async_task_result` (`task_type`, `result_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='异步任务表';
 
 CREATE TABLE IF NOT EXISTS `cloze_quiz` (
@@ -455,6 +457,10 @@ CREATE TABLE IF NOT EXISTS `cloze_quiz` (
   `daily_task_id` INT NULL COMMENT '来源今日任务 ID',
   `async_task_id` INT NULL COMMENT '来源异步任务 ID',
   `source_type` VARCHAR(32) NOT NULL DEFAULT 'MIXED' COMMENT '生成来源：TODAY_NEW、WRONG_WORDS、MIXED、COMPLETED_GROUP',
+  `source_hash` CHAR(64) NULL COMMENT '生成输入上下文 hash',
+  `cache_key` VARCHAR(255) NULL COMMENT '缓存 key，后端按完形上下文生成',
+  `cache_active` TINYINT(1) NULL DEFAULT 1 COMMENT '当前可命中缓存，1 是，NULL 历史版本',
+  `hit_count` INT NOT NULL DEFAULT 0 COMMENT '命中次数',
   `title` VARCHAR(255) NULL COMMENT '题目标题',
   `passage` MEDIUMTEXT NOT NULL COMMENT '短文内容，空格用占位符标记',
   `candidate_words` JSON NOT NULL COMMENT '候选词数组',
@@ -467,7 +473,9 @@ CREATE TABLE IF NOT EXISTS `cloze_quiz` (
   PRIMARY KEY (`id`),
   KEY `idx_cloze_quiz_user_time` (`user_id`, `created_at`),
   KEY `idx_cloze_quiz_wordbook` (`wordbook_id`),
-  KEY `idx_cloze_quiz_task` (`async_task_id`)
+  KEY `idx_cloze_quiz_task` (`async_task_id`),
+  UNIQUE KEY `uk_cloze_quiz_active_cache` (`cache_key`, `cache_active`, `deleted`),
+  KEY `idx_cloze_quiz_source` (`source_hash`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='AI 完形填空题目主表';
 
 CREATE TABLE IF NOT EXISTS `cloze_quiz_blank` (

@@ -4,13 +4,17 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.lexiflow.ai.content.domain.AiContentType;
-import com.lexiflow.ai.content.mapper.AiContentCacheMapper;
+import com.lexiflow.ai.content.domain.WordAiQa;
+import com.lexiflow.ai.content.dto.WordAiContentResponse;
+import com.lexiflow.ai.content.mapper.WordAiQaMapper;
 import com.lexiflow.ai.core.client.AiStreamDeltaHandler;
 import com.lexiflow.ai.core.dto.AiChatCompletionResult;
 import com.lexiflow.ai.core.service.AiGatewayService;
@@ -18,6 +22,8 @@ import com.lexiflow.ai.prompt.domain.AiPromptFeatureType;
 import com.lexiflow.ai.prompt.service.AiPromptOutputSchemaService;
 import com.lexiflow.ai.prompt.service.AiPromptTemplateService;
 import com.lexiflow.ai.prompt.service.ResolvedAiPromptTemplate;
+import com.lexiflow.async.domain.AsyncTask;
+import com.lexiflow.async.service.AsyncTaskService;
 import com.lexiflow.user.domain.TargetExam;
 import com.lexiflow.user.domain.UserSettings;
 import com.lexiflow.user.service.UserService;
@@ -47,7 +53,8 @@ class WordAiContentServiceTest {
     @Test
     void wordQaSourceJsonShouldOnlyExposeMinimalContext() throws Exception {
         WordAiContentService service = new WordAiContentService(
-                mock(AiContentCacheMapper.class),
+                mock(WordAiQaMapper.class),
+                mock(AsyncTaskService.class),
                 mock(AiGatewayService.class),
                 mock(WordbookService.class),
                 mock(WordMapper.class),
@@ -92,7 +99,8 @@ class WordAiContentServiceTest {
 
     @Test
     void streamWordQuestionShouldKeepStreamingAfterAnswerNewlines() throws Exception {
-        AiContentCacheMapper cacheMapper = mock(AiContentCacheMapper.class);
+        WordAiQaMapper wordAiQaMapper = mock(WordAiQaMapper.class);
+        AsyncTaskService asyncTaskService = mock(AsyncTaskService.class);
         AiGatewayService gatewayService = mock(AiGatewayService.class);
         WordbookService wordbookService = mock(WordbookService.class);
         WordMapper wordMapper = mock(WordMapper.class);
@@ -100,7 +108,8 @@ class WordAiContentServiceTest {
         AiPromptTemplateService promptTemplateService = mock(AiPromptTemplateService.class);
         AiPromptOutputSchemaService outputSchemaService = new AiPromptOutputSchemaService(objectMapper);
         WordAiContentService service = new WordAiContentService(
-                cacheMapper,
+                wordAiQaMapper,
+                asyncTaskService,
                 gatewayService,
                 wordbookService,
                 wordMapper,
@@ -142,7 +151,10 @@ class WordAiContentServiceTest {
         when(wordMapper.selectOne(any())).thenReturn(word);
         when(userService.getOrCreateSettings(9L)).thenReturn(settings);
         when(promptTemplateService.resolve(AiPromptFeatureType.WORD_QA, 1L)).thenReturn(template);
-        when(gatewayService.generateJsonStream(eq(9L), eq(AiContentType.WORD_QA), any(), any()))
+        AsyncTask task = new AsyncTask();
+        task.setId(88L);
+        when(asyncTaskService.createTask(eq(9L), any(), any())).thenReturn(task);
+        when(gatewayService.generateJsonStream(eq(9L), eq(AiContentType.WORD_QA), any(), any(), eq(88L)))
                 .thenAnswer(invocation -> {
                     AiStreamDeltaHandler handler = invocation.getArgument(3);
                     for (int index = 0; index < aiJson.length(); index += 5) {
@@ -163,6 +175,74 @@ class WordAiContentServiceTest {
         assertThat(response).contains("\"field\":\"examples\"");
         assertThat(response).contains("\"outputSchema\"");
         assertThat(response).contains("event: done");
+    }
+
+    @Test
+    void generateWordQuestionShouldReuseWordAiQaCacheWithoutCallingAi() {
+        WordAiQaMapper wordAiQaMapper = mock(WordAiQaMapper.class);
+        AsyncTaskService asyncTaskService = mock(AsyncTaskService.class);
+        AiGatewayService gatewayService = mock(AiGatewayService.class);
+        WordbookService wordbookService = mock(WordbookService.class);
+        WordMapper wordMapper = mock(WordMapper.class);
+        UserService userService = mock(UserService.class);
+        AiPromptTemplateService promptTemplateService = mock(AiPromptTemplateService.class);
+        AiPromptOutputSchemaService outputSchemaService = new AiPromptOutputSchemaService(objectMapper);
+        WordAiContentService service = new WordAiContentService(
+                wordAiQaMapper,
+                asyncTaskService,
+                gatewayService,
+                wordbookService,
+                wordMapper,
+                userService,
+                objectMapper,
+                promptTemplateService,
+                outputSchemaService,
+                transactionTemplate()
+        );
+        Wordbook wordbook = new Wordbook();
+        wordbook.setId(1L);
+        wordbook.setName("CET4");
+        wordbook.setType(WordbookType.CET4);
+        wordbook.setDifficultyLevel(4);
+        Word word = new Word();
+        word.setId(67L);
+        word.setWordbookId(1L);
+        word.setWord("plentiful");
+        word.setTrans("[{\"pos\":\"adj.\",\"cn\":\"丰富的，众多的\"}]");
+        UserSettings settings = new UserSettings();
+        settings.setTargetExam(TargetExam.CET4);
+        AsyncTask task = new AsyncTask();
+        task.setId(88L);
+        WordAiQa cached = new WordAiQa();
+        cached.setId(99L);
+        cached.setHitCount(2);
+        cached.setContentJson("{\"answer\":\"缓存回答\",\"keyPoints\":[]}");
+        ResolvedAiPromptTemplate template = new ResolvedAiPromptTemplate(
+                AiPromptFeatureType.WORD_QA,
+                1L,
+                null,
+                "默认 AI 问答提示词",
+                "system",
+                "instruction",
+                outputSchemaService.defaultSchemaJson(AiPromptFeatureType.WORD_QA),
+                true,
+                "fingerprint"
+        );
+
+        when(wordbookService.getEnabledWordbook(1L)).thenReturn(wordbook);
+        when(wordMapper.selectOne(any())).thenReturn(word);
+        when(userService.getOrCreateSettings(9L)).thenReturn(settings);
+        when(promptTemplateService.resolve(AiPromptFeatureType.WORD_QA, 1L)).thenReturn(template);
+        when(asyncTaskService.createTask(eq(9L), any(), any())).thenReturn(task);
+        when(wordAiQaMapper.selectOne(any())).thenReturn(cached);
+
+        WordAiContentResponse response = service.generateWordQuestion(9L, 1L, 67L, "plentiful 是什么意思？", false);
+
+        assertThat(response.cacheHit()).isTrue();
+        assertThat(response.content().path("answer").asText()).isEqualTo("缓存回答");
+        assertThat(cached.getHitCount()).isEqualTo(3);
+        verify(gatewayService, never()).generateJson(any(), any(), any(), any());
+        verify(asyncTaskService).markSuccess(88L, 99L, "AI 问答命中缓存");
     }
 
     @Test

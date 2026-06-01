@@ -118,7 +118,7 @@ public class StudyReportService {
         }
         ReportStats stats = buildStats(userId, dailyTask, plan, reportDate);
         AiPrompt prompt = buildPrompt(stats);
-        AiChatCompletionResult result = aiGatewayService.generateJson(userId, AiContentType.REPORT, prompt);
+        AiChatCompletionResult result = aiGatewayService.generateJson(userId, AiContentType.REPORT, prompt, asyncTaskId);
         JsonNode content = parseJson(result.content());
         return upsertReport(userId, dailyTask, plan, asyncTaskId, reportDate, stats, content);
     }

@@ -1,11 +1,10 @@
 package com.lexiflow.quiz.cloze.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.lexiflow.ai.content.domain.AiContentCache;
 import com.lexiflow.ai.content.domain.AiContentType;
-import com.lexiflow.ai.content.mapper.AiContentCacheMapper;
 import com.lexiflow.ai.core.dto.AiChatCompletionResult;
 import com.lexiflow.ai.core.dto.AiPrompt;
 import com.lexiflow.ai.core.service.AiGatewayService;
@@ -90,7 +89,6 @@ public class ClozeQuizService {
 
     private final AsyncTaskService asyncTaskService;
     private final AiGatewayService aiGatewayService;
-    private final AiContentCacheMapper aiContentCacheMapper;
     private final ClozeBlankWordSelector clozeBlankWordSelector;
     private final DailyTaskMapper dailyTaskMapper;
     private final DailyTaskItemMapper dailyTaskItemMapper;
@@ -292,7 +290,7 @@ public class ClozeQuizService {
         ResolvedAiPromptTemplate promptTemplate = aiPromptTemplateService.resolve(AiPromptFeatureType.CLOZE_QUIZ, wordbookId);
         String sourceHash = buildClozeSourceHash(userId, dailyTask, wordbookId, sourceType, selection, promptTemplate);
         if (!regenerate) {
-            ClozeQuiz cachedQuiz = tryCreateQuizFromCache(userId, dailyTask, wordbookId, asyncTaskId, sourceType, selection, sourceHash);
+            ClozeQuiz cachedQuiz = tryReuseQuizFromCache(userId, sourceHash);
             if (cachedQuiz != null) {
                 return cachedQuiz;
             }
@@ -303,7 +301,7 @@ public class ClozeQuizService {
         for (int attempt = 1; attempt <= MAX_GENERATE_ATTEMPTS; attempt++) {
             AiPrompt prompt = buildPrompt(sourceType, selection, sourceHash, promptTemplate);
             try {
-                AiChatCompletionResult result = aiGatewayService.generateJson(userId, AiContentType.CLOZE, prompt);
+                AiChatCompletionResult result = aiGatewayService.generateJson(userId, AiContentType.CLOZE, prompt, asyncTaskId);
                 JsonNode content = parseJson(result.content());
                 validateGeneratedContent(content, selection);
                 return saveGeneratedQuiz(userId, dailyTask, wordbookId, asyncTaskId, sourceType, selection, sourceHash, content);
@@ -539,84 +537,53 @@ public class ClozeQuizService {
         return wordIds.stream().map(wordMap::get).filter(Objects::nonNull).toList();
     }
 
-    private ClozeQuiz tryCreateQuizFromCache(
-            Long userId,
-            DailyTask dailyTask,
-            Long wordbookId,
-            Long asyncTaskId,
-            ClozeSourceType sourceType,
-            ClozeWordSelection selection,
-            String sourceHash
-    ) {
-        AiContentCache cache = aiContentCacheMapper.selectOne(new LambdaQueryWrapper<AiContentCache>()
-                .eq(AiContentCache::getContentType, AiContentType.CLOZE)
-                .eq(AiContentCache::getCacheKey, clozeCacheKey(sourceHash))
-                .eq(AiContentCache::getUserId, userId)
-                .last("LIMIT 1"));
-        if (cache == null) {
+    private ClozeQuiz tryReuseQuizFromCache(Long userId, String sourceHash) {
+        ClozeQuiz cachedQuiz = findActiveClozeQuiz(userId, clozeCacheKey(sourceHash));
+        if (cachedQuiz == null) {
             return null;
         }
-        try {
-            JsonNode content = parseJson(cache.getContentJson());
-            validateGeneratedContent(content, selection);
-            return transactionTemplate.execute(status -> {
-                cache.setHitCount((cache.getHitCount() == null ? 0 : cache.getHitCount()) + 1);
-                aiContentCacheMapper.updateById(cache);
-                return saveQuiz(userId, dailyTask, wordbookId, asyncTaskId, sourceType, selection, content);
-            });
-        } catch (BizException ex) {
-            return null;
-        }
+        incrementClozeQuizHit(cachedQuiz);
+        return cachedQuiz;
     }
 
     private ClozeQuiz saveGeneratedQuiz(Long userId, DailyTask dailyTask, Long wordbookId, Long asyncTaskId, ClozeSourceType sourceType, ClozeWordSelection selection, String sourceHash, JsonNode content) {
         return transactionTemplate.execute(status -> {
-            upsertClozeCache(userId, wordbookId, sourceHash, content);
-            return saveQuiz(userId, dailyTask, wordbookId, asyncTaskId, sourceType, selection, content);
+            String cacheKey = clozeCacheKey(sourceHash);
+            deactivateClozeQuizCache(cacheKey);
+            try {
+                return saveQuiz(userId, dailyTask, wordbookId, asyncTaskId, sourceType, selection, sourceHash, cacheKey, content);
+            } catch (DuplicateKeyException ignored) {
+                ClozeQuiz active = findActiveClozeQuiz(userId, cacheKey);
+                if (active != null) {
+                    return active;
+                }
+                throw ignored;
+            }
         });
     }
 
-    private ClozeQuiz saveQuizInTransaction(Long userId, DailyTask dailyTask, Long wordbookId, Long asyncTaskId, ClozeSourceType sourceType, ClozeWordSelection selection, JsonNode content) {
-        return transactionTemplate.execute(status -> saveQuiz(userId, dailyTask, wordbookId, asyncTaskId, sourceType, selection, content));
-    }
-
-    private void upsertClozeCache(Long userId, Long wordbookId, String sourceHash, JsonNode content) {
-        String cacheKey = clozeCacheKey(sourceHash);
-        AiContentCache cache = findClozeCacheByKey(cacheKey);
-        if (cache == null) {
-            cache = new AiContentCache();
-            cache.setContentType(AiContentType.CLOZE);
-            cache.setCacheKey(cacheKey);
-            cache.setUserId(userId);
-            cache.setWordbookId(wordbookId);
-            cache.setSourceHash(sourceHash);
-            cache.setHitCount(0);
-            cache.setDeleted(0);
-            fillClozeCacheContent(cache, content);
-            try {
-                aiContentCacheMapper.insert(cache);
-                return;
-            } catch (DuplicateKeyException ignored) {
-                return;
-            }
-        }
-        fillClozeCacheContent(cache, content);
-        aiContentCacheMapper.updateById(cache);
-    }
-
-    private AiContentCache findClozeCacheByKey(String cacheKey) {
-        return aiContentCacheMapper.selectOne(new LambdaQueryWrapper<AiContentCache>()
-                .eq(AiContentCache::getContentType, AiContentType.CLOZE)
-                .eq(AiContentCache::getCacheKey, cacheKey)
-                .eq(AiContentCache::getDeleted, 0)
+    private ClozeQuiz findActiveClozeQuiz(Long userId, String cacheKey) {
+        return clozeQuizMapper.selectOne(new LambdaQueryWrapper<ClozeQuiz>()
+                .eq(ClozeQuiz::getUserId, userId)
+                .eq(ClozeQuiz::getCacheKey, cacheKey)
+                .eq(ClozeQuiz::getCacheActive, true)
+                .eq(ClozeQuiz::getDeleted, 0)
                 .last("LIMIT 1"));
     }
 
-    private void fillClozeCacheContent(AiContentCache cache, JsonNode content) {
-        cache.setContentJson(toJson(content));
-        cache.setMarkdownContent(null);
-        cache.setModelName(null);
-        cache.setExpiresAt(null);
+    private void incrementClozeQuizHit(ClozeQuiz quiz) {
+        transactionTemplate.executeWithoutResult(status -> {
+            quiz.setHitCount((quiz.getHitCount() == null ? 0 : quiz.getHitCount()) + 1);
+            clozeQuizMapper.updateById(quiz);
+        });
+    }
+
+    private void deactivateClozeQuizCache(String cacheKey) {
+        clozeQuizMapper.update(null, new LambdaUpdateWrapper<ClozeQuiz>()
+                .set(ClozeQuiz::getCacheActive, null)
+                .eq(ClozeQuiz::getCacheKey, cacheKey)
+                .eq(ClozeQuiz::getCacheActive, true)
+                .eq(ClozeQuiz::getDeleted, 0));
     }
 
     private String buildClozeSourceHash(Long userId, DailyTask dailyTask, Long wordbookId, ClozeSourceType sourceType, ClozeWordSelection selection, ResolvedAiPromptTemplate promptTemplate) {
@@ -636,7 +603,7 @@ public class ClozeQuizService {
         return "cloze:" + sourceHash;
     }
 
-    private ClozeQuiz saveQuiz(Long userId, DailyTask dailyTask, Long wordbookId, Long asyncTaskId, ClozeSourceType sourceType, ClozeWordSelection selection, JsonNode content) {
+    private ClozeQuiz saveQuiz(Long userId, DailyTask dailyTask, Long wordbookId, Long asyncTaskId, ClozeSourceType sourceType, ClozeWordSelection selection, String sourceHash, String cacheKey, JsonNode content) {
         ProgrammaticClozeDraft draft = buildProgrammaticClozeDraft(content, selection);
 
         ClozeQuiz quiz = new ClozeQuiz();
@@ -645,6 +612,10 @@ public class ClozeQuizService {
         quiz.setDailyTaskId(dailyTask.getId());
         quiz.setAsyncTaskId(asyncTaskId);
         quiz.setSourceType(sourceType);
+        quiz.setSourceHash(sourceHash);
+        quiz.setCacheKey(cacheKey);
+        quiz.setCacheActive(true);
+        quiz.setHitCount(0);
         quiz.setTitle(content.path("title").asText("LexiFlow Cloze Practice"));
         quiz.setPassage(draft.passage());
         quiz.setCandidateWords(toJson(normalizeCandidateWordsFromBlanks(draft.blanks())));

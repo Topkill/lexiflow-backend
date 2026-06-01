@@ -11,6 +11,9 @@ import com.lexiflow.ai.prompt.domain.AiPromptFeatureType;
 import com.lexiflow.ai.prompt.service.AiPromptOutputSchemaService;
 import com.lexiflow.ai.prompt.service.AiPromptTemplateService;
 import com.lexiflow.ai.prompt.service.ResolvedAiPromptTemplate;
+import com.lexiflow.async.domain.AsyncTask;
+import com.lexiflow.async.domain.AsyncTaskType;
+import com.lexiflow.async.service.AsyncTaskService;
 import com.lexiflow.common.error.ErrorCode;
 import com.lexiflow.common.exception.BizException;
 import com.lexiflow.quiz.cloze.domain.ClozeAttempt;
@@ -50,6 +53,7 @@ public class ClozeAttemptAiReviewService {
 
     private static final int STREAM_CHUNK_SIZE = 12;
 
+    private final AsyncTaskService asyncTaskService;
     private final AiGatewayService aiGatewayService;
     private final ClozeAttemptAiReviewMapper reviewMapper;
     private final ClozeAttemptMapper attemptMapper;
@@ -86,60 +90,110 @@ public class ClozeAttemptAiReviewService {
             ResolvedAiPromptTemplate promptTemplate = context.promptTemplate();
             ClozeAttemptResponse attemptResponse = context.attemptResponse();
             Map<Long, Integer> blankNoMap = context.blankNoMap();
+            AsyncTask task = createReviewTask(userId, attemptId, regenerate);
+            boolean taskFinished = false;
+            try {
+                asyncTaskService.markRunning(task.getId(), "正在生成 AI 评阅", 20);
 
-            ClozeAttemptAiReview existingReview = getOwnedReview(userId, attemptId);
-            if (existingReview != null
-                    && !regenerate
-                    && existingReview.getStatus() == ClozeAttemptAiReviewStatus.DONE
-                    && StringUtils.hasText(existingReview.getContentJson())
-                    && sourceHash.equals(existingReview.getSourceHash())) {
-                ClozeAttemptAiReviewResponse cached = ClozeAttemptAiReviewResponse.of(existingReview, parseContent(existingReview.getContentJson()), outputSchemaService.schemaNode(promptTemplate.outputSchemaJson()));
-                try (OutputStreamWriter writer = new OutputStreamWriter(outputStream, StandardCharsets.UTF_8)) {
-                    writeEvent(writer, "status", Map.of("status", "DONE", "message", "已命中缓存"));
-                    streamDisplayText(writer, cached.displayText());
-                    writeEvent(writer, "done", cached);
+                ClozeAttemptAiReview existingReview = getOwnedReview(userId, attemptId);
+                if (existingReview != null
+                        && !regenerate
+                        && existingReview.getStatus() == ClozeAttemptAiReviewStatus.DONE
+                        && StringUtils.hasText(existingReview.getContentJson())
+                        && sourceHash.equals(existingReview.getSourceHash())) {
+                    ClozeAttemptAiReviewResponse cached = ClozeAttemptAiReviewResponse.of(existingReview, parseContent(existingReview.getContentJson()), outputSchemaService.schemaNode(promptTemplate.outputSchemaJson()));
+                    asyncTaskService.markSuccess(task.getId(), existingReview.getId(), "AI 评阅命中缓存");
+                    taskFinished = true;
+                    try (OutputStreamWriter writer = new OutputStreamWriter(outputStream, StandardCharsets.UTF_8)) {
+                        writeEvent(writer, "status", Map.of("status", "DONE", "message", "已命中缓存"));
+                        streamDisplayText(writer, cached.displayText());
+                        writeEvent(writer, "done", cached);
+                    }
+                    return;
                 }
-                return;
-            }
 
-            ClozeAttemptAiReview review = upsertRunningReview(userId, attempt, sourceHash);
-            try (OutputStreamWriter writer = new OutputStreamWriter(outputStream, StandardCharsets.UTF_8)) {
-                writeEvent(writer, "status", Map.of("status", "RUNNING", "message", "正在生成 AI 评阅"));
-                try {
-                    AiPrompt prompt = new AiPrompt(
-                            promptTemplate.systemPrompt(),
-                            buildManagedPrompt(promptTemplate, sourceJson),
-                            sourceHash,
-                            promptTemplate.featureType().name(),
-                            promptTemplate.templateId(),
-                            promptTemplate.templateName()
-                    );
-                    AiChatCompletionResult result = aiGatewayService.generateJson(userId, AiContentType.CLOZE, prompt);
-                    JsonNode contentNode = normalizeReviewContent(parseJson(result.content()), attemptResponse, blankNoMap);
-                    review.setContentJson(toJson(contentNode));
-                    review.setStatus(ClozeAttemptAiReviewStatus.DONE);
-                    review.setFinishedAt(LocalDateTime.now());
-                    review.setErrorMessage(null);
-                    reviewMapper.updateById(review);
+                ClozeAttemptAiReview review = upsertRunningReview(userId, attempt, sourceHash);
+                try (OutputStreamWriter writer = new OutputStreamWriter(outputStream, StandardCharsets.UTF_8)) {
+                    writeEvent(writer, "status", Map.of("status", "RUNNING", "message", "正在生成 AI 评阅"));
+                    ClozeAttemptAiReviewResponse response;
+                    try {
+                        AiPrompt prompt = new AiPrompt(
+                                promptTemplate.systemPrompt(),
+                                buildManagedPrompt(promptTemplate, sourceJson),
+                                sourceHash,
+                                promptTemplate.featureType().name(),
+                                promptTemplate.templateId(),
+                                promptTemplate.templateName()
+                        );
+                        AiChatCompletionResult result = aiGatewayService.generateJson(userId, AiContentType.CLOZE_REVIEW, prompt, task.getId());
+                        JsonNode contentNode = normalizeReviewContent(parseJson(result.content()), attemptResponse, blankNoMap);
+                        review.setContentJson(toJson(contentNode));
+                        review.setStatus(ClozeAttemptAiReviewStatus.DONE);
+                        review.setFinishedAt(LocalDateTime.now());
+                        review.setErrorMessage(null);
+                        reviewMapper.updateById(review);
+                        asyncTaskService.markSuccess(task.getId(), review.getId(), "AI 评阅生成完成");
+                        taskFinished = true;
 
-                    ClozeAttemptAiReviewResponse response = ClozeAttemptAiReviewResponse.of(review, contentNode, outputSchemaService.schemaNode(promptTemplate.outputSchemaJson()));
+                        response = ClozeAttemptAiReviewResponse.of(review, contentNode, outputSchemaService.schemaNode(promptTemplate.outputSchemaJson()));
+                    } catch (BizException ex) {
+                        String message = ex.getErrorCode() == ErrorCode.AI_PUBLIC_QUOTA_EXHAUSTED
+                                ? "今日公共 AI 调用次数已用完"
+                                : StringUtils.hasText(ex.getCustomMessage()) ? ex.getCustomMessage() : "AI 评阅生成失败，请稍后重试";
+                        markFailed(review, message);
+                        asyncTaskService.markFailed(task.getId(), String.valueOf(ex.getErrorCode().getCode()), message);
+                        taskFinished = true;
+                        writeEvent(writer, "error", Map.of(
+                                "code", ex.getErrorCode().getCode(),
+                                "message", message
+                        ));
+                        return;
+                    } catch (RuntimeException ex) {
+                        markFailed(review, ex.getMessage());
+                        asyncTaskService.markFailed(task.getId(), String.valueOf(ErrorCode.AI_CALL_FAILED.getCode()), ex.getMessage());
+                        taskFinished = true;
+                        writeEvent(writer, "error", Map.of("message", "AI 评阅生成失败，请稍后重试"));
+                        return;
+                    }
                     streamDisplayText(writer, response.displayText());
                     writeEvent(writer, "done", response);
-                } catch (BizException ex) {
-                    String message = ex.getErrorCode() == ErrorCode.AI_PUBLIC_QUOTA_EXHAUSTED
-                            ? "今日公共 AI 调用次数已用完"
-                            : StringUtils.hasText(ex.getCustomMessage()) ? ex.getCustomMessage() : "AI 评阅生成失败，请稍后重试";
-                    markFailed(review, message);
-                    writeEvent(writer, "error", Map.of(
-                            "code", ex.getErrorCode().getCode(),
-                            "message", message
-                    ));
-                } catch (Exception ex) {
-                    markFailed(review, ex.getMessage());
-                    writeEvent(writer, "error", Map.of("message", "AI 评阅生成失败，请稍后重试"));
                 }
+            } catch (IOException ex) {
+                if (!taskFinished) {
+                    markReviewTaskFailed(task, ex);
+                }
+                throw ex;
+            } catch (RuntimeException ex) {
+                if (!taskFinished) {
+                    markReviewTaskFailed(task, ex);
+                }
+                throw ex;
             }
         }
+    }
+
+    private void markReviewTaskFailed(AsyncTask task, Exception ex) {
+        if (ex instanceof BizException bizException) {
+            asyncTaskService.markFailed(
+                    task.getId(),
+                    String.valueOf(bizException.getErrorCode().getCode()),
+                    bizException.getCustomMessage()
+            );
+            return;
+        }
+        asyncTaskService.markFailed(
+                task.getId(),
+                String.valueOf(ErrorCode.AI_CALL_FAILED.getCode()),
+                ex.getMessage()
+        );
+    }
+
+    private AsyncTask createReviewTask(Long userId, Long attemptId, boolean regenerate) {
+        String requestJson = toJson(Map.of(
+                "attemptId", String.valueOf(attemptId),
+                "regenerate", regenerate
+        ));
+        return asyncTaskService.createTask(userId, AsyncTaskType.AI_CLOZE_REVIEW, requestJson);
     }
 
     private ClozeAttemptAiReview getOwnedReview(Long userId, Long attemptId) {

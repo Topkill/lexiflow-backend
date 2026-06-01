@@ -23,6 +23,10 @@ public class ClozeQuiz {
     private Long dailyTaskId;
     private Long asyncTaskId;
     private ClozeSourceType sourceType;
+    private String sourceHash;
+    private String cacheKey;
+    private Boolean cacheActive;
+    private Integer hitCount;
     private String title;
     private String passage;
     private String candidateWords;

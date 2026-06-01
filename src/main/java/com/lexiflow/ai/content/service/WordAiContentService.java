@@ -1,12 +1,14 @@
 package com.lexiflow.ai.content.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.lexiflow.ai.content.domain.AiContentCache;
 import com.lexiflow.ai.content.domain.AiContentType;
+import com.lexiflow.ai.content.domain.WordAiQa;
 import com.lexiflow.ai.content.dto.WordAiContentResponse;
-import com.lexiflow.ai.content.mapper.AiContentCacheMapper;
+import com.lexiflow.ai.content.mapper.WordAiQaMapper;
 import com.lexiflow.ai.core.dto.AiChatCompletionResult;
 import com.lexiflow.ai.core.dto.AiPrompt;
 import com.lexiflow.ai.core.service.AiGatewayService;
@@ -15,6 +17,9 @@ import com.lexiflow.ai.prompt.domain.AiPromptFeatureType;
 import com.lexiflow.ai.prompt.service.AiPromptOutputSchemaService;
 import com.lexiflow.ai.prompt.service.AiPromptTemplateService;
 import com.lexiflow.ai.prompt.service.ResolvedAiPromptTemplate;
+import com.lexiflow.async.domain.AsyncTask;
+import com.lexiflow.async.domain.AsyncTaskType;
+import com.lexiflow.async.service.AsyncTaskService;
 import com.lexiflow.common.error.ErrorCode;
 import com.lexiflow.common.exception.BizException;
 import com.lexiflow.user.domain.UserSettings;
@@ -27,7 +32,6 @@ import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.LinkedHashSet;
@@ -49,8 +53,10 @@ public class WordAiContentService {
 
     private static final String SYSTEM_PROMPT = "你是 LexiFlow 的 AI 英语学习助手。请只输出合法 JSON，不要输出 JSON 外的 Markdown、解释性前后缀或代码块。内容面向备考大学生，中文为主，简洁、准确、适合背单词。";
     private static final String STREAM_OUTPUT_CONSTRAINT = "流式输出约束：JSON 对象必须先输出 answer 字段，其他字段继续按照输出 JSON 结构输出。";
+    private static final int WORD_QA_CACHE_LOCK_STRIPES = 64;
 
-    private final AiContentCacheMapper aiContentCacheMapper;
+    private final WordAiQaMapper wordAiQaMapper;
+    private final AsyncTaskService asyncTaskService;
     private final AiGatewayService aiGatewayService;
     private final WordbookService wordbookService;
     private final WordMapper wordMapper;
@@ -59,16 +65,21 @@ public class WordAiContentService {
     private final AiPromptTemplateService aiPromptTemplateService;
     private final AiPromptOutputSchemaService outputSchemaService;
     private final TransactionTemplate transactionTemplate;
+    private final Object[] wordQaCacheLocks = createWordQaCacheLocks();
 
-    public WordAiContentResponse generateWordContent(Long userId, Long wordbookId, Long wordId, AiContentType contentType, boolean regenerate) {
-        return generateWordContent(userId, wordbookId, wordId, contentType, null, regenerate);
+    private static Object[] createWordQaCacheLocks() {
+        Object[] locks = new Object[WORD_QA_CACHE_LOCK_STRIPES];
+        for (int i = 0; i < locks.length; i++) {
+            locks[i] = new Object();
+        }
+        return locks;
     }
 
     public WordAiContentResponse generateWordQuestion(Long userId, Long wordbookId, Long wordId, String question, boolean regenerate) {
         if (question == null || question.isBlank()) {
             throw new BizException(ErrorCode.BAD_REQUEST, "问题不能为空");
         }
-        return generateWordContent(userId, wordbookId, wordId, AiContentType.WORD_QA, question.trim(), regenerate);
+        return generateWordQaContent(userId, wordbookId, wordId, question.trim(), regenerate);
     }
 
     public void streamWordQuestion(Long userId, Long wordbookId, Long wordId, String question, boolean regenerate, OutputStream outputStream) {
@@ -76,43 +87,58 @@ public class WordAiContentService {
             throw new BizException(ErrorCode.BAD_REQUEST, "问题不能为空");
         }
         OutputStreamWriter writer = new OutputStreamWriter(outputStream, StandardCharsets.UTF_8);
+        AsyncTask task = null;
+        boolean taskFinished = false;
         try {
+            String safeQuestion = question.trim();
             Wordbook wordbook = wordbookService.getEnabledWordbook(wordbookId);
             Word word = getEnabledWord(wordbookId, wordId);
             UserSettings settings = userService.getOrCreateSettings(userId);
-            String sourceJson = buildSourceJson(AiContentType.WORD_QA, wordbook, word, settings, question.trim());
+            String sourceJson = buildSourceJson(AiContentType.WORD_QA, wordbook, word, settings, safeQuestion);
             ResolvedAiPromptTemplate promptTemplate = aiPromptTemplateService.resolve(AiPromptFeatureType.WORD_QA, wordbookId);
             JsonNode outputSchema = outputSchemaService.schemaNode(promptTemplate.outputSchemaJson());
             String sourceHash = sha256(sourceJson + "\n#prompt:" + promptTemplate.cacheFingerprint());
             String cacheKey = buildCacheKey(AiContentType.WORD_QA, wordbookId, wordId, sourceHash);
+            task = createWordQaTask(userId, wordbookId, wordId, safeQuestion, regenerate);
+            asyncTaskService.markRunning(task.getId(), "正在生成 AI 回答", 20);
 
-            if (!regenerate) {
-                AiContentCache cache = findUsableCache(AiContentType.WORD_QA, cacheKey);
-                if (cache != null) {
-                    incrementCacheHit(cache);
-                    JsonNode content = parseJson(cache.getContentJson());
-                    writeEvent(writer, "status", buildWordQaStatusPayload("CACHE_HIT", "已命中缓存", outputSchema));
-                    streamCachedAnswer(writer, content);
-                    streamWordQaFieldItems(writer, content, outputSchema);
-                    writeEvent(writer, "done", WordAiContentResponse.of(true, AiContentType.WORD_QA, wordId, wordbookId, content, outputSchema));
-                    return;
+            synchronized (wordQaCacheLock(cacheKey)) {
+                if (!regenerate) {
+                    WordAiQa cached = findActiveWordQa(cacheKey);
+                    if (cached != null) {
+                        incrementWordQaHit(cached);
+                        JsonNode content = parseJson(cached.getContentJson());
+                        asyncTaskService.markSuccess(task.getId(), cached.getId(), "AI 问答命中缓存");
+                        taskFinished = true;
+                        writeEvent(writer, "status", buildWordQaStatusPayload("CACHE_HIT", "已命中缓存", outputSchema));
+                        streamCachedAnswer(writer, content);
+                        streamWordQaFieldItems(writer, content, outputSchema);
+                        writeEvent(writer, "done", WordAiContentResponse.of(true, AiContentType.WORD_QA, wordId, wordbookId, content, outputSchema));
+                        return;
+                    }
                 }
-            }
 
-            writeEvent(writer, "status", buildWordQaStatusPayload("RUNNING", "正在生成 AI 回答", outputSchema));
-            WordQaJsonStreamExtractor streamExtractor = new WordQaJsonStreamExtractor(outputSchema, objectMapper);
-            AiPrompt prompt = buildPrompt(AiContentType.WORD_QA, sourceJson, sourceHash, promptTemplate, STREAM_OUTPUT_CONSTRAINT);
-            AiChatCompletionResult result = generateQuestionStreamWithFallback(userId, prompt, writer, streamExtractor, outputSchema);
-            JsonNode content = parseJson(result.content());
-            if (!streamExtractor.hasAnswerEmitted()) {
-                String answer = content.path("answer").asText("");
-                if (!answer.isBlank()) {
-                    writeEvent(writer, "chunk", Map.of("text", answer));
+                writeEvent(writer, "status", buildWordQaStatusPayload("RUNNING", "正在生成 AI 回答", outputSchema));
+                WordQaJsonStreamExtractor streamExtractor = new WordQaJsonStreamExtractor(outputSchema, objectMapper);
+                AiPrompt prompt = buildPrompt(AiContentType.WORD_QA, sourceJson, sourceHash, promptTemplate, STREAM_OUTPUT_CONSTRAINT);
+                AiChatCompletionResult result = generateQuestionStreamWithFallback(userId, prompt, writer, streamExtractor, outputSchema, task.getId());
+                JsonNode content = parseJson(result.content());
+                if (!streamExtractor.hasAnswerEmitted()) {
+                    String answer = content.path("answer").asText("");
+                    if (!answer.isBlank()) {
+                        writeEvent(writer, "chunk", Map.of("text", answer));
+                    }
                 }
+                WordAiQa qa = saveWordQaResult(userId, wordId, wordbookId, safeQuestion, sourceHash, cacheKey, content, outputSchema);
+                JsonNode savedContent = parseJson(qa.getContentJson());
+                asyncTaskService.markSuccess(task.getId(), qa.getId(), "AI 问答生成完成");
+                taskFinished = true;
+                writeEvent(writer, "done", WordAiContentResponse.of(false, AiContentType.WORD_QA, wordId, wordbookId, savedContent, outputSchema));
             }
-            upsertCache(AiContentType.WORD_QA, cacheKey, sourceHash, wordId, wordbookId, content);
-            writeEvent(writer, "done", WordAiContentResponse.of(false, AiContentType.WORD_QA, wordId, wordbookId, content, outputSchema));
         } catch (Exception ex) {
+            if (task != null && !taskFinished) {
+                markWordQaTaskFailed(task, ex);
+            }
             log.warn("AI 单词问答流式输出失败，wordId={}, wordbookId={}", wordId, wordbookId, ex);
             try {
                 writeEvent(writer, "error", buildStreamErrorPayload(ex));
@@ -133,7 +159,8 @@ public class WordAiContentService {
             AiPrompt prompt,
             OutputStreamWriter writer,
             WordQaJsonStreamExtractor streamExtractor,
-            JsonNode outputSchema
+            JsonNode outputSchema,
+            Long asyncTaskId
     ) throws Exception {
         try {
             return aiGatewayService.generateJsonStream(userId, AiContentType.WORD_QA, prompt, delta -> {
@@ -147,12 +174,12 @@ public class WordAiContentService {
                             "item", item.item()
                     ));
                 }
-            });
+            }, asyncTaskId);
         } catch (BizException ex) {
             if (ex.getErrorCode() != ErrorCode.AI_CALL_FAILED) {
                 throw ex;
             }
-            AiChatCompletionResult fallback = aiGatewayService.generateJson(userId, AiContentType.WORD_QA, prompt);
+            AiChatCompletionResult fallback = aiGatewayService.generateJson(userId, AiContentType.WORD_QA, prompt, asyncTaskId);
             JsonNode content = parseJson(fallback.content());
             String answer = content.path("answer").asText("");
             if (!answer.isBlank()) {
@@ -181,34 +208,43 @@ public class WordAiContentService {
         );
     }
 
-    private WordAiContentResponse generateWordContent(Long userId, Long wordbookId, Long wordId, AiContentType contentType, String question, boolean regenerate) {
+    private WordAiContentResponse generateWordQaContent(Long userId, Long wordbookId, Long wordId, String question, boolean regenerate) {
         Wordbook wordbook = wordbookService.getEnabledWordbook(wordbookId);
         Word word = getEnabledWord(wordbookId, wordId);
         UserSettings settings = userService.getOrCreateSettings(userId);
-        String sourceJson = buildSourceJson(contentType, wordbook, word, settings, question);
-        ResolvedAiPromptTemplate promptTemplate = contentType == AiContentType.WORD_QA
-                ? aiPromptTemplateService.resolve(AiPromptFeatureType.WORD_QA, wordbookId)
-                : null;
-        String sourceHash = promptTemplate == null
-                ? sha256(sourceJson)
-                : sha256(sourceJson + "\n#prompt:" + promptTemplate.cacheFingerprint());
-        String cacheKey = buildCacheKey(contentType, wordbookId, wordId, sourceHash);
+        String sourceJson = buildSourceJson(AiContentType.WORD_QA, wordbook, word, settings, question);
+        ResolvedAiPromptTemplate promptTemplate = aiPromptTemplateService.resolve(AiPromptFeatureType.WORD_QA, wordbookId);
+        JsonNode outputSchema = outputSchemaService.schemaNode(promptTemplate.outputSchemaJson());
+        String sourceHash = sha256(sourceJson + "\n#prompt:" + promptTemplate.cacheFingerprint());
+        String cacheKey = buildCacheKey(AiContentType.WORD_QA, wordbookId, wordId, sourceHash);
+        AsyncTask task = createWordQaTask(userId, wordbookId, wordId, question, regenerate);
+        try {
+            asyncTaskService.markRunning(task.getId(), "正在生成 AI 回答", 20);
+            synchronized (wordQaCacheLock(cacheKey)) {
+                if (!regenerate) {
+                    WordAiQa cached = findActiveWordQa(cacheKey);
+                    if (cached != null) {
+                        incrementWordQaHit(cached);
+                        asyncTaskService.markSuccess(task.getId(), cached.getId(), "AI 问答命中缓存");
+                        return WordAiContentResponse.of(true, AiContentType.WORD_QA, wordId, wordbookId, parseJson(cached.getContentJson()), outputSchema);
+                    }
+                }
 
-        if (!regenerate) {
-            AiContentCache cache = findUsableCache(contentType, cacheKey);
-            if (cache != null) {
-                incrementCacheHit(cache);
-                JsonNode outputSchema = promptTemplate == null ? null : outputSchemaService.schemaNode(promptTemplate.outputSchemaJson());
-                return WordAiContentResponse.of(true, contentType, wordId, wordbookId, parseJson(cache.getContentJson()), outputSchema);
+                AiPrompt prompt = buildPrompt(AiContentType.WORD_QA, sourceJson, sourceHash, promptTemplate);
+                AiChatCompletionResult result = aiGatewayService.generateJson(userId, AiContentType.WORD_QA, prompt, task.getId());
+                JsonNode content = parseJson(result.content());
+                WordAiQa qa = saveWordQaResult(userId, wordId, wordbookId, question, sourceHash, cacheKey, content, outputSchema);
+                JsonNode savedContent = parseJson(qa.getContentJson());
+                asyncTaskService.markSuccess(task.getId(), qa.getId(), "AI 问答生成完成");
+                return WordAiContentResponse.of(false, AiContentType.WORD_QA, wordId, wordbookId, savedContent, outputSchema);
             }
+        } catch (BizException ex) {
+            markWordQaTaskFailed(task, ex);
+            throw ex;
+        } catch (Exception ex) {
+            markWordQaTaskFailed(task, ex);
+            throw new BizException(ErrorCode.AI_CALL_FAILED, "AI 问答生成失败，请稍后重试");
         }
-
-        AiPrompt prompt = buildPrompt(contentType, sourceJson, sourceHash, promptTemplate);
-        AiChatCompletionResult result = aiGatewayService.generateJson(userId, contentType, prompt);
-        JsonNode content = parseJson(result.content());
-        upsertCache(contentType, cacheKey, sourceHash, wordId, wordbookId, content);
-        JsonNode outputSchema = promptTemplate == null ? null : outputSchemaService.schemaNode(promptTemplate.outputSchemaJson());
-        return WordAiContentResponse.of(false, contentType, wordId, wordbookId, content, outputSchema);
     }
 
     private Word getEnabledWord(Long wordbookId, Long wordId) {
@@ -223,62 +259,97 @@ public class WordAiContentService {
         return word;
     }
 
-    private AiContentCache findUsableCache(AiContentType contentType, String cacheKey) {
-        return aiContentCacheMapper.selectOne(new LambdaQueryWrapper<AiContentCache>()
-                .eq(AiContentCache::getContentType, contentType)
-                .eq(AiContentCache::getCacheKey, cacheKey)
-                .and(wrapper -> wrapper.isNull(AiContentCache::getExpiresAt)
-                        .or()
-                        .gt(AiContentCache::getExpiresAt, LocalDateTime.now()))
+    private AsyncTask createWordQaTask(Long userId, Long wordbookId, Long wordId, String question, boolean regenerate) {
+        String requestJson = toJson(Map.of(
+                "wordbookId", String.valueOf(wordbookId),
+                "wordId", String.valueOf(wordId),
+                "question", question,
+                "regenerate", regenerate
+        ));
+        return asyncTaskService.createTask(userId, AsyncTaskType.AI_WORD_QA, requestJson);
+    }
+
+    private WordAiQa findActiveWordQa(String cacheKey) {
+        return wordAiQaMapper.selectOne(new QueryWrapper<WordAiQa>()
+                .eq("cache_key", cacheKey)
+                .eq("cache_active", true)
+                .eq("deleted", 0)
                 .last("LIMIT 1"));
     }
 
-    private void incrementCacheHit(AiContentCache cache) {
+    private Object wordQaCacheLock(String cacheKey) {
+        return wordQaCacheLocks[Math.floorMod(cacheKey.hashCode(), wordQaCacheLocks.length)];
+    }
+
+    private void incrementWordQaHit(WordAiQa qa) {
         transactionTemplate.executeWithoutResult(status -> {
-            cache.setHitCount((cache.getHitCount() == null ? 0 : cache.getHitCount()) + 1);
-            aiContentCacheMapper.updateById(cache);
+            qa.setHitCount((qa.getHitCount() == null ? 0 : qa.getHitCount()) + 1);
+            wordAiQaMapper.updateById(qa);
         });
     }
 
-    private void upsertCache(AiContentType contentType, String cacheKey, String sourceHash, Long wordId, Long wordbookId, JsonNode content) {
-        transactionTemplate.executeWithoutResult(status -> {
-            AiContentCache cache = findCacheByKey(contentType, cacheKey);
-            if (cache == null) {
-                cache = new AiContentCache();
-                cache.setContentType(contentType);
-                cache.setCacheKey(cacheKey);
-                cache.setUserId(null);
-                cache.setWordId(wordId);
-                cache.setWordbookId(wordbookId);
-                cache.setSourceHash(sourceHash);
-                cache.setHitCount(0);
-                cache.setDeleted(0);
-                fillCacheContent(cache, content);
-                try {
-                    aiContentCacheMapper.insert(cache);
-                    return;
-                } catch (DuplicateKeyException ignored) {
-                    return;
+    private WordAiQa saveWordQaResult(
+            Long userId,
+            Long wordId,
+            Long wordbookId,
+            String question,
+            String sourceHash,
+            String cacheKey,
+            JsonNode content,
+            JsonNode outputSchema
+    ) {
+        return transactionTemplate.execute(status -> {
+            deactivateWordQaCache(cacheKey);
+            WordAiQa qa = new WordAiQa();
+            qa.setCreatedByUserId(userId);
+            qa.setWordId(wordId);
+            qa.setWordbookId(wordbookId);
+            qa.setQuestion(question);
+            qa.setSourceHash(sourceHash);
+            qa.setCacheKey(cacheKey);
+            qa.setContentJson(toJson(content));
+            qa.setOutputSchemaJson(outputSchema == null ? null : toJson(outputSchema));
+            qa.setCacheActive(true);
+            qa.setHitCount(0);
+            qa.setDeleted(0);
+            try {
+                wordAiQaMapper.insert(qa);
+                return qa;
+            } catch (DuplicateKeyException ignored) {
+                WordAiQa active = findActiveWordQa(cacheKey);
+                if (active != null) {
+                    return active;
                 }
+                throw ignored;
             }
-            fillCacheContent(cache, content);
-            aiContentCacheMapper.updateById(cache);
         });
     }
 
-    private AiContentCache findCacheByKey(AiContentType contentType, String cacheKey) {
-        return aiContentCacheMapper.selectOne(new LambdaQueryWrapper<AiContentCache>()
-                .eq(AiContentCache::getContentType, contentType)
-                .eq(AiContentCache::getCacheKey, cacheKey)
-                .eq(AiContentCache::getDeleted, 0)
-                .last("LIMIT 1"));
+    private void deactivateWordQaCache(String cacheKey) {
+        wordAiQaMapper.update(null, new UpdateWrapper<WordAiQa>()
+                .set("cache_active", null)
+                .eq("cache_key", cacheKey)
+                .eq("cache_active", true)
+                .eq("deleted", 0));
     }
 
-    private void fillCacheContent(AiContentCache cache, JsonNode content) {
-        cache.setContentJson(toJson(content));
-        cache.setMarkdownContent(null);
-        cache.setModelName(null);
-        cache.setExpiresAt(null);
+    private void markWordQaTaskFailed(AsyncTask task, Exception ex) {
+        if (task == null) {
+            return;
+        }
+        if (ex instanceof BizException bizException) {
+            asyncTaskService.markFailed(
+                    task.getId(),
+                    String.valueOf(bizException.getErrorCode().getCode()),
+                    bizException.getCustomMessage()
+            );
+            return;
+        }
+        asyncTaskService.markFailed(
+                task.getId(),
+                String.valueOf(ErrorCode.AI_CALL_FAILED.getCode()),
+                ex.getMessage()
+        );
     }
 
     private AiPrompt buildPrompt(AiContentType contentType, String sourceJson, String sourceHash, ResolvedAiPromptTemplate promptTemplate) {
@@ -297,9 +368,6 @@ public class WordAiContentService {
             );
         }
         String schema = switch (contentType) {
-            case EXPLANATION -> "输出 JSON 字段：brief 字符串；usage 字符串数组；confusingWords 字符串数组；scenes 字符串数组。";
-            case EXAMPLES -> "输出 JSON 字段：simple、medium、examStyle 三个对象；每个对象包含 sentence 英文例句和 translation 中文翻译。";
-            case MNEMONIC -> "输出 JSON 字段：association 字符串；rootsAffixes 字符串；pitfalls 字符串数组。";
             case WORD_QA -> "输出 JSON 字段：answer 字符串；keyPoints 字符串数组；relatedWords 字符串数组；followUps 字符串数组；grammarTip 字符串。回答必须直接回应用户问题，不能编造未给出的固定知识；如果问题超出单词学习范围，请简短说明并拉回该单词。grammarTip 最后补充一条零基础英语语法小知识，优先相关，否则由你自由生成。允许 answer 和 grammarTip 里的字符串适当使用 Markdown 语法。";
             default -> throw new BizException(ErrorCode.BAD_REQUEST, "不支持的 AI 单词内容类型");
         };

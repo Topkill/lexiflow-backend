@@ -8,7 +8,6 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.lexiflow.ai.content.mapper.AiContentCacheMapper;
 import com.lexiflow.ai.core.service.AiGatewayService;
 import com.lexiflow.ai.prompt.service.AiPromptTemplateService;
 import com.lexiflow.async.service.AsyncTaskService;
@@ -51,8 +50,6 @@ class ClozeQuizServiceWordSelectionTest {
     private AsyncTaskService asyncTaskService;
     @Mock
     private AiGatewayService aiGatewayService;
-    @Mock
-    private AiContentCacheMapper aiContentCacheMapper;
     @Mock
     private ClozeBlankWordSelector clozeBlankWordSelector;
     @Mock

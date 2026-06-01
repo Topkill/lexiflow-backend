@@ -25,34 +25,43 @@ public class AiGatewayService {
     private final AiCallLogMapper aiCallLogMapper;
 
     public AiChatCompletionResult generateJson(Long userId, AiContentType contentType, AiPrompt prompt) {
+        return generateJson(userId, contentType, prompt, null);
+    }
+
+    public AiChatCompletionResult generateJson(Long userId, AiContentType contentType, AiPrompt prompt, Long asyncTaskId) {
         AiRuntimeConfig config = aiConfigResolver.resolve(userId);
         aiQuotaService.checkQuota(userId, config);
         long startNanos = System.nanoTime();
         try {
             AiChatCompletionResult result = springAiChatClient.chatJson(config, prompt.systemPrompt(), prompt.userPrompt());
-            saveLog(userId, contentType, prompt, config, result, latencyMs(startNanos), null, null);
+            saveLog(asyncTaskId, userId, contentType, prompt, config, result, latencyMs(startNanos), null, null);
             return result;
         } catch (AiClientException ex) {
-            saveLog(userId, contentType, prompt, config, null, latencyMs(startNanos), ex.getErrorCode(), ex.getMessage());
+            saveLog(asyncTaskId, userId, contentType, prompt, config, null, latencyMs(startNanos), ex.getErrorCode(), ex.getMessage());
             throw new BizException(ErrorCode.AI_CALL_FAILED, "AI 调用失败，请稍后重试");
         }
     }
 
     public AiChatCompletionResult generateJsonStream(Long userId, AiContentType contentType, AiPrompt prompt, AiStreamDeltaHandler deltaHandler) {
+        return generateJsonStream(userId, contentType, prompt, deltaHandler, null);
+    }
+
+    public AiChatCompletionResult generateJsonStream(Long userId, AiContentType contentType, AiPrompt prompt, AiStreamDeltaHandler deltaHandler, Long asyncTaskId) {
         AiRuntimeConfig config = aiConfigResolver.resolve(userId);
         aiQuotaService.checkQuota(userId, config);
         long startNanos = System.nanoTime();
         try {
             AiChatCompletionResult result = springAiChatClient.chatJsonStream(config, prompt.systemPrompt(), prompt.userPrompt(), deltaHandler);
-            saveLog(userId, contentType, prompt, config, result, latencyMs(startNanos), null, null);
+            saveLog(asyncTaskId, userId, contentType, prompt, config, result, latencyMs(startNanos), null, null);
             return result;
         } catch (AiClientException ex) {
-            saveLog(userId, contentType, prompt, config, null, latencyMs(startNanos), ex.getErrorCode(), ex.getMessage());
+            saveLog(asyncTaskId, userId, contentType, prompt, config, null, latencyMs(startNanos), ex.getErrorCode(), ex.getMessage());
             throw new BizException(ErrorCode.AI_CALL_FAILED, "AI 调用失败，请稍后重试");
         }
     }
 
     private void saveLog(
+            Long asyncTaskId,
             Long userId,
             AiContentType contentType,
             AiPrompt prompt,
@@ -63,6 +72,7 @@ public class AiGatewayService {
             String errorMessage
     ) {
         AiCallLog log = new AiCallLog();
+        log.setAsyncTaskId(asyncTaskId);
         log.setUserId(userId);
         log.setConfigScope(config.scope());
         log.setContentType(contentType);

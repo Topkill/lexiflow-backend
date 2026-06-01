@@ -47,11 +47,27 @@ class AiGatewayServiceTest {
         ArgumentCaptor<AiCallLog> captor = ArgumentCaptor.forClass(AiCallLog.class);
         verify(logMapper).insert(captor.capture());
         AiCallLog log = captor.getValue();
+        assertThat(log.getAsyncTaskId()).isNull();
         assertThat(log.getStatus()).isEqualTo(AiCallStatus.SUCCESS);
         assertThat(log.getPromptTokens()).isEqualTo(3);
         assertThat(log.getCompletionTokens()).isEqualTo(4);
         assertThat(log.getTotalTokens()).isEqualTo(7);
         assertThat(log.getErrorCode()).isNull();
+    }
+
+    @Test
+    void generateJsonShouldWriteAsyncTaskIdWhenProvided() {
+        AiRuntimeConfig config = runtimeConfig();
+        AiPrompt prompt = prompt();
+        AiChatCompletionResult result = new AiChatCompletionResult("{\"ok\":true}", 3, 4, 7);
+        when(configResolver.resolve(9L)).thenReturn(config);
+        when(chatClient.chatJson(config, prompt.systemPrompt(), prompt.userPrompt())).thenReturn(result);
+
+        service.generateJson(9L, AiContentType.CLOZE, prompt, 52L);
+
+        ArgumentCaptor<AiCallLog> captor = ArgumentCaptor.forClass(AiCallLog.class);
+        verify(logMapper).insert(captor.capture());
+        assertThat(captor.getValue().getAsyncTaskId()).isEqualTo(52L);
     }
 
     @Test

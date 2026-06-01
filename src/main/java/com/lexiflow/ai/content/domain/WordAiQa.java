@@ -12,22 +12,21 @@ import lombok.Setter;
 
 @Getter
 @Setter
-@TableName("ai_content_cache")
-public class AiContentCache {
+@TableName("word_ai_qa")
+public class WordAiQa {
 
     @TableId(type = IdType.AUTO)
     private Long id;
 
-    private AiContentType contentType;
-    private String cacheKey;
-    private Long userId;
+    private Long createdByUserId;
     private Long wordId;
     private Long wordbookId;
+    private String question;
     private String sourceHash;
+    private String cacheKey;
     private String contentJson;
-    private String markdownContent;
-    private String modelName;
-    private LocalDateTime expiresAt;
+    private String outputSchemaJson;
+    private Boolean cacheActive;
     private Integer hitCount;
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
