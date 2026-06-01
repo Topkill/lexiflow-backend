@@ -26,7 +26,6 @@ public class AsyncTaskService {
         task.setProgress(0);
         task.setMessage("等待执行");
         task.setRequestJson(requestJson);
-        task.setRetryCount(0);
         asyncTaskMapper.insert(task);
         return task;
     }

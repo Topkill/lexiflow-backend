@@ -26,7 +26,6 @@ public class AsyncTask {
     private Long resultId;
     private String errorCode;
     private String errorMessage;
-    private Integer retryCount;
     private LocalDateTime startedAt;
     private LocalDateTime finishedAt;
     @TableField(fill = FieldFill.INSERT)

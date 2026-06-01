@@ -1,3 +1,7 @@
+-- 本迁移只创建新的 AI 结果/缓存结构，并修改相关字段注释与索引。
+-- 旧表 ai_content_cache 已从代码链路移除，但这里不执行 DROP TABLE，避免误删历史数据。
+-- 如需保留旧缓存数据，请按业务需要手工/写sql或者脚本迁移到 word_ai_qa 或 cloze_quiz；如不保留，可在确认后手工删除 ai_content_cache。
+
 CREATE TABLE IF NOT EXISTS `word_ai_qa` (
   `id` INT NOT NULL AUTO_INCREMENT COMMENT '问答结果 ID',
   `created_by_user_id` INT NULL COMMENT '首次生成用户 ID，跨用户缓存命中时仅作来源记录',

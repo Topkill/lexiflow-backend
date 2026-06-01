@@ -438,7 +438,6 @@ CREATE TABLE IF NOT EXISTS `async_task` (
   `result_id` INT NULL COMMENT '结果 ID：AI_WORD_QA 对应 word_ai_qa.id，AI_CLOZE 对应 cloze_quiz.id，AI_CLOZE_REVIEW 对应 cloze_attempt_ai_review.id',
   `error_code` VARCHAR(128) NULL COMMENT '错误码',
   `error_message` VARCHAR(1024) NULL COMMENT '错误摘要',
-  `retry_count` INT NOT NULL DEFAULT 0 COMMENT '重试次数',
   `started_at` DATETIME(3) NULL COMMENT '开始时间',
   `finished_at` DATETIME(3) NULL COMMENT '结束时间',
   `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
