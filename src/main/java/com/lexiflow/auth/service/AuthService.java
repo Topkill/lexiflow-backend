@@ -6,6 +6,7 @@ import com.lexiflow.auth.dto.RegisterRequest;
 import com.lexiflow.auth.dto.RegisterResponse;
 import com.lexiflow.auth.dto.UserBriefResponse;
 import com.lexiflow.auth.security.JwtTokenService;
+import com.lexiflow.auth.security.JwtTokenService.TokenClaims;
 import com.lexiflow.common.error.ErrorCode;
 import com.lexiflow.common.exception.BizException;
 import com.lexiflow.user.domain.User;
@@ -23,6 +24,8 @@ public class AuthService {
     private final UserService userService;
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenService jwtTokenService;
+    private final AuthRateLimitService authRateLimitService;
+    private final JwtRevocationService jwtRevocationService;
 
     @Transactional
     public RegisterResponse register(RegisterRequest request) {
@@ -32,13 +35,16 @@ public class AuthService {
 
     @Transactional
     public LoginResult login(LoginRequest request, String clientIp) {
+        authRateLimitService.assertLoginAllowed(request.email(), clientIp);
         User user = userService.findByEmail(request.email());
         if (user == null || !passwordEncoder.matches(request.password(), user.getPasswordHash())) {
+            authRateLimitService.recordLoginFailure(request.email(), clientIp);
             throw new BizException(ErrorCode.INVALID_CREDENTIALS);
         }
         if (user.getStatus() != UserStatus.ACTIVE) {
             throw new BizException(ErrorCode.USER_DISABLED);
         }
+        authRateLimitService.clearLoginFailures(request.email(), clientIp);
         userService.updateLoginInfo(user.getId(), clientIp);
 
         String accessToken = jwtTokenService.createAccessToken(user);
@@ -53,8 +59,11 @@ public class AuthService {
     }
 
     public LoginResponse refresh(String refreshToken) {
-        Long userId = jwtTokenService.parseRefreshUserId(refreshToken);
-        User user = userService.getActiveUserById(userId);
+        TokenClaims claims = jwtTokenService.parseRefreshToken(refreshToken);
+        if (jwtRevocationService.isRefreshTokenRevoked(claims.tokenId())) {
+            throw new BizException(ErrorCode.UNAUTHORIZED);
+        }
+        User user = userService.getActiveUserById(claims.userId());
         return new LoginResponse(
                 jwtTokenService.createAccessToken(user),
                 jwtTokenService.accessTokenTtlSeconds(),
@@ -63,8 +72,37 @@ public class AuthService {
         );
     }
 
+    public void logout(String refreshToken, String accessToken) {
+        revokeRefreshToken(refreshToken);
+        revokeAccessToken(accessToken);
+    }
+
     public UserBriefResponse currentUser(Long userId) {
         return UserBriefResponse.from(userService.getActiveUserById(userId));
+    }
+
+    private void revokeRefreshToken(String refreshToken) {
+        if (refreshToken == null || refreshToken.isBlank()) {
+            return;
+        }
+        try {
+            TokenClaims claims = jwtTokenService.parseRefreshToken(refreshToken);
+            jwtRevocationService.revokeRefreshToken(claims.tokenId(), claims.expiresAt());
+        } catch (BizException ignored) {
+            // 退出登录保持幂等，非法或过期 token 不影响清 Cookie。
+        }
+    }
+
+    private void revokeAccessToken(String accessToken) {
+        if (accessToken == null || accessToken.isBlank()) {
+            return;
+        }
+        try {
+            TokenClaims claims = jwtTokenService.parseAccessToken(accessToken);
+            jwtRevocationService.revokeAccessToken(claims.tokenId(), claims.expiresAt());
+        } catch (BizException ignored) {
+            // 退出登录保持幂等，非法或过期 token 不影响清 Cookie。
+        }
     }
 
     public record LoginResult(LoginResponse response, String refreshToken, long refreshTokenTtlSeconds) {

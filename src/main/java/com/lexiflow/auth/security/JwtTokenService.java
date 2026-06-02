@@ -11,6 +11,7 @@ import io.jsonwebtoken.security.Keys;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Date;
+import java.util.UUID;
 import javax.crypto.SecretKey;
 import org.springframework.stereotype.Service;
 
@@ -29,6 +30,7 @@ public class JwtTokenService {
         Instant now = Instant.now();
         Instant expiresAt = now.plusSeconds(accessTokenTtlSeconds());
         return Jwts.builder()
+                .id(UUID.randomUUID().toString())
                 .subject(String.valueOf(user.getId()))
                 .claim("email", user.getEmail())
                 .claim("role", user.getRole().name())
@@ -42,6 +44,7 @@ public class JwtTokenService {
         Instant now = Instant.now();
         Instant expiresAt = now.plusSeconds(refreshTokenTtlSeconds());
         return Jwts.builder()
+                .id(UUID.randomUUID().toString())
                 .subject(String.valueOf(user.getId()))
                 .claim("type", "refresh")
                 .issuedAt(Date.from(now))
@@ -51,16 +54,27 @@ public class JwtTokenService {
     }
 
     public Long parseUserId(String token) {
-        Claims claims = parseClaims(token);
-        return Long.valueOf(claims.getSubject());
+        return parseAccessToken(token).userId();
     }
 
     public Long parseRefreshUserId(String token) {
+        return parseRefreshToken(token).userId();
+    }
+
+    public TokenClaims parseAccessToken(String token) {
+        Claims claims = parseClaims(token);
+        if ("refresh".equals(claims.get("type", String.class))) {
+            throw new BizException(ErrorCode.UNAUTHORIZED);
+        }
+        return toTokenClaims(claims);
+    }
+
+    public TokenClaims parseRefreshToken(String token) {
         Claims claims = parseClaims(token);
         if (!"refresh".equals(claims.get("type", String.class))) {
             throw new BizException(ErrorCode.UNAUTHORIZED);
         }
-        return Long.valueOf(claims.getSubject());
+        return toTokenClaims(claims);
     }
 
     public long accessTokenTtlSeconds() {
@@ -81,5 +95,17 @@ public class JwtTokenService {
         } catch (JwtException | IllegalArgumentException ex) {
             throw new BizException(ErrorCode.UNAUTHORIZED);
         }
+    }
+
+    private TokenClaims toTokenClaims(Claims claims) {
+        Date expiration = claims.getExpiration();
+        return new TokenClaims(
+                Long.valueOf(claims.getSubject()),
+                claims.getId(),
+                expiration == null ? null : expiration.toInstant()
+        );
+    }
+
+    public record TokenClaims(Long userId, String tokenId, Instant expiresAt) {
     }
 }

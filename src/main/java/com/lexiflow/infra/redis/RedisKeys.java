@@ -38,6 +38,18 @@ public final class RedisKeys {
         return "lexiflow:admin:overview";
     }
 
+    public static String authLoginFailureKey(String scope, String value) {
+        return "lexiflow:auth:login:" + scope + ":" + sha256(value).substring(0, 32);
+    }
+
+    public static String authRevokedAccessTokenKey(String tokenId) {
+        return "lexiflow:auth:revoked:access:" + sha256(tokenId).substring(0, 32);
+    }
+
+    public static String authRevokedRefreshTokenKey(String tokenId) {
+        return "lexiflow:auth:revoked:refresh:" + sha256(tokenId).substring(0, 32);
+    }
+
     public static String promptEvictPayload(AiPromptFeatureType featureType) {
         return PROMPT_EVICT_PREFIX + featureType.name();
     }

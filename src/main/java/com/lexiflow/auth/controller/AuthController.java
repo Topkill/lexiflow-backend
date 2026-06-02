@@ -34,6 +34,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class AuthController {
 
     private static final String REFRESH_TOKEN_COOKIE = "refresh_token";
+    private static final String BEARER_PREFIX = "Bearer ";
 
     private final AuthService authService;
     private final AuthCookieProperties authCookieProperties;
@@ -67,7 +68,12 @@ public class AuthController {
 
     @Operation(summary = "退出登录")
     @PostMapping("/logout")
-    public ApiResponse<Void> logout(HttpServletResponse response) {
+    public ApiResponse<Void> logout(
+            @CookieValue(name = REFRESH_TOKEN_COOKIE, required = false) String refreshToken,
+            HttpServletRequest request,
+            HttpServletResponse response
+    ) {
+        authService.logout(refreshToken, resolveBearerToken(request));
         response.addHeader(HttpHeaders.SET_COOKIE, buildRefreshCookie("", 0).toString());
         return ApiResponse.success();
     }
@@ -86,5 +92,13 @@ public class AuthController {
                 .path(authCookieProperties.path())
                 .maxAge(maxAgeSeconds)
                 .build();
+    }
+
+    private String resolveBearerToken(HttpServletRequest request) {
+        String authorization = request.getHeader(HttpHeaders.AUTHORIZATION);
+        if (authorization == null || !authorization.startsWith(BEARER_PREFIX)) {
+            return null;
+        }
+        return authorization.substring(BEARER_PREFIX.length());
     }
 }
