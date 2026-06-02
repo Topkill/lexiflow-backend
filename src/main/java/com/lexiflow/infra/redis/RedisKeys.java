@@ -54,6 +54,10 @@ public final class RedisKeys {
         return "lexiflow:auth:refresh:session:" + sha256(tokenId).substring(0, 32);
     }
 
+    public static String authUserKey(Long userId) {
+        return "lexiflow:auth:user:" + userId;
+    }
+
     public static String promptEvictPayload(AiPromptFeatureType featureType) {
         return PROMPT_EVICT_PREFIX + featureType.name();
     }

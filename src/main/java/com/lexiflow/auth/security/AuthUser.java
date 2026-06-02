@@ -1,5 +1,6 @@
 package com.lexiflow.auth.security;
 
+import com.lexiflow.user.domain.User;
 import com.lexiflow.user.domain.UserRole;
 import com.lexiflow.user.domain.UserStatus;
 import java.util.Collection;
@@ -15,6 +16,16 @@ public record AuthUser(
         UserRole role,
         UserStatus status
 ) implements UserDetails {
+
+    public static AuthUser from(User user) {
+        return new AuthUser(
+                user.getId(),
+                user.getEmail(),
+                user.getNickname(),
+                user.getRole(),
+                user.getStatus()
+        );
+    }
 
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {

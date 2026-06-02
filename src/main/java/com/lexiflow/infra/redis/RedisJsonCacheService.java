@@ -43,4 +43,12 @@ public class RedisJsonCacheService {
             log.warn("Redis json cache serialize failed, key={}", key, ex);
         }
     }
+
+    public void delete(String key) {
+        try {
+            stringRedisTemplate.delete(key);
+        } catch (RuntimeException ex) {
+            log.warn("Redis json cache delete failed, key={}", key, ex);
+        }
+    }
 }

@@ -7,6 +7,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.lexiflow.auth.security.JwtTokenService.TokenClaims;
+import com.lexiflow.auth.service.AuthUserCacheService;
 import com.lexiflow.auth.service.JwtRevocationService;
 import com.lexiflow.user.domain.User;
 import com.lexiflow.user.domain.UserRole;
@@ -32,6 +33,8 @@ class JwtAuthenticationFilterTest {
     @Mock
     private JwtRevocationService jwtRevocationService;
     @Mock
+    private AuthUserCacheService authUserCacheService;
+    @Mock
     private UserService userService;
 
     @AfterEach
@@ -52,6 +55,7 @@ class JwtAuthenticationFilterTest {
         filter.doFilter(request, response, chain);
 
         assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
+        verify(authUserCacheService, never()).get(anyLong());
         verify(userService, never()).getActiveUserById(anyLong());
     }
 
@@ -65,6 +69,7 @@ class JwtAuthenticationFilterTest {
         when(jwtTokenService.parseAccessToken("access-token"))
                 .thenReturn(new TokenClaims(7L, "access-jti", Instant.now().plusSeconds(60)));
         when(jwtRevocationService.isAccessTokenRevoked("access-jti")).thenReturn(false);
+        when(authUserCacheService.get(7L)).thenReturn(null);
         when(userService.getActiveUserById(7L)).thenReturn(user);
 
         filter.doFilter(request, response, chain);
@@ -73,10 +78,32 @@ class JwtAuthenticationFilterTest {
         assertThat(authentication).isNotNull();
         assertThat(authentication.getPrincipal()).isInstanceOf(AuthUser.class);
         assertThat(((AuthUser) authentication.getPrincipal()).id()).isEqualTo(7L);
+        verify(authUserCacheService).put(AuthUser.from(user));
+    }
+
+    @Test
+    void cachedAuthUserShouldSetAuthenticationWithoutUserLookup() throws Exception {
+        JwtAuthenticationFilter filter = jwtAuthenticationFilter();
+        MockHttpServletRequest request = requestWithBearer("access-token");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+        AuthUser cachedAuthUser = AuthUser.from(activeUser());
+        when(jwtTokenService.parseAccessToken("access-token"))
+                .thenReturn(new TokenClaims(7L, "access-jti", Instant.now().plusSeconds(60)));
+        when(jwtRevocationService.isAccessTokenRevoked("access-jti")).thenReturn(false);
+        when(authUserCacheService.get(7L)).thenReturn(cachedAuthUser);
+
+        filter.doFilter(request, response, chain);
+
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        assertThat(authentication).isNotNull();
+        assertThat(authentication.getPrincipal()).isEqualTo(cachedAuthUser);
+        verify(userService, never()).getActiveUserById(anyLong());
+        verify(authUserCacheService, never()).put(cachedAuthUser);
     }
 
     private JwtAuthenticationFilter jwtAuthenticationFilter() {
-        return new JwtAuthenticationFilter(jwtTokenService, jwtRevocationService, userService);
+        return new JwtAuthenticationFilter(jwtTokenService, jwtRevocationService, authUserCacheService, userService);
     }
 
     private MockHttpServletRequest requestWithBearer(String token) {

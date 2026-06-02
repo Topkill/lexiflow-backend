@@ -1,6 +1,7 @@
 package com.lexiflow.auth.security;
 
 import com.lexiflow.auth.security.JwtTokenService.TokenClaims;
+import com.lexiflow.auth.service.AuthUserCacheService;
 import com.lexiflow.auth.service.JwtRevocationService;
 import com.lexiflow.user.domain.User;
 import com.lexiflow.user.service.UserService;
@@ -26,6 +27,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtTokenService jwtTokenService;
     private final JwtRevocationService jwtRevocationService;
+    private final AuthUserCacheService authUserCacheService;
     private final UserService userService;
 
     @Override
@@ -45,14 +47,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     filterChain.doFilter(request, response);
                     return;
                 }
-                User user = userService.getActiveUserById(claims.userId());
-                AuthUser authUser = new AuthUser(
-                        user.getId(),
-                        user.getEmail(),
-                        user.getNickname(),
-                        user.getRole(),
-                        user.getStatus()
-                );
+                AuthUser authUser = authUserCacheService.get(claims.userId());
+                if (authUser == null) {
+                    User user = userService.getActiveUserById(claims.userId());
+                    authUser = AuthUser.from(user);
+                    authUserCacheService.put(authUser);
+                }
                 UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
                         authUser,
                         null,
