@@ -1,6 +1,7 @@
 package com.lexiflow.wordbook.importing.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -11,6 +12,7 @@ import com.lexiflow.wordbook.domain.Word;
 import com.lexiflow.wordbook.domain.Wordbook;
 import com.lexiflow.wordbook.importing.domain.WordImportDuplicateStrategy;
 import com.lexiflow.wordbook.importing.domain.WordImportError;
+import com.lexiflow.wordbook.importing.domain.WordImportSourceType;
 import com.lexiflow.wordbook.importing.domain.WordImportStatus;
 import com.lexiflow.wordbook.importing.domain.WordImportTask;
 import com.lexiflow.wordbook.importing.dto.WordImportErrorQueryRequest;
@@ -21,8 +23,10 @@ import com.lexiflow.wordbook.importing.dto.WordImportTaskResponse;
 import com.lexiflow.wordbook.importing.dto.WordImportTemplateResponse;
 import com.lexiflow.wordbook.importing.mapper.WordImportErrorMapper;
 import com.lexiflow.wordbook.importing.mapper.WordImportTaskMapper;
+import com.lexiflow.wordbook.importing.mq.WordImportTaskPublisher;
 import com.lexiflow.wordbook.mapper.WordMapper;
 import com.lexiflow.wordbook.mapper.WordbookMapper;
+import com.lexiflow.wordbook.service.WordDictionaryJsonService;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.net.URI;
@@ -38,6 +42,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.amqp.AmqpException;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.DataFormatter;
 import org.apache.poi.ss.usermodel.Row;
@@ -45,13 +51,13 @@ import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
-import com.lexiflow.wordbook.service.WordDictionaryJsonService;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class WordImportService {
 
     private static final long MAX_FILE_SIZE = 10L * 1024 * 1024;
@@ -67,6 +73,8 @@ public class WordImportService {
     private final WordImportErrorMapper wordImportErrorMapper;
     private final ObjectMapper objectMapper;
     private final WordDictionaryJsonService wordDictionaryJsonService;
+    private final WordImportTaskPublisher wordImportTaskPublisher;
+    private final TransactionTemplate transactionTemplate;
     private final HttpClient httpClient = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NORMAL).build();
 
     public WordImportTemplateResponse buildTemplate() {
@@ -93,70 +101,77 @@ public class WordImportService {
         }
     }
 
-    @Transactional
     public WordImportTaskResponse importWords(Long adminUserId, Long wordbookId, WordImportDuplicateStrategy duplicateStrategy, MultipartFile file) {
-        Wordbook wordbook = getWordbook(wordbookId);
+        getWordbook(wordbookId);
         validateFile(file);
-        WordImportTask task = createTask(adminUserId, wordbookId, duplicateStrategy, file);
+        WordImportDuplicateStrategy safeDuplicateStrategy = safeDuplicateStrategy(duplicateStrategy);
+        WordImportTask task = createTask(adminUserId, wordbookId, safeDuplicateStrategy, file);
         try {
-            task.setStatus(WordImportStatus.RUNNING);
-            task.setStartedAt(LocalDateTime.now());
-            wordImportTaskMapper.updateById(task);
             Path savedFile = saveUploadFile(task.getId(), file);
             task.setFilePath(savedFile.toString());
-            ImportResult result = parseAndImport(task, adminUserId, wordbook, duplicateStrategy, file);
-            task.setTotalRows(result.totalRows());
-            task.setSuccessRows(result.successRows());
-            task.setFailedRows(result.failedRows());
-            task.setStatus(result.failedRows() == 0 ? WordImportStatus.SUCCESS : WordImportStatus.PARTIAL_SUCCESS);
-            task.setFinishedAt(LocalDateTime.now());
+            task.setRequestJson(buildRequestJson(WordImportSourceType.EXCEL, null, false));
             wordImportTaskMapper.updateById(task);
-            refreshWordbookCount(wordbookId);
+            publishImportTask(task);
             return WordImportTaskResponse.from(task);
         } catch (BizException ex) {
             markFailed(task, ex.getCustomMessage());
             throw ex;
+        } catch (AmqpException ex) {
+            markFailed(task, "Excel 导入任务入队失败");
+            throw new BizException(ErrorCode.INTERNAL_ERROR, "Excel 导入任务入队失败，请稍后重试");
         } catch (Exception ex) {
             markFailed(task, ex.getMessage());
-            throw new BizException(ErrorCode.EXCEL_TEMPLATE_INVALID, "Excel 导入失败");
+            throw new BizException(ErrorCode.EXCEL_TEMPLATE_INVALID, "Excel 导入任务创建失败");
         }
     }
 
-    @Transactional
     public WordImportTaskResponse importWordsFromJsonUrl(Long adminUserId, Long wordbookId, WordImportJsonUrlRequest request) {
-        Wordbook wordbook = getWordbook(wordbookId);
+        getWordbook(wordbookId);
         URI sourceUri = validateJsonUrl(request.sourceUrl());
         WordImportDuplicateStrategy duplicateStrategy = request.safeDuplicateStrategy();
-        WordImportTask task = createJsonUrlTask(adminUserId, wordbookId, duplicateStrategy, sourceUri);
+        WordImportTask task = createJsonUrlTask(adminUserId, wordbookId, duplicateStrategy, sourceUri, request.shouldReplaceWordbook());
         try {
-            task.setStatus(WordImportStatus.RUNNING);
-            task.setStartedAt(LocalDateTime.now());
-            wordImportTaskMapper.updateById(task);
-            if (request.shouldReplaceWordbook()) {
-                clearWordbookRelations(wordbookId);
-            }
-            JsonNode root = fetchJson(sourceUri);
-            if (!root.isArray()) {
-                throw new BizException(ErrorCode.BAD_REQUEST, "远程 JSON 必须是单词数组");
-            }
-            if (root.size() > MAX_JSON_WORDS) {
-                throw new BizException(ErrorCode.BAD_REQUEST, "JSON 单词数量不能超过 " + MAX_JSON_WORDS);
-            }
-            ImportResult result = importJsonWords(task, adminUserId, wordbook, duplicateStrategy, root);
-            task.setTotalRows(result.totalRows());
-            task.setSuccessRows(result.successRows());
-            task.setFailedRows(result.failedRows());
-            task.setStatus(result.failedRows() == 0 ? WordImportStatus.SUCCESS : WordImportStatus.PARTIAL_SUCCESS);
-            task.setFinishedAt(LocalDateTime.now());
-            wordImportTaskMapper.updateById(task);
-            refreshWordbookCount(wordbookId);
+            publishImportTask(task);
             return WordImportTaskResponse.from(task);
         } catch (BizException ex) {
             markFailed(task, ex.getCustomMessage());
             throw ex;
+        } catch (AmqpException ex) {
+            markFailed(task, "JSON URL 导入任务入队失败");
+            throw new BizException(ErrorCode.INTERNAL_ERROR, "JSON URL 导入任务入队失败，请稍后重试");
         } catch (Exception ex) {
             markFailed(task, ex.getMessage());
-            throw new BizException(ErrorCode.BAD_REQUEST, "JSON URL 导入失败");
+            throw new BizException(ErrorCode.BAD_REQUEST, "JSON URL 导入任务创建失败");
+        }
+    }
+
+    public void processImportTask(Long importTaskId) {
+        processImportTask(importTaskId, false);
+    }
+
+    public void processImportTask(Long importTaskId, boolean redelivered) {
+        if (importTaskId == null) {
+            return;
+        }
+        WordImportTask task = wordImportTaskMapper.selectById(importTaskId);
+        if (task == null) {
+            log.warn("词库导入任务不存在，importTaskId={}", importTaskId);
+            return;
+        }
+        if (isTerminalStatus(task.getStatus())) {
+            return;
+        }
+        if (!prepareTaskForProcessing(task, redelivered)) {
+            return;
+        }
+        try {
+            transactionTemplate.executeWithoutResult(status -> executeRunningImportTask(importTaskId));
+        } catch (RuntimeException ex) {
+            WordImportTask failedTask = wordImportTaskMapper.selectById(importTaskId);
+            if (failedTask != null && !isTerminalStatus(failedTask.getStatus())) {
+                markFailed(failedTask, ex.getMessage());
+            }
+            log.warn("词库导入任务执行失败，importTaskId={}", importTaskId, ex);
         }
     }
 
@@ -230,9 +245,11 @@ public class WordImportService {
     private WordImportTask createTask(Long adminUserId, Long wordbookId, WordImportDuplicateStrategy duplicateStrategy, MultipartFile file) {
         WordImportTask task = new WordImportTask();
         task.setWordbookId(wordbookId);
-        task.setFileName(file.getOriginalFilename() == null ? "words.xlsx" : file.getOriginalFilename());
+        task.setFileName(safeFileName(file.getOriginalFilename(), "words.xlsx"));
         task.setFilePath("");
-        task.setDuplicateStrategy(duplicateStrategy == null ? WordImportDuplicateStrategy.SKIP : duplicateStrategy);
+        task.setSourceType(WordImportSourceType.EXCEL);
+        task.setRequestJson(buildRequestJson(WordImportSourceType.EXCEL, null, false));
+        task.setDuplicateStrategy(safeDuplicateStrategy(duplicateStrategy));
         task.setStatus(WordImportStatus.PENDING);
         task.setTotalRows(0);
         task.setSuccessRows(0);
@@ -242,12 +259,14 @@ public class WordImportService {
         return task;
     }
 
-    private WordImportTask createJsonUrlTask(Long adminUserId, Long wordbookId, WordImportDuplicateStrategy duplicateStrategy, URI sourceUri) {
+    private WordImportTask createJsonUrlTask(Long adminUserId, Long wordbookId, WordImportDuplicateStrategy duplicateStrategy, URI sourceUri, boolean replaceWordbook) {
         WordImportTask task = new WordImportTask();
         task.setWordbookId(wordbookId);
-        task.setFileName(sourceUri.toString());
+        task.setFileName(limitLength(sourceUri.toString(), 255));
         task.setFilePath(sourceUri.toString());
-        task.setDuplicateStrategy(duplicateStrategy == null ? WordImportDuplicateStrategy.SKIP : duplicateStrategy);
+        task.setSourceType(WordImportSourceType.JSON_URL);
+        task.setRequestJson(buildRequestJson(WordImportSourceType.JSON_URL, sourceUri.toString(), replaceWordbook));
+        task.setDuplicateStrategy(safeDuplicateStrategy(duplicateStrategy));
         task.setStatus(WordImportStatus.PENDING);
         task.setTotalRows(0);
         task.setSuccessRows(0);
@@ -257,8 +276,59 @@ public class WordImportService {
         return task;
     }
 
-    private ImportResult parseAndImport(WordImportTask task, Long adminUserId, Wordbook wordbook, WordImportDuplicateStrategy duplicateStrategy, MultipartFile file) {
-        try (InputStream inputStream = file.getInputStream(); Workbook workbook = new XSSFWorkbook(inputStream)) {
+    private void executeRunningImportTask(Long importTaskId) {
+        WordImportTask task = wordImportTaskMapper.selectById(importTaskId);
+        if (task == null || task.getStatus() != WordImportStatus.RUNNING) {
+            return;
+        }
+        try {
+            Wordbook wordbook = getWordbook(task.getWordbookId());
+            ImportResult result = switch (sourceType(task)) {
+                case JSON_URL -> processJsonUrlTask(task, wordbook);
+                case EXCEL -> processExcelTask(task, wordbook);
+            };
+            task.setTotalRows(result.totalRows());
+            task.setSuccessRows(result.successRows());
+            task.setFailedRows(result.failedRows());
+            task.setStatus(result.failedRows() == 0 ? WordImportStatus.SUCCESS : WordImportStatus.PARTIAL_SUCCESS);
+            task.setFinishedAt(LocalDateTime.now());
+            wordImportTaskMapper.updateById(task);
+            refreshWordbookCount(task.getWordbookId());
+        } catch (BizException ex) {
+            markFailed(task, ex.getCustomMessage());
+        } catch (Exception ex) {
+            markFailed(task, ex.getMessage());
+        }
+    }
+
+    private ImportResult processExcelTask(WordImportTask task, Wordbook wordbook) {
+        if (!StringUtils.hasText(task.getFilePath())) {
+            throw new BizException(ErrorCode.EXCEL_TEMPLATE_INVALID, "Excel 文件路径为空");
+        }
+        Path filePath = Path.of(task.getFilePath());
+        if (!Files.exists(filePath)) {
+            throw new BizException(ErrorCode.EXCEL_TEMPLATE_INVALID, "Excel 文件不存在");
+        }
+        return parseAndImportExcelFile(task, task.getCreatedBy(), wordbook, safeDuplicateStrategy(task.getDuplicateStrategy()), filePath);
+    }
+
+    private ImportResult processJsonUrlTask(WordImportTask task, Wordbook wordbook) {
+        URI sourceUri = validateJsonUrl(task.getFilePath());
+        JsonNode root = fetchJson(sourceUri);
+        if (!root.isArray()) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "远程 JSON 必须是单词数组");
+        }
+        if (root.size() > MAX_JSON_WORDS) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "JSON 单词数量不能超过 " + MAX_JSON_WORDS);
+        }
+        if (shouldReplaceWordbook(task)) {
+            clearWordbookRelations(task.getWordbookId());
+        }
+        return importJsonWords(task, task.getCreatedBy(), wordbook, safeDuplicateStrategy(task.getDuplicateStrategy()), root);
+    }
+
+    private ImportResult parseAndImportExcelFile(WordImportTask task, Long adminUserId, Wordbook wordbook, WordImportDuplicateStrategy duplicateStrategy, Path filePath) {
+        try (InputStream inputStream = Files.newInputStream(filePath); Workbook workbook = new XSSFWorkbook(inputStream)) {
             Sheet sheet = workbook.getSheetAt(0);
             validateHeader(sheet);
             int totalRows = Math.max(0, sheet.getLastRowNum());
@@ -432,6 +502,71 @@ public class WordImportService {
         }
     }
 
+    private void publishImportTask(WordImportTask task) {
+        wordImportTaskPublisher.publish(task.getId());
+    }
+
+    private boolean prepareTaskForProcessing(WordImportTask task, boolean redelivered) {
+        if (task.getStatus() == WordImportStatus.PENDING) {
+            return markRunningIfPending(task.getId());
+        }
+        if (task.getStatus() == WordImportStatus.RUNNING && redelivered) {
+            log.warn("恢复处理 RabbitMQ 重投的词库导入任务，importTaskId={}", task.getId());
+            return true;
+        }
+        return false;
+    }
+
+    private boolean markRunningIfPending(Long importTaskId) {
+        WordImportTask update = new WordImportTask();
+        update.setStatus(WordImportStatus.RUNNING);
+        update.setStartedAt(LocalDateTime.now());
+        return wordImportTaskMapper.update(update, new LambdaUpdateWrapper<WordImportTask>()
+                .eq(WordImportTask::getId, importTaskId)
+                .eq(WordImportTask::getStatus, WordImportStatus.PENDING)) > 0;
+    }
+
+    private boolean isTerminalStatus(WordImportStatus status) {
+        return status == WordImportStatus.SUCCESS
+                || status == WordImportStatus.PARTIAL_SUCCESS
+                || status == WordImportStatus.FAILED;
+    }
+
+    private WordImportSourceType sourceType(WordImportTask task) {
+        if (StringUtils.hasText(task.getFilePath()) && isHttpUrl(task.getFilePath())) {
+            return WordImportSourceType.JSON_URL;
+        }
+        if (task.getSourceType() != null) {
+            return task.getSourceType();
+        }
+        return WordImportSourceType.EXCEL;
+    }
+
+    private boolean shouldReplaceWordbook(WordImportTask task) {
+        if (!StringUtils.hasText(task.getRequestJson())) {
+            return false;
+        }
+        try {
+            return objectMapper.readTree(task.getRequestJson()).path("replaceWordbook").asBoolean(false);
+        } catch (Exception ex) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "导入任务参数格式错误");
+        }
+    }
+
+    private WordImportDuplicateStrategy safeDuplicateStrategy(WordImportDuplicateStrategy duplicateStrategy) {
+        return duplicateStrategy == null ? WordImportDuplicateStrategy.SKIP : duplicateStrategy;
+    }
+
+    private String buildRequestJson(WordImportSourceType sourceType, String sourceUrl, boolean replaceWordbook) {
+        Map<String, Object> request = new LinkedHashMap<>();
+        request.put("sourceType", sourceType.name());
+        request.put("replaceWordbook", replaceWordbook);
+        if (StringUtils.hasText(sourceUrl)) {
+            request.put("sourceUrl", sourceUrl);
+        }
+        return toJson(request);
+    }
+
     private void validateFile(MultipartFile file) {
         if (file == null || file.isEmpty()) {
             throw new BizException(ErrorCode.EXCEL_TEMPLATE_INVALID, "请选择 Excel 文件");
@@ -448,12 +583,26 @@ public class WordImportService {
     private Path saveUploadFile(Long taskId, MultipartFile file) throws Exception {
         Path dir = Path.of("data", "imports", String.valueOf(taskId));
         Files.createDirectories(dir);
-        String filename = file.getOriginalFilename() == null ? "words.xlsx" : Path.of(file.getOriginalFilename()).getFileName().toString();
+        String filename = safeFileName(file.getOriginalFilename(), "words.xlsx");
         Path target = dir.resolve(filename);
         try (InputStream inputStream = file.getInputStream()) {
             Files.copy(inputStream, target, StandardCopyOption.REPLACE_EXISTING);
         }
         return target;
+    }
+
+    private String safeFileName(String originalFilename, String fallback) {
+        String filename = StringUtils.hasText(originalFilename)
+                ? Path.of(originalFilename).getFileName().toString()
+                : fallback;
+        return limitLength(filename, 255);
+    }
+
+    private String limitLength(String value, int maxLength) {
+        if (value == null || value.length() <= maxLength) {
+            return value;
+        }
+        return value.substring(0, maxLength);
     }
 
     private void validateHeader(Sheet sheet) {
@@ -578,13 +727,25 @@ public class WordImportService {
         try {
             URI uri = URI.create(sourceUrl.trim());
             String scheme = uri.getScheme();
-            if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) {
+            if (!isHttpScheme(scheme)) {
                 throw new BizException(ErrorCode.BAD_REQUEST, "JSON URL 仅支持 http 或 https");
             }
             return uri;
         } catch (IllegalArgumentException ex) {
             throw new BizException(ErrorCode.BAD_REQUEST, "JSON URL 格式不正确");
         }
+    }
+
+    private boolean isHttpUrl(String sourceUrl) {
+        try {
+            return isHttpScheme(URI.create(sourceUrl.trim()).getScheme());
+        } catch (Exception ex) {
+            return false;
+        }
+    }
+
+    private boolean isHttpScheme(String scheme) {
+        return "http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme);
     }
 
     private JsonNode fetchJson(URI sourceUri) {

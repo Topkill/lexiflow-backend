@@ -21,6 +21,8 @@ public class WordImportTask {
     private Long wordbookId;
     private String fileName;
     private String filePath;
+    private WordImportSourceType sourceType;
+    private String requestJson;
     private WordImportDuplicateStrategy duplicateStrategy;
     private WordImportStatus status;
     private Integer totalRows;
