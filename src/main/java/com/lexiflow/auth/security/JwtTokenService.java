@@ -33,8 +33,6 @@ public class JwtTokenService {
         return Jwts.builder()
                 .id(UUID.randomUUID().toString())
                 .subject(String.valueOf(user.getId()))
-                .claim("email", user.getEmail())
-                .claim("role", user.getRole().name())
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(expiresAt))
                 .signWith(signingKey)

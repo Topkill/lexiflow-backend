@@ -33,6 +33,23 @@ class JwtTokenServiceTest {
     }
 
     @Test
+    void accessTokenShouldNotExposeUserProfileOrRoleClaims() {
+        JwtTokenService service = jwtTokenService();
+
+        var claims = Jwts.parser()
+                .verifyWith(Keys.hmacShaKeyFor(JWT_SECRET.getBytes(StandardCharsets.UTF_8)))
+                .build()
+                .parseSignedClaims(service.createAccessToken(activeUser()))
+                .getPayload();
+
+        assertThat(claims.getSubject()).isEqualTo("7");
+        assertThat(claims.getId()).isNotBlank();
+        assertThat(claims.get("email")).isNull();
+        assertThat(claims.get("role")).isNull();
+        assertThat(claims.get("type")).isNull();
+    }
+
+    @Test
     void parseAccessTokenShouldRejectRefreshToken() {
         JwtTokenService service = jwtTokenService();
         String refreshToken = service.createRefreshToken(activeUser());
