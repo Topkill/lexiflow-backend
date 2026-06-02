@@ -76,11 +76,11 @@ class RefreshTokenSessionServiceTest {
     }
 
     @Test
-    void legacyTokenWithoutJtiShouldStayActiveAndSkipRedis() {
+    void tokenWithoutJtiShouldBeMissingAndSkipRedis() {
         RefreshTokenSessionService service = new RefreshTokenSessionService(stringRedisTemplate);
 
         assertThat(service.getStatus(new TokenClaims(7L, null, Instant.now().plusSeconds(60))))
-                .isEqualTo(RefreshTokenSessionStatus.ACTIVE);
+                .isEqualTo(RefreshTokenSessionStatus.MISSING);
         service.store(new TokenClaims(7L, "", Instant.now().plusSeconds(60)));
         service.delete(null);
 

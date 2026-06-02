@@ -2,6 +2,7 @@ package com.lexiflow.auth.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
@@ -110,6 +111,23 @@ class AuthServiceTest {
                 .isEqualTo(ErrorCode.UNAUTHORIZED);
 
         verify(userService, never()).getActiveUserById(anyLong());
+    }
+
+    @Test
+    void refreshShouldRejectTokenWhenParsingFails() {
+        AuthService service = authService();
+        when(jwtTokenService.parseRefreshToken("legacy-refresh"))
+                .thenThrow(new BizException(ErrorCode.UNAUTHORIZED));
+
+        assertThatThrownBy(() -> service.refresh("legacy-refresh"))
+                .isInstanceOf(BizException.class)
+                .extracting(ex -> ((BizException) ex).getErrorCode())
+                .isEqualTo(ErrorCode.UNAUTHORIZED);
+
+        verifyNoInteractions(jwtRevocationService);
+        verifyNoInteractions(refreshTokenSessionService);
+        verify(userService, never()).getActiveUserById(anyLong());
+        verify(jwtTokenService, never()).createAccessToken(any(User.class));
     }
 
     @Test

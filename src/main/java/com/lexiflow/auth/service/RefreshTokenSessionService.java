@@ -41,7 +41,7 @@ public class RefreshTokenSessionService {
             return RefreshTokenSessionStatus.MISSING;
         }
         if (!StringUtils.hasText(claims.tokenId())) {
-            return RefreshTokenSessionStatus.ACTIVE;
+            return RefreshTokenSessionStatus.MISSING;
         }
         try {
             String storedUserId = stringRedisTemplate.opsForValue().get(RedisKeys.authRefreshSessionKey(claims.tokenId()));

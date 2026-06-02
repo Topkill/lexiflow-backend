@@ -14,6 +14,7 @@ import java.util.Date;
 import java.util.UUID;
 import javax.crypto.SecretKey;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 @Service
 public class JwtTokenService {
@@ -98,10 +99,14 @@ public class JwtTokenService {
     }
 
     private TokenClaims toTokenClaims(Claims claims) {
+        String tokenId = claims.getId();
+        if (!StringUtils.hasText(tokenId)) {
+            throw new BizException(ErrorCode.UNAUTHORIZED);
+        }
         Date expiration = claims.getExpiration();
         return new TokenClaims(
                 Long.valueOf(claims.getSubject()),
-                claims.getId(),
+                tokenId,
                 expiration == null ? null : expiration.toInstant()
         );
     }

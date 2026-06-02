@@ -10,10 +10,16 @@ import com.lexiflow.infra.properties.JwtProperties;
 import com.lexiflow.user.domain.User;
 import com.lexiflow.user.domain.UserRole;
 import com.lexiflow.user.domain.UserStatus;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.security.Keys;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.Date;
 import org.junit.jupiter.api.Test;
 
 class JwtTokenServiceTest {
+
+    private static final String JWT_SECRET = "0123456789abcdef0123456789abcdef";
 
     @Test
     void accessTokenShouldIncludeJtiAndParseClaims() {
@@ -38,6 +44,16 @@ class JwtTokenServiceTest {
     }
 
     @Test
+    void parseAccessTokenShouldRejectTokenWithoutJti() {
+        JwtTokenService service = jwtTokenService();
+
+        assertThatThrownBy(() -> service.parseAccessToken(legacyAccessTokenWithoutJti()))
+                .isInstanceOf(BizException.class)
+                .extracting(ex -> ((BizException) ex).getErrorCode())
+                .isEqualTo(ErrorCode.UNAUTHORIZED);
+    }
+
+    @Test
     void refreshTokenShouldIncludeJtiAndParseClaims() {
         JwtTokenService service = jwtTokenService();
 
@@ -48,12 +64,45 @@ class JwtTokenServiceTest {
         assertThat(claims.expiresAt()).isAfter(Instant.now());
     }
 
+    @Test
+    void parseRefreshTokenShouldRejectTokenWithoutJti() {
+        JwtTokenService service = jwtTokenService();
+
+        assertThatThrownBy(() -> service.parseRefreshToken(legacyRefreshTokenWithoutJti()))
+                .isInstanceOf(BizException.class)
+                .extracting(ex -> ((BizException) ex).getErrorCode())
+                .isEqualTo(ErrorCode.UNAUTHORIZED);
+    }
+
     private JwtTokenService jwtTokenService() {
         return new JwtTokenService(new JwtProperties(
-                "0123456789abcdef0123456789abcdef",
+                JWT_SECRET,
                 15,
                 7
         ));
+    }
+
+    private String legacyAccessTokenWithoutJti() {
+        Instant now = Instant.now();
+        return Jwts.builder()
+                .subject("7")
+                .claim("email", "student@example.com")
+                .claim("role", UserRole.USER.name())
+                .issuedAt(Date.from(now))
+                .expiration(Date.from(now.plusSeconds(60)))
+                .signWith(Keys.hmacShaKeyFor(JWT_SECRET.getBytes(StandardCharsets.UTF_8)))
+                .compact();
+    }
+
+    private String legacyRefreshTokenWithoutJti() {
+        Instant now = Instant.now();
+        return Jwts.builder()
+                .subject("7")
+                .claim("type", "refresh")
+                .issuedAt(Date.from(now))
+                .expiration(Date.from(now.plusSeconds(60)))
+                .signWith(Keys.hmacShaKeyFor(JWT_SECRET.getBytes(StandardCharsets.UTF_8)))
+                .compact();
     }
 
     private User activeUser() {
