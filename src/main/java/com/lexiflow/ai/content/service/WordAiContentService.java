@@ -22,6 +22,7 @@ import com.lexiflow.async.domain.AsyncTaskType;
 import com.lexiflow.async.service.AsyncTaskService;
 import com.lexiflow.common.error.ErrorCode;
 import com.lexiflow.common.exception.BizException;
+import com.lexiflow.infra.redis.RedisAiHitCountBuffer;
 import com.lexiflow.infra.redis.RedisDistributedLockService;
 import com.lexiflow.infra.redis.RedisKeys;
 import com.lexiflow.infra.redis.RedisLockAttempt;
@@ -72,6 +73,7 @@ public class WordAiContentService {
     private final AiPromptTemplateService aiPromptTemplateService;
     private final AiPromptOutputSchemaService outputSchemaService;
     private final TransactionTemplate transactionTemplate;
+    private final RedisAiHitCountBuffer redisAiHitCountBuffer;
     private final RedisDistributedLockService redisDistributedLockService;
     private final Object[] wordQaCacheLocks = createWordQaCacheLocks();
 
@@ -398,8 +400,14 @@ public class WordAiContentService {
     }
 
     private void incrementWordQaHit(WordAiQa qa) {
+        if (qa == null || qa.getId() == null) {
+            return;
+        }
+        qa.setHitCount((qa.getHitCount() == null ? 0 : qa.getHitCount()) + 1);
+        if (redisAiHitCountBuffer.incrementHit(AiContentType.WORD_QA, qa.getId())) {
+            return;
+        }
         transactionTemplate.executeWithoutResult(status -> {
-            qa.setHitCount((qa.getHitCount() == null ? 0 : qa.getHitCount()) + 1);
             wordAiQaMapper.updateById(qa);
         });
     }

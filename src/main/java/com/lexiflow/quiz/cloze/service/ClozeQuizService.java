@@ -18,6 +18,7 @@ import com.lexiflow.async.domain.AsyncTaskType;
 import com.lexiflow.async.service.AsyncTaskService;
 import com.lexiflow.common.error.ErrorCode;
 import com.lexiflow.common.exception.BizException;
+import com.lexiflow.infra.redis.RedisAiHitCountBuffer;
 import com.lexiflow.infra.redis.RedisDistributedLockService;
 import com.lexiflow.infra.redis.RedisKeys;
 import com.lexiflow.infra.redis.RedisLockAttempt;
@@ -111,6 +112,7 @@ public class ClozeQuizService {
     private final AiPromptTemplateService aiPromptTemplateService;
     private final AiPromptOutputSchemaService outputSchemaService;
     private final TransactionTemplate transactionTemplate;
+    private final RedisAiHitCountBuffer redisAiHitCountBuffer;
     private final RedisDistributedLockService redisDistributedLockService;
 
     public CreateClozeTaskResponse createClozeTask(Long userId, CreateClozeTaskRequest request) {
@@ -647,8 +649,14 @@ public class ClozeQuizService {
     }
 
     private void incrementClozeQuizHit(ClozeQuiz quiz) {
+        if (quiz == null || quiz.getId() == null) {
+            return;
+        }
+        quiz.setHitCount((quiz.getHitCount() == null ? 0 : quiz.getHitCount()) + 1);
+        if (redisAiHitCountBuffer.incrementHit(AiContentType.CLOZE, quiz.getId())) {
+            return;
+        }
         transactionTemplate.executeWithoutResult(status -> {
-            quiz.setHitCount((quiz.getHitCount() == null ? 0 : quiz.getHitCount()) + 1);
             clozeQuizMapper.updateById(quiz);
         });
     }

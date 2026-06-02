@@ -5,6 +5,8 @@ import com.lexiflow.admin.dto.AdminOverviewResponse;
 import com.lexiflow.ai.content.domain.AiCallLog;
 import com.lexiflow.ai.content.domain.AiCallStatus;
 import com.lexiflow.ai.content.mapper.AiCallLogMapper;
+import com.lexiflow.infra.redis.RedisJsonCacheService;
+import com.lexiflow.infra.redis.RedisKeys;
 import com.lexiflow.study.progress.domain.StudyEvent;
 import com.lexiflow.study.progress.mapper.StudyEventMapper;
 import com.lexiflow.user.domain.User;
@@ -16,6 +18,7 @@ import com.lexiflow.wordbook.mapper.WordMapper;
 import com.lexiflow.wordbook.mapper.WordbookMapper;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Duration;
 import java.time.LocalDate;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -24,13 +27,21 @@ import org.springframework.stereotype.Service;
 @RequiredArgsConstructor
 public class AdminDashboardService {
 
+    private static final Duration OVERVIEW_CACHE_TTL = Duration.ofSeconds(15);
+
     private final UserMapper userMapper;
     private final WordbookMapper wordbookMapper;
     private final WordMapper wordMapper;
     private final StudyEventMapper studyEventMapper;
     private final AiCallLogMapper aiCallLogMapper;
+    private final RedisJsonCacheService redisJsonCacheService;
 
     public AdminOverviewResponse overview() {
+        String cacheKey = RedisKeys.adminOverviewKey();
+        AdminOverviewResponse cached = redisJsonCacheService.get(cacheKey, AdminOverviewResponse.class);
+        if (cached != null) {
+            return cached;
+        }
         LocalDate today = LocalDate.now();
         long registeredUsers = userMapper.selectCount(new LambdaQueryWrapper<User>());
         long activeUsers = userMapper.selectCount(new LambdaQueryWrapper<User>().eq(User::getStatus, UserStatus.ACTIVE));
@@ -53,7 +64,7 @@ public class AdminDashboardService {
         long todayAiCallCount = aiCallLogMapper.selectCount(new LambdaQueryWrapper<AiCallLog>()
                 .ge(AiCallLog::getCreatedAt, today.atStartOfDay())
                 .lt(AiCallLog::getCreatedAt, today.plusDays(1).atStartOfDay()));
-        return new AdminOverviewResponse(
+        AdminOverviewResponse response = new AdminOverviewResponse(
                 registeredUsers,
                 activeUsers,
                 todayLearners,
@@ -63,5 +74,7 @@ public class AdminDashboardService {
                 aiSuccessRate,
                 todayAiCallCount
         );
+        redisJsonCacheService.set(cacheKey, response, OVERVIEW_CACHE_TTL);
+        return response;
     }
 }

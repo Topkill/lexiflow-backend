@@ -26,6 +26,18 @@ public final class RedisKeys {
         return "lexiflow:ai:lock:" + contentType.name().toLowerCase() + ":" + sha256(cacheKey).substring(0, 32);
     }
 
+    public static String aiHitCountHashKey(AiContentType contentType) {
+        return "lexiflow:ai:hit:" + contentType.name().toLowerCase();
+    }
+
+    public static String studyStatisticsOverviewKey(Long userId) {
+        return "lexiflow:study:stats:overview:" + userId;
+    }
+
+    public static String adminOverviewKey() {
+        return "lexiflow:admin:overview";
+    }
+
     public static String promptEvictPayload(AiPromptFeatureType featureType) {
         return PROMPT_EVICT_PREFIX + featureType.name();
     }

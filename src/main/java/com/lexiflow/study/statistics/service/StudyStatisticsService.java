@@ -3,6 +3,8 @@ package com.lexiflow.study.statistics.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.lexiflow.quiz.cloze.domain.ClozeAttempt;
 import com.lexiflow.quiz.cloze.mapper.ClozeAttemptMapper;
+import com.lexiflow.infra.redis.RedisJsonCacheService;
+import com.lexiflow.infra.redis.RedisKeys;
 import com.lexiflow.study.domain.StudyPlan;
 import com.lexiflow.study.domain.StudyPlanStatus;
 import com.lexiflow.study.mapper.StudyPlanMapper;
@@ -19,6 +21,7 @@ import com.lexiflow.study.task.domain.DailyTaskType;
 import com.lexiflow.study.task.mapper.DailyTaskMapper;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.util.HashSet;
 import java.util.List;
@@ -30,14 +33,22 @@ import org.springframework.stereotype.Service;
 @RequiredArgsConstructor
 public class StudyStatisticsService {
 
+    private static final Duration OVERVIEW_CACHE_TTL = Duration.ofSeconds(30);
+
     private final UserWordStateMapper userWordStateMapper;
     private final WrongWordMapper wrongWordMapper;
     private final StudyEventMapper studyEventMapper;
     private final StudyPlanMapper studyPlanMapper;
     private final DailyTaskMapper dailyTaskMapper;
     private final ClozeAttemptMapper clozeAttemptMapper;
+    private final RedisJsonCacheService redisJsonCacheService;
 
     public StudyStatisticsOverviewResponse overview(Long userId) {
+        String cacheKey = RedisKeys.studyStatisticsOverviewKey(userId);
+        StudyStatisticsOverviewResponse cached = redisJsonCacheService.get(cacheKey, StudyStatisticsOverviewResponse.class);
+        if (cached != null) {
+            return cached;
+        }
         StudyPlan primaryPlan = findPrimaryPlan(userId);
         Long wordbookId = primaryPlan == null ? null : primaryPlan.getWordbookId();
         Long planId = primaryPlan == null ? null : primaryPlan.getId();
@@ -51,7 +62,7 @@ public class StudyStatisticsService {
         BigDecimal clozeAccuracy = calculateClozeAccuracy(userId, wordbookId);
         BigDecimal currentWordbookProgress = calculatePlanProgress(primaryPlan);
 
-        return new StudyStatisticsOverviewResponse(
+        StudyStatisticsOverviewResponse response = new StudyStatisticsOverviewResponse(
                 learnedWords,
                 masteredWords,
                 dueReviewWords,
@@ -63,6 +74,8 @@ public class StudyStatisticsService {
                 planId == null ? null : String.valueOf(planId),
                 wordbookId == null ? null : String.valueOf(wordbookId)
         );
+        redisJsonCacheService.set(cacheKey, response, OVERVIEW_CACHE_TTL);
+        return response;
     }
 
     private StudyPlan findPrimaryPlan(Long userId) {
