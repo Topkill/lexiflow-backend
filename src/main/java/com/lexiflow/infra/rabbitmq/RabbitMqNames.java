@@ -16,6 +16,13 @@ public final class RabbitMqNames {
     public static final String CLOZE_GENERATION_DEAD_LETTER_QUEUE = "lexiflow.cloze-generation.dlq";
     public static final String CLOZE_GENERATION_DEAD_LETTER_ROUTING_KEY = "lexiflow.cloze-generation.dead";
 
+    public static final String STUDY_REPORT_EXCHANGE = "lexiflow.study-report.exchange";
+    public static final String STUDY_REPORT_QUEUE = "lexiflow.study-report.queue";
+    public static final String STUDY_REPORT_ROUTING_KEY = "lexiflow.study-report.task";
+    public static final String STUDY_REPORT_DEAD_LETTER_EXCHANGE = "lexiflow.study-report.dlx";
+    public static final String STUDY_REPORT_DEAD_LETTER_QUEUE = "lexiflow.study-report.dlq";
+    public static final String STUDY_REPORT_DEAD_LETTER_ROUTING_KEY = "lexiflow.study-report.dead";
+
     private RabbitMqNames() {
     }
 }

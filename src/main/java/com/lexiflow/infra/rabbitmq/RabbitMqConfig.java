@@ -36,6 +36,16 @@ public class RabbitMqConfig {
     }
 
     @Bean
+    public DirectExchange studyReportExchange() {
+        return new DirectExchange(RabbitMqNames.STUDY_REPORT_EXCHANGE, true, false);
+    }
+
+    @Bean
+    public DirectExchange studyReportDeadLetterExchange() {
+        return new DirectExchange(RabbitMqNames.STUDY_REPORT_DEAD_LETTER_EXCHANGE, true, false);
+    }
+
+    @Bean
     public Queue wordImportQueue() {
         return QueueBuilder.durable(RabbitMqNames.WORD_IMPORT_QUEUE)
                 .deadLetterExchange(RabbitMqNames.WORD_IMPORT_DEAD_LETTER_EXCHANGE)
@@ -59,6 +69,19 @@ public class RabbitMqConfig {
     @Bean
     public Queue clozeGenerationDeadLetterQueue() {
         return QueueBuilder.durable(RabbitMqNames.CLOZE_GENERATION_DEAD_LETTER_QUEUE).build();
+    }
+
+    @Bean
+    public Queue studyReportQueue() {
+        return QueueBuilder.durable(RabbitMqNames.STUDY_REPORT_QUEUE)
+                .deadLetterExchange(RabbitMqNames.STUDY_REPORT_DEAD_LETTER_EXCHANGE)
+                .deadLetterRoutingKey(RabbitMqNames.STUDY_REPORT_DEAD_LETTER_ROUTING_KEY)
+                .build();
+    }
+
+    @Bean
+    public Queue studyReportDeadLetterQueue() {
+        return QueueBuilder.durable(RabbitMqNames.STUDY_REPORT_DEAD_LETTER_QUEUE).build();
     }
 
     @Bean
@@ -99,6 +122,26 @@ public class RabbitMqConfig {
         return BindingBuilder.bind(clozeGenerationDeadLetterQueue)
                 .to(clozeGenerationDeadLetterExchange)
                 .with(RabbitMqNames.CLOZE_GENERATION_DEAD_LETTER_ROUTING_KEY);
+    }
+
+    @Bean
+    public Binding studyReportBinding(
+            @Qualifier("studyReportQueue") Queue studyReportQueue,
+            @Qualifier("studyReportExchange") DirectExchange studyReportExchange
+    ) {
+        return BindingBuilder.bind(studyReportQueue)
+                .to(studyReportExchange)
+                .with(RabbitMqNames.STUDY_REPORT_ROUTING_KEY);
+    }
+
+    @Bean
+    public Binding studyReportDeadLetterBinding(
+            @Qualifier("studyReportDeadLetterQueue") Queue studyReportDeadLetterQueue,
+            @Qualifier("studyReportDeadLetterExchange") DirectExchange studyReportDeadLetterExchange
+    ) {
+        return BindingBuilder.bind(studyReportDeadLetterQueue)
+                .to(studyReportDeadLetterExchange)
+                .with(RabbitMqNames.STUDY_REPORT_DEAD_LETTER_ROUTING_KEY);
     }
 
     @Bean

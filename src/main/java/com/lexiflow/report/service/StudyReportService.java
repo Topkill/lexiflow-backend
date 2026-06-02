@@ -10,6 +10,7 @@ import com.lexiflow.ai.core.dto.AiPrompt;
 import com.lexiflow.ai.core.service.AiGatewayService;
 import com.lexiflow.ai.core.util.AiJsonUtils;
 import com.lexiflow.async.domain.AsyncTask;
+import com.lexiflow.async.domain.AsyncTaskStatus;
 import com.lexiflow.async.domain.AsyncTaskType;
 import com.lexiflow.async.service.AsyncTaskService;
 import com.lexiflow.common.api.PageResponse;
@@ -23,6 +24,7 @@ import com.lexiflow.report.dto.CreateReportTaskResponse;
 import com.lexiflow.report.dto.ReportQueryRequest;
 import com.lexiflow.report.dto.StudyReportResponse;
 import com.lexiflow.report.mapper.StudyReportMapper;
+import com.lexiflow.report.mq.StudyReportTaskPublisher;
 import com.lexiflow.study.domain.StudyPlan;
 import com.lexiflow.study.mapper.StudyPlanMapper;
 import com.lexiflow.study.progress.domain.StudyEvent;
@@ -42,10 +44,13 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.amqp.AmqpException;
 import org.springframework.stereotype.Service;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class StudyReportService {
 
     private static final String SYSTEM_PROMPT = "你是 LexiFlow 的 AI 学习教练。请只输出合法 JSON，不要输出 Markdown 代码块。总结要具体、鼓励但不夸张，面向备考大学生。";
@@ -59,25 +64,77 @@ public class StudyReportService {
     private final WrongWordMapper wrongWordMapper;
     private final ClozeAttemptMapper clozeAttemptMapper;
     private final ObjectMapper objectMapper;
+    private final StudyReportTaskPublisher studyReportTaskPublisher;
 
     public CreateReportTaskResponse createReportTask(Long userId, CreateReportTaskRequest request) {
-        DailyTask dailyTask = getOwnedDailyTask(userId, request.dailyTaskId());
+        getOwnedDailyTask(userId, request.dailyTaskId());
         String requestJson = toJson(Map.of(
                 "dailyTaskId", String.valueOf(request.dailyTaskId()),
                 "reportDate", request.reportDate().toString()
         ));
         AsyncTask task = asyncTaskService.createTask(userId, AsyncTaskType.AI_REPORT, requestJson);
         try {
-            asyncTaskService.markRunning(task.getId(), "正在生成学习报告", 20);
-            StudyReport report = generateReport(userId, dailyTask, task.getId(), request.reportDate());
+            studyReportTaskPublisher.publish(task.getId());
+            return CreateReportTaskResponse.from(task);
+        } catch (AmqpException ex) {
+            asyncTaskService.markFailed(task.getId(), String.valueOf(ErrorCode.ASYNC_TASK_FAILED.getCode()), "学习报告生成任务入队失败");
+            throw new BizException(ErrorCode.ASYNC_TASK_FAILED, "学习报告生成任务入队失败，请稍后重试");
+        }
+    }
+
+    public void processReportTask(Long taskId, boolean redelivered) {
+        if (taskId == null) {
+            return;
+        }
+        AsyncTask task = asyncTaskService.getTaskEntity(taskId);
+        if (task == null) {
+            log.warn("学习报告生成任务不存在，taskId={}", taskId);
+            return;
+        }
+        if (task.getTaskType() != AsyncTaskType.AI_REPORT || isTerminalStatus(task.getStatus())) {
+            return;
+        }
+        if (!prepareReportTaskForProcessing(task, redelivered)) {
+            return;
+        }
+        try {
+            ReportTaskPayload payload = parseReportTaskPayload(task.getRequestJson());
+            DailyTask dailyTask = getOwnedDailyTask(task.getUserId(), payload.dailyTaskId());
+            StudyReport report = generateReport(task.getUserId(), dailyTask, task.getId(), payload.reportDate());
             asyncTaskService.markSuccess(task.getId(), report.getId(), "学习报告生成完成");
-            return CreateReportTaskResponse.from(asyncTaskService.getOwnedTaskEntity(userId, task.getId()));
         } catch (BizException ex) {
             asyncTaskService.markFailed(task.getId(), String.valueOf(ex.getErrorCode().getCode()), ex.getCustomMessage());
-            throw ex;
-        } catch (Exception ex) {
+        } catch (RuntimeException ex) {
             asyncTaskService.markFailed(task.getId(), String.valueOf(ErrorCode.ASYNC_TASK_FAILED.getCode()), ex.getMessage());
-            throw new BizException(ErrorCode.ASYNC_TASK_FAILED, "学习报告生成失败，请稍后重试");
+            log.warn("学习报告生成任务执行失败，taskId={}", taskId, ex);
+        }
+    }
+
+    private boolean prepareReportTaskForProcessing(AsyncTask task, boolean redelivered) {
+        if (task.getStatus() == AsyncTaskStatus.PENDING) {
+            return asyncTaskService.markRunningIfPending(task.getId(), "正在生成学习报告", 20);
+        }
+        if (task.getStatus() == AsyncTaskStatus.RUNNING && redelivered) {
+            log.warn("恢复处理 RabbitMQ 重投的学习报告任务，taskId={}", task.getId());
+            return true;
+        }
+        return false;
+    }
+
+    private boolean isTerminalStatus(AsyncTaskStatus status) {
+        return status == AsyncTaskStatus.SUCCESS || status == AsyncTaskStatus.FAILED;
+    }
+
+    private ReportTaskPayload parseReportTaskPayload(String requestJson) {
+        try {
+            JsonNode root = objectMapper.readTree(requestJson);
+            Long dailyTaskId = Long.parseLong(root.path("dailyTaskId").asText(""));
+            LocalDate reportDate = LocalDate.parse(root.path("reportDate").asText(""));
+            return new ReportTaskPayload(dailyTaskId, reportDate);
+        } catch (RuntimeException ex) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "学习报告任务参数格式错误");
+        } catch (Exception ex) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "学习报告任务参数格式错误");
         }
     }
 
@@ -286,5 +343,8 @@ public class StudyReportService {
             BigDecimal quizAccuracy,
             List<String> wrongWordIds
     ) {
+    }
+
+    private record ReportTaskPayload(Long dailyTaskId, LocalDate reportDate) {
     }
 }
