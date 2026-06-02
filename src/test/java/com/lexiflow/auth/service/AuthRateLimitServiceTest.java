@@ -55,6 +55,15 @@ class AuthRateLimitServiceTest {
     }
 
     @Test
+    void requiresCaptchaShouldReturnTrueWhenCounterReachesThreshold() {
+        AuthRateLimitService service = new AuthRateLimitService(stringRedisTemplate);
+        when(stringRedisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(valueOperations.get(anyString())).thenReturn("3");
+
+        assertThat(service.requiresCaptcha("user@example.com", "127.0.0.1")).isTrue();
+    }
+
+    @Test
     void recordLoginFailureShouldIncrementEmailAndIpCountersWithWindow() {
         AuthRateLimitService service = new AuthRateLimitService(stringRedisTemplate);
         when(stringRedisTemplate.execute(any(DefaultRedisScript.class), any(List.class), eq("600000")))
@@ -64,6 +73,32 @@ class AuthRateLimitServiceTest {
 
         verify(stringRedisTemplate, times(2))
                 .execute(any(DefaultRedisScript.class), any(List.class), eq("600000"));
+    }
+
+    @Test
+    void recordLoginFailureShouldReportCaptchaThreshold() {
+        AuthRateLimitService service = new AuthRateLimitService(stringRedisTemplate);
+        when(stringRedisTemplate.execute(any(DefaultRedisScript.class), any(List.class), eq("600000")))
+                .thenReturn(3L)
+                .thenReturn(1L);
+
+        AuthRateLimitService.LoginFailureStatus status = service.recordLoginFailure("USER@example.com", "127.0.0.1");
+
+        assertThat(status.captchaRequired()).isTrue();
+        assertThat(status.blocked()).isFalse();
+    }
+
+    @Test
+    void recordLoginFailureShouldReportBlockThreshold() {
+        AuthRateLimitService service = new AuthRateLimitService(stringRedisTemplate);
+        when(stringRedisTemplate.execute(any(DefaultRedisScript.class), any(List.class), eq("600000")))
+                .thenReturn(5L)
+                .thenReturn(1L);
+
+        AuthRateLimitService.LoginFailureStatus status = service.recordLoginFailure("USER@example.com", "127.0.0.1");
+
+        assertThat(status.captchaRequired()).isTrue();
+        assertThat(status.blocked()).isTrue();
     }
 
     @Test

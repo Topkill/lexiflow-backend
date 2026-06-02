@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -43,12 +44,16 @@ class AuthServiceTest {
     private RefreshTokenSessionService refreshTokenSessionService;
     @Mock
     private TokenVersionService tokenVersionService;
+    @Mock
+    private LoginCaptchaService loginCaptchaService;
 
     @Test
     void loginFailureShouldRecordFailure() {
         AuthService service = authService();
         LoginRequest request = new LoginRequest("student@example.com", "bad-password");
         when(userService.findByEmail("student@example.com")).thenReturn(null);
+        when(authRateLimitService.recordLoginFailure("student@example.com", "127.0.0.1"))
+                .thenReturn(new AuthRateLimitService.LoginFailureStatus(false, false));
 
         assertThatThrownBy(() -> service.login(request, "127.0.0.1"))
                 .isInstanceOf(BizException.class)
@@ -58,6 +63,34 @@ class AuthServiceTest {
         verify(authRateLimitService).assertLoginAllowed("student@example.com", "127.0.0.1");
         verify(authRateLimitService).recordLoginFailure("student@example.com", "127.0.0.1");
         verify(authRateLimitService, never()).clearLoginFailures(anyString());
+    }
+
+    @Test
+    void thirdLoginFailureShouldAskForCaptcha() {
+        AuthService service = authService();
+        LoginRequest request = new LoginRequest("student@example.com", "bad-password");
+        when(userService.findByEmail("student@example.com")).thenReturn(null);
+        when(authRateLimitService.recordLoginFailure("student@example.com", "127.0.0.1"))
+                .thenReturn(new AuthRateLimitService.LoginFailureStatus(true, false));
+
+        assertThatThrownBy(() -> service.login(request, "127.0.0.1"))
+                .isInstanceOf(BizException.class)
+                .extracting(ex -> ((BizException) ex).getErrorCode())
+                .isEqualTo(ErrorCode.LOGIN_CAPTCHA_REQUIRED);
+    }
+
+    @Test
+    void fifthLoginFailureShouldBlockTemporarily() {
+        AuthService service = authService();
+        LoginRequest request = new LoginRequest("student@example.com", "bad-password");
+        when(userService.findByEmail("student@example.com")).thenReturn(null);
+        when(authRateLimitService.recordLoginFailure("student@example.com", "127.0.0.1"))
+                .thenReturn(new AuthRateLimitService.LoginFailureStatus(true, true));
+
+        assertThatThrownBy(() -> service.login(request, "127.0.0.1"))
+                .isInstanceOf(BizException.class)
+                .extracting(ex -> ((BizException) ex).getErrorCode())
+                .isEqualTo(ErrorCode.TOO_MANY_REQUESTS);
     }
 
     @Test
@@ -83,6 +116,47 @@ class AuthServiceTest {
         verify(authRateLimitService).clearLoginFailures("student@example.com");
         verify(refreshTokenSessionService).store(refreshClaims);
         verify(userService).updateLoginInfo(7L, "127.0.0.1");
+    }
+
+    @Test
+    void loginShouldRequireCaptchaWhenFailureThresholdReached() {
+        AuthService service = authService();
+        LoginRequest request = new LoginRequest("student@example.com", "Password123!");
+        when(authRateLimitService.requiresCaptcha("student@example.com", "127.0.0.1")).thenReturn(true);
+        doThrow(new BizException(ErrorCode.LOGIN_CAPTCHA_REQUIRED))
+                .when(loginCaptchaService).assertValid(null, null);
+
+        assertThatThrownBy(() -> service.login(request, "127.0.0.1"))
+                .isInstanceOf(BizException.class)
+                .extracting(ex -> ((BizException) ex).getErrorCode())
+                .isEqualTo(ErrorCode.LOGIN_CAPTCHA_REQUIRED);
+
+        verify(loginCaptchaService).assertValid(null, null);
+        verify(userService, never()).findByEmail(anyString());
+        verify(authRateLimitService, never()).recordLoginFailure(anyString(), anyString());
+    }
+
+    @Test
+    void loginShouldContinueWhenCaptchaIsValid() {
+        AuthService service = authService();
+        User user = activeUser();
+        LoginRequest request = new LoginRequest("student@example.com", "Password123!", "captcha-id", "1234");
+        when(authRateLimitService.requiresCaptcha("student@example.com", "127.0.0.1")).thenReturn(true);
+        when(userService.findByEmail("student@example.com")).thenReturn(user);
+        when(passwordEncoder.matches("Password123!", "hash")).thenReturn(true);
+        when(tokenVersionService.currentVersion(7L)).thenReturn(3L);
+        when(jwtTokenService.createAccessToken(user, 3L)).thenReturn("access-token");
+        when(jwtTokenService.createRefreshToken(user, 3L)).thenReturn("refresh-token");
+        TokenClaims refreshClaims = new TokenClaims(7L, "refresh-jti", Instant.now().plusSeconds(604800), 3L);
+        when(jwtTokenService.parseRefreshToken("refresh-token")).thenReturn(refreshClaims);
+        when(jwtTokenService.accessTokenTtlSeconds()).thenReturn(900L);
+        when(jwtTokenService.refreshTokenTtlSeconds()).thenReturn(604800L);
+
+        AuthService.LoginResult result = service.login(request, "127.0.0.1");
+
+        assertThat(result.response().accessToken()).isEqualTo("access-token");
+        verify(loginCaptchaService).assertValid("captcha-id", "1234");
+        verify(authRateLimitService).clearLoginFailures("student@example.com");
     }
 
     @Test
@@ -206,7 +280,8 @@ class AuthServiceTest {
                 authRateLimitService,
                 jwtRevocationService,
                 refreshTokenSessionService,
-                tokenVersionService
+                tokenVersionService,
+                loginCaptchaService
         );
     }
 

@@ -19,6 +19,7 @@ import org.springframework.util.StringUtils;
 public class AuthRateLimitService {
 
     private static final int MAX_FAILURES = 5;
+    private static final int CAPTCHA_REQUIRED_FAILURES = 3;
     private static final Duration FAILURE_WINDOW = Duration.ofMinutes(10);
     private static final DefaultRedisScript<Long> INCREMENT_FAILURE_SCRIPT = new DefaultRedisScript<>(
             """
@@ -39,9 +40,20 @@ public class AuthRateLimitService {
         }
     }
 
-    public void recordLoginFailure(String email, String clientIp) {
-        increment(emailKey(email));
-        increment(ipKey(clientIp));
+    public boolean requiresCaptcha(String email, String clientIp) {
+        return reachesThreshold(emailKey(email), CAPTCHA_REQUIRED_FAILURES)
+                || reachesThreshold(ipKey(clientIp), CAPTCHA_REQUIRED_FAILURES);
+    }
+
+    public LoginFailureStatus recordLoginFailure(String email, String clientIp) {
+        Long emailFailures = increment(emailKey(email));
+        Long ipFailures = increment(ipKey(clientIp));
+        return new LoginFailureStatus(
+                reachesThreshold(emailFailures, CAPTCHA_REQUIRED_FAILURES)
+                        || reachesThreshold(ipFailures, CAPTCHA_REQUIRED_FAILURES),
+                reachesThreshold(emailFailures, MAX_FAILURES)
+                        || reachesThreshold(ipFailures, MAX_FAILURES)
+        );
     }
 
     public void clearLoginFailures(String email) {
@@ -53,12 +65,16 @@ public class AuthRateLimitService {
     }
 
     private boolean isBlocked(String key) {
+        return reachesThreshold(key, MAX_FAILURES);
+    }
+
+    private boolean reachesThreshold(String key, int threshold) {
         try {
             String value = stringRedisTemplate.opsForValue().get(key);
             if (!StringUtils.hasText(value)) {
                 return false;
             }
-            return Long.parseLong(value) >= MAX_FAILURES;
+            return Long.parseLong(value) >= threshold;
         } catch (NumberFormatException ex) {
             return false;
         } catch (RuntimeException ex) {
@@ -67,16 +83,21 @@ public class AuthRateLimitService {
         }
     }
 
-    private void increment(String key) {
+    private Long increment(String key) {
         try {
-            stringRedisTemplate.execute(
+            return stringRedisTemplate.execute(
                     INCREMENT_FAILURE_SCRIPT,
                     List.of(key),
                     String.valueOf(FAILURE_WINDOW.toMillis())
             );
         } catch (RuntimeException ex) {
             log.warn("Redis login rate limit increment failed, key={}", key, ex);
+            return null;
         }
+    }
+
+    private boolean reachesThreshold(Long value, int threshold) {
+        return value != null && value >= threshold;
     }
 
     private String emailKey(String email) {
@@ -89,5 +110,8 @@ public class AuthRateLimitService {
 
     private String normalizeEmail(String email) {
         return StringUtils.hasText(email) ? email.trim().toLowerCase(Locale.ROOT) : "unknown";
+    }
+
+    public record LoginFailureStatus(boolean captchaRequired, boolean blocked) {
     }
 }

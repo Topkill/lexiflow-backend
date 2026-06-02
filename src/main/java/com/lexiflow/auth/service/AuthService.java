@@ -5,6 +5,7 @@ import com.lexiflow.auth.dto.LoginResponse;
 import com.lexiflow.auth.dto.RegisterRequest;
 import com.lexiflow.auth.dto.RegisterResponse;
 import com.lexiflow.auth.dto.UserBriefResponse;
+import com.lexiflow.auth.service.AuthRateLimitService.LoginFailureStatus;
 import com.lexiflow.auth.security.JwtTokenService;
 import com.lexiflow.auth.security.JwtTokenService.TokenClaims;
 import com.lexiflow.common.error.ErrorCode;
@@ -28,6 +29,7 @@ public class AuthService {
     private final JwtRevocationService jwtRevocationService;
     private final RefreshTokenSessionService refreshTokenSessionService;
     private final TokenVersionService tokenVersionService;
+    private final LoginCaptchaService loginCaptchaService;
 
     @Transactional
     public RegisterResponse register(RegisterRequest request) {
@@ -38,9 +40,18 @@ public class AuthService {
     @Transactional
     public LoginResult login(LoginRequest request, String clientIp) {
         authRateLimitService.assertLoginAllowed(request.email(), clientIp);
+        if (authRateLimitService.requiresCaptcha(request.email(), clientIp)) {
+            loginCaptchaService.assertValid(request.captchaId(), request.captchaCode());
+        }
         User user = userService.findByEmail(request.email());
         if (user == null || !passwordEncoder.matches(request.password(), user.getPasswordHash())) {
-            authRateLimitService.recordLoginFailure(request.email(), clientIp);
+            LoginFailureStatus failureStatus = authRateLimitService.recordLoginFailure(request.email(), clientIp);
+            if (failureStatus.blocked()) {
+                throw new BizException(ErrorCode.TOO_MANY_REQUESTS, "登录失败次数过多，请稍后再试");
+            }
+            if (failureStatus.captchaRequired()) {
+                throw new BizException(ErrorCode.LOGIN_CAPTCHA_REQUIRED, "邮箱或密码错误，请输入验证码后再试");
+            }
             throw new BizException(ErrorCode.INVALID_CREDENTIALS);
         }
         if (user.getStatus() != UserStatus.ACTIVE) {

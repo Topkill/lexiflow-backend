@@ -46,6 +46,14 @@ public final class RedisKeys {
         return "lexiflow:auth:login:" + scope + ":" + sha256(value).substring(0, 32);
     }
 
+    public static String authLoginCaptchaKey(String captchaId) {
+        return "lexiflow:auth:captcha:" + sha256(captchaId).substring(0, 32);
+    }
+
+    public static String authLoginCaptchaRateKey(String clientIp) {
+        return "lexiflow:auth:captcha:rate:" + sha256(clientIp).substring(0, 32);
+    }
+
     public static String authRevokedAccessTokenKey(String tokenId) {
         return "lexiflow:auth:revoked:access:" + sha256(tokenId).substring(0, 32);
     }

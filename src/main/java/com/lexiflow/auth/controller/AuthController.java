@@ -1,12 +1,14 @@
 package com.lexiflow.auth.controller;
 
 import com.lexiflow.auth.dto.LoginRequest;
+import com.lexiflow.auth.dto.LoginCaptchaResponse;
 import com.lexiflow.auth.dto.LoginResponse;
 import com.lexiflow.auth.dto.RegisterRequest;
 import com.lexiflow.auth.dto.RegisterResponse;
 import com.lexiflow.auth.dto.UserBriefResponse;
 import com.lexiflow.auth.security.AuthContext;
 import com.lexiflow.auth.service.AuthService;
+import com.lexiflow.auth.service.LoginCaptchaService;
 import com.lexiflow.common.api.ApiResponse;
 import com.lexiflow.common.error.ErrorCode;
 import com.lexiflow.common.exception.BizException;
@@ -37,6 +39,7 @@ public class AuthController {
     private static final String BEARER_PREFIX = "Bearer ";
 
     private final AuthService authService;
+    private final LoginCaptchaService loginCaptchaService;
     private final AuthCookieProperties authCookieProperties;
 
     @Operation(summary = "邮箱注册")
@@ -55,6 +58,12 @@ public class AuthController {
         AuthService.LoginResult result = authService.login(request, ServletUtils.clientIp(servletRequest));
         servletResponse.addHeader(HttpHeaders.SET_COOKIE, buildRefreshCookie(result.refreshToken(), result.refreshTokenTtlSeconds()).toString());
         return ApiResponse.success(result.response());
+    }
+
+    @Operation(summary = "获取登录图形验证码")
+    @GetMapping("/login-captcha")
+    public ApiResponse<LoginCaptchaResponse> loginCaptcha(HttpServletRequest servletRequest) {
+        return ApiResponse.success(loginCaptchaService.issue(ServletUtils.clientIp(servletRequest)));
     }
 
     @Operation(summary = "刷新访问令牌")

@@ -17,6 +17,8 @@ public enum ErrorCode {
     INVALID_CREDENTIALS(11001, "邮箱或密码错误", 400),
     EMAIL_REGISTERED(11002, "邮箱已注册", 409),
     USER_DISABLED(11003, "用户已被禁用", 403),
+    LOGIN_CAPTCHA_REQUIRED(11004, "请输入验证码", 400),
+    LOGIN_CAPTCHA_INVALID(11005, "验证码错误或已过期", 400),
 
     WORDBOOK_NOT_FOUND(20001, "词库不存在", 404),
     WORD_NOT_FOUND(20002, "单词不存在", 404),

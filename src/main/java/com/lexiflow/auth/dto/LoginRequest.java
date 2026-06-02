@@ -16,6 +16,18 @@ public record LoginRequest(
         @Schema(description = "密码", example = "Password123!")
         @NotBlank
         @Size(max = 64)
-        String password
+        String password,
+
+        @Schema(description = "登录验证码 ID", example = "550e8400-e29b-41d4-a716-446655440000")
+        @Size(max = 64)
+        String captchaId,
+
+        @Schema(description = "登录验证码", example = "1234")
+        @Size(max = 8)
+        String captchaCode
 ) {
+
+    public LoginRequest(String email, String password) {
+        this(email, password, null, null);
+    }
 }
