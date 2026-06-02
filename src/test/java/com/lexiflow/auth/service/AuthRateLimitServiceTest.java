@@ -2,6 +2,7 @@ package com.lexiflow.auth.service;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -66,16 +67,14 @@ class AuthRateLimitServiceTest {
     }
 
     @Test
-    void clearLoginFailuresShouldDeleteEmailAndIpCounters() {
+    void clearLoginFailuresShouldDeleteEmailCounterOnly() {
         AuthRateLimitService service = new AuthRateLimitService(stringRedisTemplate);
-        ArgumentCaptor<List<String>> keysCaptor = listCaptor();
+        ArgumentCaptor<String> keyCaptor = ArgumentCaptor.forClass(String.class);
 
-        service.clearLoginFailures("USER@example.com", "127.0.0.1");
+        service.clearLoginFailures("USER@example.com");
 
-        verify(stringRedisTemplate).delete(keysCaptor.capture());
-        org.assertj.core.api.Assertions.assertThat(keysCaptor.getValue())
-                .hasSize(2)
-                .allMatch(key -> key.startsWith("lexiflow:auth:login:"));
+        verify(stringRedisTemplate).delete(keyCaptor.capture());
+        assertThat(keyCaptor.getValue()).startsWith("lexiflow:auth:login:email:");
     }
 
     @Test
@@ -91,8 +90,4 @@ class AuthRateLimitServiceTest {
                 .doesNotThrowAnyException();
     }
 
-    @SuppressWarnings({"unchecked", "rawtypes"})
-    private ArgumentCaptor<List<String>> listCaptor() {
-        return (ArgumentCaptor) ArgumentCaptor.forClass(List.class);
-    }
 }

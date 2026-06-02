@@ -44,7 +44,7 @@ public class AuthService {
         if (user.getStatus() != UserStatus.ACTIVE) {
             throw new BizException(ErrorCode.USER_DISABLED);
         }
-        authRateLimitService.clearLoginFailures(request.email(), clientIp);
+        authRateLimitService.clearLoginFailures(request.email());
         userService.updateLoginInfo(user.getId(), clientIp);
 
         String accessToken = jwtTokenService.createAccessToken(user);

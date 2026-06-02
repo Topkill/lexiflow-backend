@@ -44,11 +44,11 @@ public class AuthRateLimitService {
         increment(ipKey(clientIp));
     }
 
-    public void clearLoginFailures(String email, String clientIp) {
+    public void clearLoginFailures(String email) {
         try {
-            stringRedisTemplate.delete(List.of(emailKey(email), ipKey(clientIp)));
+            stringRedisTemplate.delete(emailKey(email));
         } catch (RuntimeException ex) {
-            log.warn("Redis login failure clear failed, email={}, clientIp={}", normalizeEmail(email), clientIp, ex);
+            log.warn("Redis login failure clear failed, email={}", normalizeEmail(email), ex);
         }
     }
 

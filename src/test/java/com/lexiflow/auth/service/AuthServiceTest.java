@@ -2,9 +2,8 @@ package com.lexiflow.auth.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -53,7 +52,7 @@ class AuthServiceTest {
 
         verify(authRateLimitService).assertLoginAllowed("student@example.com", "127.0.0.1");
         verify(authRateLimitService).recordLoginFailure("student@example.com", "127.0.0.1");
-        verify(authRateLimitService, never()).clearLoginFailures(anyString(), anyString());
+        verify(authRateLimitService, never()).clearLoginFailures(anyString());
     }
 
     @Test
@@ -73,7 +72,7 @@ class AuthServiceTest {
         assertThat(result.response().accessToken()).isEqualTo("access-token");
         assertThat(result.refreshToken()).isEqualTo("refresh-token");
         assertThat(result.refreshTokenTtlSeconds()).isEqualTo(604800L);
-        verify(authRateLimitService).clearLoginFailures("student@example.com", "127.0.0.1");
+        verify(authRateLimitService).clearLoginFailures("student@example.com");
         verify(userService).updateLoginInfo(7L, "127.0.0.1");
     }
 
