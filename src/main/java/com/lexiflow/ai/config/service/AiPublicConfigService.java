@@ -6,13 +6,17 @@ import com.lexiflow.ai.config.domain.AiPublicConfig;
 import com.lexiflow.ai.config.dto.AiPublicConfigRequest;
 import com.lexiflow.ai.config.dto.AiPublicConfigResponse;
 import com.lexiflow.ai.config.mapper.AiPublicConfigMapper;
+import com.lexiflow.ai.core.service.AiConfigResolver;
 import com.lexiflow.common.error.ErrorCode;
 import com.lexiflow.common.exception.BizException;
 import com.lexiflow.infra.crypto.ApiKeyCryptoService;
+import com.lexiflow.infra.redis.RedisCacheInvalidationPublisher;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 
 @Service
@@ -21,6 +25,8 @@ public class AiPublicConfigService {
 
     private final AiPublicConfigMapper aiPublicConfigMapper;
     private final ApiKeyCryptoService apiKeyCryptoService;
+    private final AiConfigResolver aiConfigResolver;
+    private final RedisCacheInvalidationPublisher cacheInvalidationPublisher;
 
     public List<AiPublicConfigResponse> listConfigs() {
         return aiPublicConfigMapper.selectList(new LambdaQueryWrapper<AiPublicConfig>()
@@ -41,6 +47,7 @@ public class AiPublicConfigService {
         config.setDeleted(0);
         config.setVersion(0);
         aiPublicConfigMapper.insert(config);
+        evictRuntimeConfig();
         return AiPublicConfigResponse.from(config);
     }
 
@@ -50,6 +57,7 @@ public class AiPublicConfigService {
         applyRequest(config, request, false);
         config.setUpdatedBy(adminUserId);
         aiPublicConfigMapper.updateById(config);
+        evictRuntimeConfig();
         return AiPublicConfigResponse.from(config);
     }
 
@@ -65,6 +73,7 @@ public class AiPublicConfigService {
         config.setActive(true);
         config.setUpdatedBy(adminUserId);
         aiPublicConfigMapper.updateById(config);
+        evictRuntimeConfig();
     }
 
     @Transactional
@@ -73,6 +82,7 @@ public class AiPublicConfigService {
         config.setEnabled(true);
         config.setUpdatedBy(adminUserId);
         aiPublicConfigMapper.updateById(config);
+        evictRuntimeConfig();
     }
 
     @Transactional
@@ -82,6 +92,7 @@ public class AiPublicConfigService {
         config.setActive(false);
         config.setUpdatedBy(adminUserId);
         aiPublicConfigMapper.updateById(config);
+        evictRuntimeConfig();
     }
 
     private AiPublicConfig getConfig(Long configId) {
@@ -90,6 +101,26 @@ public class AiPublicConfigService {
             throw new BizException(ErrorCode.NOT_FOUND, "公共 AI 配置不存在");
         }
         return config;
+    }
+
+    private void evictRuntimeConfig() {
+        runAfterCommitOrNow(() -> {
+            aiConfigResolver.evictPublicConfigCache();
+            cacheInvalidationPublisher.publishPublicAiConfigEvict();
+        });
+    }
+
+    private void runAfterCommitOrNow(Runnable task) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            task.run();
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                task.run();
+            }
+        });
     }
 
     private void applyRequest(AiPublicConfig config, AiPublicConfigRequest request, boolean apiKeyRequired) {

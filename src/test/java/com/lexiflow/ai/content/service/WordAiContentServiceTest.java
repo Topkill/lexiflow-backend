@@ -24,6 +24,7 @@ import com.lexiflow.ai.prompt.service.AiPromptTemplateService;
 import com.lexiflow.ai.prompt.service.ResolvedAiPromptTemplate;
 import com.lexiflow.async.domain.AsyncTask;
 import com.lexiflow.async.service.AsyncTaskService;
+import com.lexiflow.infra.redis.RedisDistributedLockService;
 import com.lexiflow.user.domain.TargetExam;
 import com.lexiflow.user.domain.UserSettings;
 import com.lexiflow.user.service.UserService;
@@ -62,7 +63,8 @@ class WordAiContentServiceTest {
                 objectMapper,
                 mock(AiPromptTemplateService.class),
                 mock(AiPromptOutputSchemaService.class),
-                transactionTemplate()
+                transactionTemplate(),
+                mock(RedisDistributedLockService.class)
         );
         Word word = new Word();
         word.setWord("namely");
@@ -117,7 +119,8 @@ class WordAiContentServiceTest {
                 objectMapper,
                 promptTemplateService,
                 outputSchemaService,
-                transactionTemplate()
+                transactionTemplate(),
+                mock(RedisDistributedLockService.class)
         );
         Wordbook wordbook = new Wordbook();
         wordbook.setId(1L);
@@ -203,7 +206,8 @@ class WordAiContentServiceTest {
                 objectMapper,
                 promptTemplateService,
                 outputSchemaService,
-                transactionTemplate()
+                transactionTemplate(),
+                mock(RedisDistributedLockService.class)
         );
         Wordbook wordbook = new Wordbook();
         wordbook.setId(1L);

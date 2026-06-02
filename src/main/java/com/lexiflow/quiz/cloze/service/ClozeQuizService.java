@@ -18,6 +18,9 @@ import com.lexiflow.async.domain.AsyncTaskType;
 import com.lexiflow.async.service.AsyncTaskService;
 import com.lexiflow.common.error.ErrorCode;
 import com.lexiflow.common.exception.BizException;
+import com.lexiflow.infra.redis.RedisDistributedLockService;
+import com.lexiflow.infra.redis.RedisKeys;
+import com.lexiflow.infra.redis.RedisLockAttempt;
 import com.lexiflow.quiz.cloze.domain.ClozeAttempt;
 import com.lexiflow.quiz.cloze.domain.ClozeAttemptAnswer;
 import com.lexiflow.quiz.cloze.domain.ClozeQuiz;
@@ -56,6 +59,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -86,6 +90,9 @@ public class ClozeQuizService {
     private static final int MAX_BACKGROUND_WORD_COUNT = 10;
     private static final List<String> DEFINITION_TEXT_FIELDS = List.of("cn", "definition", "definitionZh", "zh", "chinese", "meaning");
     private static final int MAX_GENERATE_ATTEMPTS = 2;
+    private static final Duration AI_CACHE_LOCK_TTL = Duration.ofSeconds(130);
+    private static final Duration AI_CACHE_LOCK_WAIT_TIMEOUT = Duration.ofSeconds(115);
+    private static final Duration AI_CACHE_LOCK_POLL_INTERVAL = Duration.ofMillis(500);
 
     private final AsyncTaskService asyncTaskService;
     private final AiGatewayService aiGatewayService;
@@ -104,6 +111,7 @@ public class ClozeQuizService {
     private final AiPromptTemplateService aiPromptTemplateService;
     private final AiPromptOutputSchemaService outputSchemaService;
     private final TransactionTemplate transactionTemplate;
+    private final RedisDistributedLockService redisDistributedLockService;
 
     public CreateClozeTaskResponse createClozeTask(Long userId, CreateClozeTaskRequest request) {
         DailyTask dailyTask = getOwnedDailyTask(userId, request.dailyTaskId());
@@ -296,26 +304,50 @@ public class ClozeQuizService {
             }
         }
 
-        BizException lastGenerationError = null;
-        List<String> attemptErrors = new ArrayList<>();
-        for (int attempt = 1; attempt <= MAX_GENERATE_ATTEMPTS; attempt++) {
-            AiPrompt prompt = buildPrompt(sourceType, selection, sourceHash, promptTemplate);
-            try {
-                AiChatCompletionResult result = aiGatewayService.generateJson(userId, AiContentType.CLOZE, prompt, asyncTaskId);
-                JsonNode content = parseJson(result.content());
-                validateGeneratedContent(content, selection);
-                return saveGeneratedQuiz(userId, dailyTask, wordbookId, asyncTaskId, sourceType, selection, sourceHash, content);
-            } catch (BizException ex) {
-                if (ex.getErrorCode() != ErrorCode.AI_CALL_FAILED) {
-                    throw ex;
+        RedisLockAttempt lockAttempt = tryAcquireClozeLock(sourceHash, regenerate);
+        try {
+            if (isLockHeld(lockAttempt)) {
+                ClozeQuiz cachedQuiz = waitForClozeQuizCache(userId, sourceHash, lockAttempt.lock().key());
+                if (cachedQuiz != null) {
+                    incrementClozeQuizHit(cachedQuiz);
+                    return cachedQuiz;
                 }
-                lastGenerationError = ex;
-                attemptErrors.add("第 " + attempt + " 次：" + generationErrorMessage(ex));
+                lockAttempt = tryAcquireClozeLock(sourceHash, regenerate);
+                if (isLockHeld(lockAttempt)) {
+                    throw new BizException(ErrorCode.AI_CALL_FAILED, "相同完形填空仍在生成中，请稍后重试");
+                }
             }
+
+            if (!regenerate) {
+                ClozeQuiz cachedQuiz = tryReuseQuizFromCache(userId, sourceHash);
+                if (cachedQuiz != null) {
+                    return cachedQuiz;
+                }
+            }
+
+            BizException lastGenerationError = null;
+            List<String> attemptErrors = new ArrayList<>();
+            for (int attempt = 1; attempt <= MAX_GENERATE_ATTEMPTS; attempt++) {
+                AiPrompt prompt = buildPrompt(sourceType, selection, sourceHash, promptTemplate);
+                try {
+                    AiChatCompletionResult result = aiGatewayService.generateJson(userId, AiContentType.CLOZE, prompt, asyncTaskId);
+                    JsonNode content = parseJson(result.content());
+                    validateGeneratedContent(content, selection);
+                    return saveGeneratedQuiz(userId, dailyTask, wordbookId, asyncTaskId, sourceType, selection, sourceHash, content);
+                } catch (BizException ex) {
+                    if (ex.getErrorCode() != ErrorCode.AI_CALL_FAILED) {
+                        throw ex;
+                    }
+                    lastGenerationError = ex;
+                    attemptErrors.add("第 " + attempt + " 次：" + generationErrorMessage(ex));
+                }
+            }
+            throw lastGenerationError == null
+                    ? new BizException(ErrorCode.AI_CALL_FAILED, "AI 完形填空生成失败，请稍后重试")
+                    : new BizException(ErrorCode.AI_CALL_FAILED, buildGenerateFailureMessage(attemptErrors, lastGenerationError));
+        } finally {
+            releaseClozeLock(lockAttempt);
         }
-        throw lastGenerationError == null
-                ? new BizException(ErrorCode.AI_CALL_FAILED, "AI 完形填空生成失败，请稍后重试")
-                : new BizException(ErrorCode.AI_CALL_FAILED, buildGenerateFailureMessage(attemptErrors, lastGenerationError));
     }
 
     private String buildGenerateFailureMessage(List<String> attemptErrors, BizException fallbackError) {
@@ -569,6 +601,49 @@ public class ClozeQuizService {
                 .eq(ClozeQuiz::getCacheActive, true)
                 .eq(ClozeQuiz::getDeleted, 0)
                 .last("LIMIT 1"));
+    }
+
+    private RedisLockAttempt tryAcquireClozeLock(String sourceHash, boolean regenerate) {
+        String cacheKey = clozeCacheKey(sourceHash);
+        if (regenerate) {
+            return RedisLockAttempt.unavailable(RedisKeys.aiLockKey(AiContentType.CLOZE, cacheKey));
+        }
+        return redisDistributedLockService.tryLock(RedisKeys.aiLockKey(AiContentType.CLOZE, cacheKey), AI_CACHE_LOCK_TTL);
+    }
+
+    private boolean isLockHeld(RedisLockAttempt lockAttempt) {
+        return lockAttempt != null && !lockAttempt.acquired() && !lockAttempt.unavailable();
+    }
+
+    private void releaseClozeLock(RedisLockAttempt lockAttempt) {
+        if (lockAttempt != null && lockAttempt.acquired()) {
+            redisDistributedLockService.release(lockAttempt.lock());
+        }
+    }
+
+    private ClozeQuiz waitForClozeQuizCache(Long userId, String sourceHash, String lockKey) {
+        String cacheKey = clozeCacheKey(sourceHash);
+        long deadline = System.nanoTime() + AI_CACHE_LOCK_WAIT_TIMEOUT.toNanos();
+        while (System.nanoTime() < deadline) {
+            sleepForCachePoll();
+            ClozeQuiz cachedQuiz = findActiveClozeQuiz(userId, cacheKey);
+            if (cachedQuiz != null) {
+                return cachedQuiz;
+            }
+            if (!redisDistributedLockService.isLocked(lockKey)) {
+                break;
+            }
+        }
+        return findActiveClozeQuiz(userId, cacheKey);
+    }
+
+    private void sleepForCachePoll() {
+        try {
+            Thread.sleep(AI_CACHE_LOCK_POLL_INTERVAL.toMillis());
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new BizException(ErrorCode.AI_CALL_FAILED, "等待相同完形填空生成时被中断");
+        }
     }
 
     private void incrementClozeQuizHit(ClozeQuiz quiz) {

@@ -22,6 +22,9 @@ import com.lexiflow.async.domain.AsyncTaskType;
 import com.lexiflow.async.service.AsyncTaskService;
 import com.lexiflow.common.error.ErrorCode;
 import com.lexiflow.common.exception.BizException;
+import com.lexiflow.infra.redis.RedisDistributedLockService;
+import com.lexiflow.infra.redis.RedisKeys;
+import com.lexiflow.infra.redis.RedisLockAttempt;
 import com.lexiflow.user.domain.UserSettings;
 import com.lexiflow.user.service.UserService;
 import com.lexiflow.wordbook.domain.Word;
@@ -32,6 +35,7 @@ import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.LinkedHashSet;
@@ -54,6 +58,9 @@ public class WordAiContentService {
     private static final String SYSTEM_PROMPT = "你是 LexiFlow 的 AI 英语学习助手。请只输出合法 JSON，不要输出 JSON 外的 Markdown、解释性前后缀或代码块。内容面向备考大学生，中文为主，简洁、准确、适合背单词。";
     private static final String STREAM_OUTPUT_CONSTRAINT = "流式输出约束：JSON 对象必须先输出 answer 字段，其他字段继续按照输出 JSON 结构输出。";
     private static final int WORD_QA_CACHE_LOCK_STRIPES = 64;
+    private static final Duration AI_CACHE_LOCK_TTL = Duration.ofSeconds(130);
+    private static final Duration AI_CACHE_LOCK_WAIT_TIMEOUT = Duration.ofSeconds(115);
+    private static final Duration AI_CACHE_LOCK_POLL_INTERVAL = Duration.ofMillis(500);
 
     private final WordAiQaMapper wordAiQaMapper;
     private final AsyncTaskService asyncTaskService;
@@ -65,6 +72,7 @@ public class WordAiContentService {
     private final AiPromptTemplateService aiPromptTemplateService;
     private final AiPromptOutputSchemaService outputSchemaService;
     private final TransactionTemplate transactionTemplate;
+    private final RedisDistributedLockService redisDistributedLockService;
     private final Object[] wordQaCacheLocks = createWordQaCacheLocks();
 
     private static Object[] createWordQaCacheLocks() {
@@ -118,22 +126,62 @@ public class WordAiContentService {
                     }
                 }
 
-                writeEvent(writer, "status", buildWordQaStatusPayload("RUNNING", "正在生成 AI 回答", outputSchema));
-                WordQaJsonStreamExtractor streamExtractor = new WordQaJsonStreamExtractor(outputSchema, objectMapper);
-                AiPrompt prompt = buildPrompt(AiContentType.WORD_QA, sourceJson, sourceHash, promptTemplate, STREAM_OUTPUT_CONSTRAINT);
-                AiChatCompletionResult result = generateQuestionStreamWithFallback(userId, prompt, writer, streamExtractor, outputSchema, task.getId());
-                JsonNode content = parseJson(result.content());
-                if (!streamExtractor.hasAnswerEmitted()) {
-                    String answer = content.path("answer").asText("");
-                    if (!answer.isBlank()) {
-                        writeEvent(writer, "chunk", Map.of("text", answer));
+                RedisLockAttempt lockAttempt = tryAcquireWordQaLock(cacheKey, regenerate);
+                try {
+                    if (isLockHeld(lockAttempt)) {
+                        writeEvent(writer, "status", buildWordQaStatusPayload("RUNNING", "正在等待相同 AI 回答生成", outputSchema));
+                        WordAiQa cached = waitForWordQaCache(cacheKey, lockAttempt.lock().key());
+                        if (cached != null) {
+                            incrementWordQaHit(cached);
+                            JsonNode content = parseJson(cached.getContentJson());
+                            asyncTaskService.markSuccess(task.getId(), cached.getId(), "AI 问答命中缓存");
+                            taskFinished = true;
+                            writeEvent(writer, "status", buildWordQaStatusPayload("CACHE_HIT", "已命中缓存", outputSchema));
+                            streamCachedAnswer(writer, content);
+                            streamWordQaFieldItems(writer, content, outputSchema);
+                            writeEvent(writer, "done", WordAiContentResponse.of(true, AiContentType.WORD_QA, cached.getId(), wordId, wordbookId, content, outputSchema));
+                            return;
+                        }
+                        lockAttempt = tryAcquireWordQaLock(cacheKey, regenerate);
+                        if (isLockHeld(lockAttempt)) {
+                            throw new BizException(ErrorCode.AI_CALL_FAILED, "相同 AI 回答仍在生成中，请稍后重试");
+                        }
                     }
+
+                    if (!regenerate) {
+                        WordAiQa cached = findActiveWordQa(cacheKey);
+                        if (cached != null) {
+                            incrementWordQaHit(cached);
+                            JsonNode cachedContent = parseJson(cached.getContentJson());
+                            asyncTaskService.markSuccess(task.getId(), cached.getId(), "AI 问答命中缓存");
+                            taskFinished = true;
+                            writeEvent(writer, "status", buildWordQaStatusPayload("CACHE_HIT", "已命中缓存", outputSchema));
+                            streamCachedAnswer(writer, cachedContent);
+                            streamWordQaFieldItems(writer, cachedContent, outputSchema);
+                            writeEvent(writer, "done", WordAiContentResponse.of(true, AiContentType.WORD_QA, cached.getId(), wordId, wordbookId, cachedContent, outputSchema));
+                            return;
+                        }
+                    }
+
+                    writeEvent(writer, "status", buildWordQaStatusPayload("RUNNING", "正在生成 AI 回答", outputSchema));
+                    WordQaJsonStreamExtractor streamExtractor = new WordQaJsonStreamExtractor(outputSchema, objectMapper);
+                    AiPrompt prompt = buildPrompt(AiContentType.WORD_QA, sourceJson, sourceHash, promptTemplate, STREAM_OUTPUT_CONSTRAINT);
+                    AiChatCompletionResult result = generateQuestionStreamWithFallback(userId, prompt, writer, streamExtractor, outputSchema, task.getId());
+                    JsonNode content = parseJson(result.content());
+                    if (!streamExtractor.hasAnswerEmitted()) {
+                        String answer = content.path("answer").asText("");
+                        if (!answer.isBlank()) {
+                            writeEvent(writer, "chunk", Map.of("text", answer));
+                        }
+                    }
+                    WordAiQa qa = saveWordQaResult(userId, wordId, wordbookId, safeQuestion, sourceHash, cacheKey, content, outputSchema);
+                    JsonNode savedContent = parseJson(qa.getContentJson());
+                    asyncTaskService.markSuccess(task.getId(), qa.getId(), "AI 问答生成完成");
+                    taskFinished = true;
+                    writeEvent(writer, "done", WordAiContentResponse.of(false, AiContentType.WORD_QA, qa.getId(), wordId, wordbookId, savedContent, outputSchema));
+                } finally {
+                    releaseWordQaLock(lockAttempt);
                 }
-                WordAiQa qa = saveWordQaResult(userId, wordId, wordbookId, safeQuestion, sourceHash, cacheKey, content, outputSchema);
-                JsonNode savedContent = parseJson(qa.getContentJson());
-                asyncTaskService.markSuccess(task.getId(), qa.getId(), "AI 问答生成完成");
-                taskFinished = true;
-                writeEvent(writer, "done", WordAiContentResponse.of(false, AiContentType.WORD_QA, qa.getId(), wordId, wordbookId, savedContent, outputSchema));
             }
         } catch (Exception ex) {
             if (task != null && !taskFinished) {
@@ -230,13 +278,40 @@ public class WordAiContentService {
                     }
                 }
 
-                AiPrompt prompt = buildPrompt(AiContentType.WORD_QA, sourceJson, sourceHash, promptTemplate);
-                AiChatCompletionResult result = aiGatewayService.generateJson(userId, AiContentType.WORD_QA, prompt, task.getId());
-                JsonNode content = parseJson(result.content());
-                WordAiQa qa = saveWordQaResult(userId, wordId, wordbookId, question, sourceHash, cacheKey, content, outputSchema);
-                JsonNode savedContent = parseJson(qa.getContentJson());
-                asyncTaskService.markSuccess(task.getId(), qa.getId(), "AI 问答生成完成");
-                return WordAiContentResponse.of(false, AiContentType.WORD_QA, qa.getId(), wordId, wordbookId, savedContent, outputSchema);
+                RedisLockAttempt lockAttempt = tryAcquireWordQaLock(cacheKey, regenerate);
+                try {
+                    if (isLockHeld(lockAttempt)) {
+                        WordAiQa cached = waitForWordQaCache(cacheKey, lockAttempt.lock().key());
+                        if (cached != null) {
+                            incrementWordQaHit(cached);
+                            asyncTaskService.markSuccess(task.getId(), cached.getId(), "AI 问答命中缓存");
+                            return WordAiContentResponse.of(true, AiContentType.WORD_QA, cached.getId(), wordId, wordbookId, parseJson(cached.getContentJson()), outputSchema);
+                        }
+                        lockAttempt = tryAcquireWordQaLock(cacheKey, regenerate);
+                        if (isLockHeld(lockAttempt)) {
+                            throw new BizException(ErrorCode.AI_CALL_FAILED, "相同 AI 回答仍在生成中，请稍后重试");
+                        }
+                    }
+
+                    if (!regenerate) {
+                        WordAiQa cached = findActiveWordQa(cacheKey);
+                        if (cached != null) {
+                            incrementWordQaHit(cached);
+                            asyncTaskService.markSuccess(task.getId(), cached.getId(), "AI 问答命中缓存");
+                            return WordAiContentResponse.of(true, AiContentType.WORD_QA, cached.getId(), wordId, wordbookId, parseJson(cached.getContentJson()), outputSchema);
+                        }
+                    }
+
+                    AiPrompt prompt = buildPrompt(AiContentType.WORD_QA, sourceJson, sourceHash, promptTemplate);
+                    AiChatCompletionResult result = aiGatewayService.generateJson(userId, AiContentType.WORD_QA, prompt, task.getId());
+                    JsonNode content = parseJson(result.content());
+                    WordAiQa qa = saveWordQaResult(userId, wordId, wordbookId, question, sourceHash, cacheKey, content, outputSchema);
+                    JsonNode savedContent = parseJson(qa.getContentJson());
+                    asyncTaskService.markSuccess(task.getId(), qa.getId(), "AI 问答生成完成");
+                    return WordAiContentResponse.of(false, AiContentType.WORD_QA, qa.getId(), wordId, wordbookId, savedContent, outputSchema);
+                } finally {
+                    releaseWordQaLock(lockAttempt);
+                }
             }
         } catch (BizException ex) {
             markWordQaTaskFailed(task, ex);
@@ -279,6 +354,47 @@ public class WordAiContentService {
 
     private Object wordQaCacheLock(String cacheKey) {
         return wordQaCacheLocks[Math.floorMod(cacheKey.hashCode(), wordQaCacheLocks.length)];
+    }
+
+    private RedisLockAttempt tryAcquireWordQaLock(String cacheKey, boolean regenerate) {
+        if (regenerate) {
+            return RedisLockAttempt.unavailable(RedisKeys.aiLockKey(AiContentType.WORD_QA, cacheKey));
+        }
+        return redisDistributedLockService.tryLock(RedisKeys.aiLockKey(AiContentType.WORD_QA, cacheKey), AI_CACHE_LOCK_TTL);
+    }
+
+    private boolean isLockHeld(RedisLockAttempt lockAttempt) {
+        return lockAttempt != null && !lockAttempt.acquired() && !lockAttempt.unavailable();
+    }
+
+    private void releaseWordQaLock(RedisLockAttempt lockAttempt) {
+        if (lockAttempt != null && lockAttempt.acquired()) {
+            redisDistributedLockService.release(lockAttempt.lock());
+        }
+    }
+
+    private WordAiQa waitForWordQaCache(String cacheKey, String lockKey) {
+        long deadline = System.nanoTime() + AI_CACHE_LOCK_WAIT_TIMEOUT.toNanos();
+        while (System.nanoTime() < deadline) {
+            sleepForCachePoll();
+            WordAiQa cached = findActiveWordQa(cacheKey);
+            if (cached != null) {
+                return cached;
+            }
+            if (!redisDistributedLockService.isLocked(lockKey)) {
+                break;
+            }
+        }
+        return findActiveWordQa(cacheKey);
+    }
+
+    private void sleepForCachePoll() {
+        try {
+            Thread.sleep(AI_CACHE_LOCK_POLL_INTERVAL.toMillis());
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new BizException(ErrorCode.AI_CALL_FAILED, "等待相同 AI 内容生成时被中断");
+        }
     }
 
     private void incrementWordQaHit(WordAiQa qa) {

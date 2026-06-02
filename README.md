@@ -73,7 +73,7 @@ mvn spring-boot:run -Dspring-boot.run.profiles=local
 $env:JAVA_HOME='D:\jdk-17.0.12'
 $env:Path="$env:JAVA_HOME\bin;$env:Path"
 mvn -DskipTests package
-java -jar target\lexiflow-backend-0.0.1-SNAPSHOT.jar --spring.profiles.active=local
+java -jar target\lexiflow-backend-0.0.2-SNAPSHOT.jar --spring.profiles.active=local
 ```
 
 服务默认地址：`http://localhost:8080`。

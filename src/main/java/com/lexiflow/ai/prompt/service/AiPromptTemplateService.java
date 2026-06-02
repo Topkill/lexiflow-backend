@@ -13,6 +13,9 @@ import com.lexiflow.ai.prompt.mapper.AiPromptFeatureBindingMapper;
 import com.lexiflow.ai.prompt.mapper.AiPromptTemplateMapper;
 import com.lexiflow.common.error.ErrorCode;
 import com.lexiflow.common.exception.BizException;
+import com.lexiflow.infra.redis.RedisCacheInvalidationListener;
+import com.lexiflow.infra.redis.RedisCacheInvalidationPublisher;
+import com.lexiflow.infra.redis.RedisKeys;
 import com.lexiflow.wordbook.domain.Wordbook;
 import com.lexiflow.wordbook.mapper.WordbookMapper;
 import java.nio.charset.StandardCharsets;
@@ -24,11 +27,13 @@ import java.util.concurrent.ConcurrentHashMap;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 
 @Service
 @RequiredArgsConstructor
-public class AiPromptTemplateService {
+public class AiPromptTemplateService implements RedisCacheInvalidationListener {
 
     public static final long ALL_WORDBOOK_ID = 0L;
 
@@ -37,6 +42,7 @@ public class AiPromptTemplateService {
     private final DefaultAiPromptRegistry defaultRegistry;
     private final WordbookMapper wordbookMapper;
     private final AiPromptOutputSchemaService outputSchemaService;
+    private final RedisCacheInvalidationPublisher cacheInvalidationPublisher;
     private final Map<String, ResolvedAiPromptTemplate> resolvedCache = new ConcurrentHashMap<>();
 
     public List<AiPromptFeatureGroupResponse> listGroups() {
@@ -415,13 +421,41 @@ public class AiPromptTemplateService {
     }
 
     private void evict(AiPromptFeatureType featureType) {
+        runAfterCommitOrNow(() -> {
+            evictLocal(featureType);
+            cacheInvalidationPublisher.publishPromptEvict(featureType);
+        });
+    }
+
+    private void evictLocal(AiPromptFeatureType featureType) {
         if (featureType != null) {
             resolvedCache.keySet().removeIf(key -> key.startsWith(featureType.name() + ":"));
         }
     }
 
+    @Override
+    public void onCacheInvalidation(String payload) {
+        AiPromptFeatureType featureType = RedisKeys.parsePromptEvictPayload(payload);
+        if (featureType != null) {
+            evictLocal(featureType);
+        }
+    }
+
     private AiPromptFeatureType featureTypeOf(AiPromptTemplateRequest request) {
         return request == null ? null : request.featureType();
+    }
+
+    private void runAfterCommitOrNow(Runnable task) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            task.run();
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                task.run();
+            }
+        });
     }
 
     private Long validateWritableWordbookId(Long wordbookId) {

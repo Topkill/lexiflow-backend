@@ -19,6 +19,8 @@ import com.lexiflow.ai.prompt.dto.AiPromptTemplateRequest;
 import com.lexiflow.ai.prompt.mapper.AiPromptFeatureBindingMapper;
 import com.lexiflow.ai.prompt.mapper.AiPromptTemplateMapper;
 import com.lexiflow.common.exception.BizException;
+import com.lexiflow.infra.redis.RedisCacheInvalidationPublisher;
+import com.lexiflow.infra.redis.RedisKeys;
 import com.lexiflow.wordbook.domain.Wordbook;
 import com.lexiflow.wordbook.mapper.WordbookMapper;
 import java.time.LocalDateTime;
@@ -29,6 +31,8 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 @ExtendWith(MockitoExtension.class)
 class AiPromptTemplateServiceTest {
@@ -39,6 +43,8 @@ class AiPromptTemplateServiceTest {
     private AiPromptFeatureBindingMapper bindingMapper;
     @Mock
     private WordbookMapper wordbookMapper;
+    @Mock
+    private RedisCacheInvalidationPublisher cacheInvalidationPublisher;
 
     private AiPromptTemplateService service;
     private AiPromptOutputSchemaService outputSchemaService;
@@ -46,7 +52,7 @@ class AiPromptTemplateServiceTest {
     @BeforeEach
     void setUp() {
         outputSchemaService = new AiPromptOutputSchemaService(new ObjectMapper());
-        service = new AiPromptTemplateService(templateMapper, bindingMapper, new DefaultAiPromptRegistry(outputSchemaService), wordbookMapper, outputSchemaService);
+        service = new AiPromptTemplateService(templateMapper, bindingMapper, new DefaultAiPromptRegistry(outputSchemaService), wordbookMapper, outputSchemaService, cacheInvalidationPublisher);
     }
 
     @Test
@@ -175,6 +181,36 @@ class AiPromptTemplateServiceTest {
         assertThat(copied.getOutputSchemaJson()).contains("\"answer\"");
         assertThat(copied.getCreatedBy()).isEqualTo(7L);
         assertThat(copied.getEnabled()).isTrue();
+        verify(cacheInvalidationPublisher).publishPromptEvict(AiPromptFeatureType.WORD_QA);
+    }
+
+    @Test
+    void redisInvalidationShouldClearLocalPromptCacheWithoutPublishingAgain() {
+        when(bindingMapper.selectOne(any())).thenReturn(null);
+
+        service.resolve(AiPromptFeatureType.WORD_QA);
+        service.resolve(AiPromptFeatureType.WORD_QA);
+        service.onCacheInvalidation(RedisKeys.promptEvictPayload(AiPromptFeatureType.WORD_QA));
+        service.resolve(AiPromptFeatureType.WORD_QA);
+
+        verify(bindingMapper, times(2)).selectOne(any());
+        verify(cacheInvalidationPublisher, never()).publishPromptEvict(any());
+    }
+
+    @Test
+    void promptEvictShouldPublishAfterTransactionCommit() {
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            service.copyBuiltin(7L, AiPromptFeatureType.WORD_QA);
+
+            verify(cacheInvalidationPublisher, never()).publishPromptEvict(any());
+            TransactionSynchronizationManager.getSynchronizations()
+                    .forEach(TransactionSynchronization::afterCommit);
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
+
+        verify(cacheInvalidationPublisher).publishPromptEvict(AiPromptFeatureType.WORD_QA);
     }
 
     @Test

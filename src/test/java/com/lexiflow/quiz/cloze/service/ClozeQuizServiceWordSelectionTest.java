@@ -10,6 +10,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lexiflow.ai.core.service.AiGatewayService;
 import com.lexiflow.ai.prompt.service.AiPromptTemplateService;
+import com.lexiflow.infra.redis.RedisDistributedLockService;
 import com.lexiflow.async.service.AsyncTaskService;
 import com.lexiflow.common.exception.BizException;
 import com.lexiflow.quiz.cloze.domain.ClozeSourceType;
@@ -76,6 +77,8 @@ class ClozeQuizServiceWordSelectionTest {
     private SpacedRepetitionService spacedRepetitionService;
     @Mock
     private AiPromptTemplateService aiPromptTemplateService;
+    @Mock
+    private RedisDistributedLockService redisDistributedLockService;
 
     @InjectMocks
     private ClozeQuizService service;
