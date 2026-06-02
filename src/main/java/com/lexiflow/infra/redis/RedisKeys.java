@@ -58,6 +58,10 @@ public final class RedisKeys {
         return "lexiflow:auth:user:" + userId;
     }
 
+    public static String authTokenVersionKey(Long userId) {
+        return "lexiflow:auth:token:version:" + userId;
+    }
+
     public static String promptEvictPayload(AiPromptFeatureType featureType) {
         return PROMPT_EVICT_PREFIX + featureType.name();
     }

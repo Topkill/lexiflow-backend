@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS `users` (
   `avatar_url` VARCHAR(512) NULL COMMENT '头像地址',
   `role` VARCHAR(32) NOT NULL DEFAULT 'USER' COMMENT '角色：USER、ADMIN',
   `status` VARCHAR(32) NOT NULL DEFAULT 'ACTIVE' COMMENT '状态：ACTIVE、DISABLED、LOCKED',
+  `token_version` INT NOT NULL DEFAULT 1 COMMENT '用户级 Token 版本，递增后旧 token 失效',
   `last_login_at` DATETIME(3) NULL COMMENT '最近登录时间',
   `last_login_ip` VARCHAR(64) NULL COMMENT '最近登录 IP',
   `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',

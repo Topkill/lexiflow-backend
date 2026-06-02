@@ -41,6 +41,8 @@ class AuthServiceTest {
     private JwtRevocationService jwtRevocationService;
     @Mock
     private RefreshTokenSessionService refreshTokenSessionService;
+    @Mock
+    private TokenVersionService tokenVersionService;
 
     @Test
     void loginFailureShouldRecordFailure() {
@@ -65,9 +67,10 @@ class AuthServiceTest {
         LoginRequest request = new LoginRequest("student@example.com", "Password123!");
         when(userService.findByEmail("student@example.com")).thenReturn(user);
         when(passwordEncoder.matches("Password123!", "hash")).thenReturn(true);
-        when(jwtTokenService.createAccessToken(user)).thenReturn("access-token");
-        when(jwtTokenService.createRefreshToken(user)).thenReturn("refresh-token");
-        TokenClaims refreshClaims = new TokenClaims(7L, "refresh-jti", Instant.now().plusSeconds(604800));
+        when(tokenVersionService.currentVersion(7L)).thenReturn(3L);
+        when(jwtTokenService.createAccessToken(user, 3L)).thenReturn("access-token");
+        when(jwtTokenService.createRefreshToken(user, 3L)).thenReturn("refresh-token");
+        TokenClaims refreshClaims = new TokenClaims(7L, "refresh-jti", Instant.now().plusSeconds(604800), 3L);
         when(jwtTokenService.parseRefreshToken("refresh-token")).thenReturn(refreshClaims);
         when(jwtTokenService.accessTokenTtlSeconds()).thenReturn(900L);
         when(jwtTokenService.refreshTokenTtlSeconds()).thenReturn(604800L);
@@ -85,7 +88,7 @@ class AuthServiceTest {
     @Test
     void refreshShouldRejectRevokedRefreshToken() {
         AuthService service = authService();
-        TokenClaims claims = new TokenClaims(7L, "refresh-jti", Instant.now().plusSeconds(60));
+        TokenClaims claims = new TokenClaims(7L, "refresh-jti", Instant.now().plusSeconds(60), 1L);
         when(jwtTokenService.parseRefreshToken("refresh-token")).thenReturn(claims);
         when(jwtRevocationService.isRefreshTokenRevoked("refresh-jti")).thenReturn(true);
 
@@ -100,7 +103,7 @@ class AuthServiceTest {
     @Test
     void refreshShouldRejectMissingRefreshSession() {
         AuthService service = authService();
-        TokenClaims claims = new TokenClaims(7L, "refresh-jti", Instant.now().plusSeconds(60));
+        TokenClaims claims = new TokenClaims(7L, "refresh-jti", Instant.now().plusSeconds(60), 1L);
         when(jwtTokenService.parseRefreshToken("refresh-token")).thenReturn(claims);
         when(jwtRevocationService.isRefreshTokenRevoked("refresh-jti")).thenReturn(false);
         when(refreshTokenSessionService.getStatus(claims)).thenReturn(RefreshTokenSessionStatus.MISSING);
@@ -127,19 +130,38 @@ class AuthServiceTest {
         verifyNoInteractions(jwtRevocationService);
         verifyNoInteractions(refreshTokenSessionService);
         verify(userService, never()).getActiveUserById(anyLong());
-        verify(jwtTokenService, never()).createAccessToken(any(User.class));
+        verify(jwtTokenService, never()).createAccessToken(any(User.class), anyLong());
+    }
+
+    @Test
+    void refreshShouldRejectStaleTokenVersion() {
+        AuthService service = authService();
+        TokenClaims claims = new TokenClaims(7L, "refresh-jti", Instant.now().plusSeconds(60), 1L);
+        when(jwtTokenService.parseRefreshToken("refresh-token")).thenReturn(claims);
+        when(jwtRevocationService.isRefreshTokenRevoked("refresh-jti")).thenReturn(false);
+        when(refreshTokenSessionService.getStatus(claims)).thenReturn(RefreshTokenSessionStatus.ACTIVE);
+        when(tokenVersionService.isCurrent(claims)).thenReturn(false);
+
+        assertThatThrownBy(() -> service.refresh("refresh-token"))
+                .isInstanceOf(BizException.class)
+                .extracting(ex -> ((BizException) ex).getErrorCode())
+                .isEqualTo(ErrorCode.UNAUTHORIZED);
+
+        verify(userService, never()).getActiveUserById(anyLong());
+        verify(jwtTokenService, never()).createAccessToken(any(User.class), anyLong());
     }
 
     @Test
     void refreshShouldFallbackWhenRefreshSessionStoreUnavailable() {
         AuthService service = authService();
         User user = activeUser();
-        TokenClaims claims = new TokenClaims(7L, "refresh-jti", Instant.now().plusSeconds(60));
+        TokenClaims claims = new TokenClaims(7L, "refresh-jti", Instant.now().plusSeconds(60), 3L);
         when(jwtTokenService.parseRefreshToken("refresh-token")).thenReturn(claims);
         when(jwtRevocationService.isRefreshTokenRevoked("refresh-jti")).thenReturn(false);
         when(refreshTokenSessionService.getStatus(claims)).thenReturn(RefreshTokenSessionStatus.UNAVAILABLE);
+        when(tokenVersionService.isCurrent(claims)).thenReturn(true);
         when(userService.getActiveUserById(7L)).thenReturn(user);
-        when(jwtTokenService.createAccessToken(user)).thenReturn("new-access-token");
+        when(jwtTokenService.createAccessToken(user, 3L)).thenReturn("new-access-token");
         when(jwtTokenService.accessTokenTtlSeconds()).thenReturn(900L);
 
         assertThat(service.refresh("refresh-token").accessToken()).isEqualTo("new-access-token");
@@ -151,9 +173,9 @@ class AuthServiceTest {
         Instant refreshExpiresAt = Instant.now().plusSeconds(3600);
         Instant accessExpiresAt = Instant.now().plusSeconds(900);
         when(jwtTokenService.parseRefreshToken("refresh-token"))
-                .thenReturn(new TokenClaims(7L, "refresh-jti", refreshExpiresAt));
+                .thenReturn(new TokenClaims(7L, "refresh-jti", refreshExpiresAt, 1L));
         when(jwtTokenService.parseAccessToken("access-token"))
-                .thenReturn(new TokenClaims(7L, "access-jti", accessExpiresAt));
+                .thenReturn(new TokenClaims(7L, "access-jti", accessExpiresAt, 1L));
 
         service.logout("refresh-token", "access-token");
 
@@ -183,7 +205,8 @@ class AuthServiceTest {
                 jwtTokenService,
                 authRateLimitService,
                 jwtRevocationService,
-                refreshTokenSessionService
+                refreshTokenSessionService,
+                tokenVersionService
         );
     }
 

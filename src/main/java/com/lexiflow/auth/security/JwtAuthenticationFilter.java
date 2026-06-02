@@ -3,6 +3,7 @@ package com.lexiflow.auth.security;
 import com.lexiflow.auth.security.JwtTokenService.TokenClaims;
 import com.lexiflow.auth.service.AuthUserCacheService;
 import com.lexiflow.auth.service.JwtRevocationService;
+import com.lexiflow.auth.service.TokenVersionService;
 import com.lexiflow.user.domain.User;
 import com.lexiflow.user.service.UserService;
 import jakarta.servlet.DispatcherType;
@@ -28,6 +29,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private final JwtTokenService jwtTokenService;
     private final JwtRevocationService jwtRevocationService;
     private final AuthUserCacheService authUserCacheService;
+    private final TokenVersionService tokenVersionService;
     private final UserService userService;
 
     @Override
@@ -44,6 +46,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             try {
                 TokenClaims claims = jwtTokenService.parseAccessToken(token);
                 if (jwtRevocationService.isAccessTokenRevoked(claims.tokenId())) {
+                    filterChain.doFilter(request, response);
+                    return;
+                }
+                if (!tokenVersionService.isCurrent(claims)) {
                     filterChain.doFilter(request, response);
                     return;
                 }

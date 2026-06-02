@@ -2,6 +2,7 @@ package com.lexiflow.user.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.lexiflow.auth.service.AuthUserCacheService;
+import com.lexiflow.auth.service.TokenVersionService;
 import com.lexiflow.common.error.ErrorCode;
 import com.lexiflow.common.exception.BizException;
 import com.lexiflow.user.domain.AiKeyMode;
@@ -30,6 +31,7 @@ public class UserService {
     private final UserSettingsMapper userSettingsMapper;
     private final PasswordEncoder passwordEncoder;
     private final AuthUserCacheService authUserCacheService;
+    private final TokenVersionService tokenVersionService;
 
     @Transactional
     public User createUser(String email, String rawPassword, String nickname) {
@@ -90,6 +92,7 @@ public class UserService {
         return getActiveUserById(userId);
     }
 
+    @Transactional
     public void changePassword(Long userId, ChangePasswordRequest request) {
         User user = getActiveUserById(userId);
         if (!passwordEncoder.matches(request.oldPassword(), user.getPasswordHash())) {
@@ -97,6 +100,7 @@ public class UserService {
         }
         user.setPasswordHash(passwordEncoder.encode(request.newPassword()));
         userMapper.updateById(user);
+        tokenVersionService.bumpVersion(userId);
     }
 
     public UserSettings getOrCreateSettings(Long userId) {

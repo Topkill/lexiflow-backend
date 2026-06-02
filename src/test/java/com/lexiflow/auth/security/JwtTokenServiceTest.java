@@ -25,11 +25,12 @@ class JwtTokenServiceTest {
     void accessTokenShouldIncludeJtiAndParseClaims() {
         JwtTokenService service = jwtTokenService();
 
-        TokenClaims claims = service.parseAccessToken(service.createAccessToken(activeUser()));
+        TokenClaims claims = service.parseAccessToken(service.createAccessToken(activeUser(), 1L));
 
         assertThat(claims.userId()).isEqualTo(7L);
         assertThat(claims.tokenId()).isNotBlank();
         assertThat(claims.expiresAt()).isAfter(Instant.now());
+        assertThat(claims.tokenVersion()).isEqualTo(1L);
     }
 
     @Test
@@ -39,11 +40,12 @@ class JwtTokenServiceTest {
         var claims = Jwts.parser()
                 .verifyWith(Keys.hmacShaKeyFor(JWT_SECRET.getBytes(StandardCharsets.UTF_8)))
                 .build()
-                .parseSignedClaims(service.createAccessToken(activeUser()))
+                .parseSignedClaims(service.createAccessToken(activeUser(), 1L))
                 .getPayload();
 
         assertThat(claims.getSubject()).isEqualTo("7");
         assertThat(claims.getId()).isNotBlank();
+        assertThat(((Number) claims.get("ver")).longValue()).isEqualTo(1L);
         assertThat(claims.get("email")).isNull();
         assertThat(claims.get("role")).isNull();
         assertThat(claims.get("type")).isNull();
@@ -52,7 +54,7 @@ class JwtTokenServiceTest {
     @Test
     void parseAccessTokenShouldRejectRefreshToken() {
         JwtTokenService service = jwtTokenService();
-        String refreshToken = service.createRefreshToken(activeUser());
+        String refreshToken = service.createRefreshToken(activeUser(), 1L);
 
         assertThatThrownBy(() -> service.parseAccessToken(refreshToken))
                 .isInstanceOf(BizException.class)
@@ -71,14 +73,25 @@ class JwtTokenServiceTest {
     }
 
     @Test
+    void parseAccessTokenShouldRejectTokenWithoutVersion() {
+        JwtTokenService service = jwtTokenService();
+
+        assertThatThrownBy(() -> service.parseAccessToken(accessTokenWithoutVersion()))
+                .isInstanceOf(BizException.class)
+                .extracting(ex -> ((BizException) ex).getErrorCode())
+                .isEqualTo(ErrorCode.UNAUTHORIZED);
+    }
+
+    @Test
     void refreshTokenShouldIncludeJtiAndParseClaims() {
         JwtTokenService service = jwtTokenService();
 
-        TokenClaims claims = service.parseRefreshToken(service.createRefreshToken(activeUser()));
+        TokenClaims claims = service.parseRefreshToken(service.createRefreshToken(activeUser(), 1L));
 
         assertThat(claims.userId()).isEqualTo(7L);
         assertThat(claims.tokenId()).isNotBlank();
         assertThat(claims.expiresAt()).isAfter(Instant.now());
+        assertThat(claims.tokenVersion()).isEqualTo(1L);
     }
 
     @Test
@@ -86,6 +99,16 @@ class JwtTokenServiceTest {
         JwtTokenService service = jwtTokenService();
 
         assertThatThrownBy(() -> service.parseRefreshToken(legacyRefreshTokenWithoutJti()))
+                .isInstanceOf(BizException.class)
+                .extracting(ex -> ((BizException) ex).getErrorCode())
+                .isEqualTo(ErrorCode.UNAUTHORIZED);
+    }
+
+    @Test
+    void parseRefreshTokenShouldRejectTokenWithoutVersion() {
+        JwtTokenService service = jwtTokenService();
+
+        assertThatThrownBy(() -> service.parseRefreshToken(refreshTokenWithoutVersion()))
                 .isInstanceOf(BizException.class)
                 .extracting(ex -> ((BizException) ex).getErrorCode())
                 .isEqualTo(ErrorCode.UNAUTHORIZED);
@@ -111,9 +134,32 @@ class JwtTokenServiceTest {
                 .compact();
     }
 
+    private String accessTokenWithoutVersion() {
+        Instant now = Instant.now();
+        return Jwts.builder()
+                .id("access-jti")
+                .subject("7")
+                .issuedAt(Date.from(now))
+                .expiration(Date.from(now.plusSeconds(60)))
+                .signWith(Keys.hmacShaKeyFor(JWT_SECRET.getBytes(StandardCharsets.UTF_8)))
+                .compact();
+    }
+
     private String legacyRefreshTokenWithoutJti() {
         Instant now = Instant.now();
         return Jwts.builder()
+                .subject("7")
+                .claim("type", "refresh")
+                .issuedAt(Date.from(now))
+                .expiration(Date.from(now.plusSeconds(60)))
+                .signWith(Keys.hmacShaKeyFor(JWT_SECRET.getBytes(StandardCharsets.UTF_8)))
+                .compact();
+    }
+
+    private String refreshTokenWithoutVersion() {
+        Instant now = Instant.now();
+        return Jwts.builder()
+                .id("refresh-jti")
                 .subject("7")
                 .claim("type", "refresh")
                 .issuedAt(Date.from(now))

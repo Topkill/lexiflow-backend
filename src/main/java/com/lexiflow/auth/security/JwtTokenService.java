@@ -19,6 +19,8 @@ import org.springframework.util.StringUtils;
 @Service
 public class JwtTokenService {
 
+    private static final String TOKEN_VERSION_CLAIM = "ver";
+
     private final JwtProperties jwtProperties;
     private final SecretKey signingKey;
 
@@ -27,24 +29,26 @@ public class JwtTokenService {
         this.signingKey = Keys.hmacShaKeyFor(jwtProperties.jwtSecret().getBytes(StandardCharsets.UTF_8));
     }
 
-    public String createAccessToken(User user) {
+    public String createAccessToken(User user, long tokenVersion) {
         Instant now = Instant.now();
         Instant expiresAt = now.plusSeconds(accessTokenTtlSeconds());
         return Jwts.builder()
                 .id(UUID.randomUUID().toString())
                 .subject(String.valueOf(user.getId()))
+                .claim(TOKEN_VERSION_CLAIM, tokenVersion)
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(expiresAt))
                 .signWith(signingKey)
                 .compact();
     }
 
-    public String createRefreshToken(User user) {
+    public String createRefreshToken(User user, long tokenVersion) {
         Instant now = Instant.now();
         Instant expiresAt = now.plusSeconds(refreshTokenTtlSeconds());
         return Jwts.builder()
                 .id(UUID.randomUUID().toString())
                 .subject(String.valueOf(user.getId()))
+                .claim(TOKEN_VERSION_CLAIM, tokenVersion)
                 .claim("type", "refresh")
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(expiresAt))
@@ -101,14 +105,24 @@ public class JwtTokenService {
         if (!StringUtils.hasText(tokenId)) {
             throw new BizException(ErrorCode.UNAUTHORIZED);
         }
+        long tokenVersion = tokenVersion(claims);
         Date expiration = claims.getExpiration();
         return new TokenClaims(
                 Long.valueOf(claims.getSubject()),
                 tokenId,
-                expiration == null ? null : expiration.toInstant()
+                expiration == null ? null : expiration.toInstant(),
+                tokenVersion
         );
     }
 
-    public record TokenClaims(Long userId, String tokenId, Instant expiresAt) {
+    private long tokenVersion(Claims claims) {
+        Object version = claims.get(TOKEN_VERSION_CLAIM);
+        if (!(version instanceof Number number) || number.longValue() <= 0) {
+            throw new BizException(ErrorCode.UNAUTHORIZED);
+        }
+        return number.longValue();
+    }
+
+    public record TokenClaims(Long userId, String tokenId, Instant expiresAt, Long tokenVersion) {
     }
 }

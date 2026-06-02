@@ -6,6 +6,7 @@ import static org.mockito.Mockito.when;
 
 import com.lexiflow.ai.content.mapper.AiCallLogMapper;
 import com.lexiflow.auth.service.AuthUserCacheService;
+import com.lexiflow.auth.service.TokenVersionService;
 import com.lexiflow.study.progress.mapper.StudyEventMapper;
 import com.lexiflow.user.domain.User;
 import com.lexiflow.user.domain.UserRole;
@@ -27,6 +28,8 @@ class AdminUserServiceTest {
     private AiCallLogMapper aiCallLogMapper;
     @Mock
     private AuthUserCacheService authUserCacheService;
+    @Mock
+    private TokenVersionService tokenVersionService;
 
     @Test
     void disableUserShouldEvictAuthUserCache() {
@@ -38,6 +41,7 @@ class AdminUserServiceTest {
 
         assertThat(user.getStatus()).isEqualTo(UserStatus.DISABLED);
         verify(userMapper).updateById(user);
+        verify(tokenVersionService).bumpVersion(7L);
         verify(authUserCacheService).evict(7L);
     }
 
@@ -51,11 +55,12 @@ class AdminUserServiceTest {
 
         assertThat(user.getStatus()).isEqualTo(UserStatus.ACTIVE);
         verify(userMapper).updateById(user);
+        verify(tokenVersionService).bumpVersion(7L);
         verify(authUserCacheService).evict(7L);
     }
 
     private AdminUserService adminUserService() {
-        return new AdminUserService(userMapper, studyEventMapper, aiCallLogMapper, authUserCacheService);
+        return new AdminUserService(userMapper, studyEventMapper, aiCallLogMapper, authUserCacheService, tokenVersionService);
     }
 
     private User user(UserStatus status) {

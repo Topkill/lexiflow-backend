@@ -8,6 +8,7 @@ import com.lexiflow.admin.dto.AdminUserResponse;
 import com.lexiflow.ai.content.domain.AiCallLog;
 import com.lexiflow.ai.content.mapper.AiCallLogMapper;
 import com.lexiflow.auth.service.AuthUserCacheService;
+import com.lexiflow.auth.service.TokenVersionService;
 import com.lexiflow.common.api.PageResponse;
 import com.lexiflow.common.error.ErrorCode;
 import com.lexiflow.common.exception.BizException;
@@ -30,6 +31,7 @@ public class AdminUserService {
     private final StudyEventMapper studyEventMapper;
     private final AiCallLogMapper aiCallLogMapper;
     private final AuthUserCacheService authUserCacheService;
+    private final TokenVersionService tokenVersionService;
 
     public PageResponse<AdminUserResponse> pageUsers(AdminUserQueryRequest request) {
         AdminUserQueryRequest safeRequest = request == null ? new AdminUserQueryRequest(null, null, null, null) : request;
@@ -69,6 +71,7 @@ public class AdminUserService {
         }
         user.setStatus(UserStatus.DISABLED);
         userMapper.updateById(user);
+        tokenVersionService.bumpVersion(userId);
         authUserCacheService.evict(userId);
     }
 
@@ -77,6 +80,7 @@ public class AdminUserService {
         User user = getUserEntity(userId);
         user.setStatus(UserStatus.ACTIVE);
         userMapper.updateById(user);
+        tokenVersionService.bumpVersion(userId);
         authUserCacheService.evict(userId);
     }
 

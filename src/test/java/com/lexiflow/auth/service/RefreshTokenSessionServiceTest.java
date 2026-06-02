@@ -34,7 +34,7 @@ class RefreshTokenSessionServiceTest {
         Instant expiresAt = Instant.now().plusSeconds(60);
         ArgumentCaptor<Duration> ttlCaptor = ArgumentCaptor.forClass(Duration.class);
 
-        service.store(new TokenClaims(7L, "refresh-jti", expiresAt));
+        service.store(new TokenClaims(7L, "refresh-jti", expiresAt, 1L));
 
         verify(valueOperations).set(
                 eq(RedisKeys.authRefreshSessionKey("refresh-jti")),
@@ -48,7 +48,7 @@ class RefreshTokenSessionServiceTest {
     @Test
     void getStatusShouldReturnActiveWhenStoredUserMatches() {
         RefreshTokenSessionService service = new RefreshTokenSessionService(stringRedisTemplate);
-        TokenClaims claims = new TokenClaims(7L, "refresh-jti", Instant.now().plusSeconds(60));
+        TokenClaims claims = new TokenClaims(7L, "refresh-jti", Instant.now().plusSeconds(60), 1L);
         when(stringRedisTemplate.opsForValue()).thenReturn(valueOperations);
         when(valueOperations.get(RedisKeys.authRefreshSessionKey("refresh-jti"))).thenReturn("7");
 
@@ -58,7 +58,7 @@ class RefreshTokenSessionServiceTest {
     @Test
     void getStatusShouldReturnMissingWhenSessionAbsentOrUserMismatch() {
         RefreshTokenSessionService service = new RefreshTokenSessionService(stringRedisTemplate);
-        TokenClaims claims = new TokenClaims(7L, "refresh-jti", Instant.now().plusSeconds(60));
+        TokenClaims claims = new TokenClaims(7L, "refresh-jti", Instant.now().plusSeconds(60), 1L);
         when(stringRedisTemplate.opsForValue()).thenReturn(valueOperations);
         when(valueOperations.get(RedisKeys.authRefreshSessionKey("refresh-jti"))).thenReturn(null, "8");
 
@@ -71,7 +71,7 @@ class RefreshTokenSessionServiceTest {
         RefreshTokenSessionService service = new RefreshTokenSessionService(stringRedisTemplate);
         when(stringRedisTemplate.opsForValue()).thenThrow(new RuntimeException("redis down"));
 
-        assertThat(service.getStatus(new TokenClaims(7L, "refresh-jti", Instant.now().plusSeconds(60))))
+        assertThat(service.getStatus(new TokenClaims(7L, "refresh-jti", Instant.now().plusSeconds(60), 1L)))
                 .isEqualTo(RefreshTokenSessionStatus.UNAVAILABLE);
     }
 
@@ -79,9 +79,9 @@ class RefreshTokenSessionServiceTest {
     void tokenWithoutJtiShouldBeMissingAndSkipRedis() {
         RefreshTokenSessionService service = new RefreshTokenSessionService(stringRedisTemplate);
 
-        assertThat(service.getStatus(new TokenClaims(7L, null, Instant.now().plusSeconds(60))))
+        assertThat(service.getStatus(new TokenClaims(7L, null, Instant.now().plusSeconds(60), 1L)))
                 .isEqualTo(RefreshTokenSessionStatus.MISSING);
-        service.store(new TokenClaims(7L, "", Instant.now().plusSeconds(60)));
+        service.store(new TokenClaims(7L, "", Instant.now().plusSeconds(60), 1L));
         service.delete(null);
 
         verifyNoInteractions(stringRedisTemplate);
@@ -110,7 +110,7 @@ class RefreshTokenSessionServiceTest {
         when(stringRedisTemplate.delete(RedisKeys.authRefreshSessionKey("refresh-jti")))
                 .thenThrow(new RuntimeException("redis down"));
 
-        assertThatCode(() -> service.store(new TokenClaims(7L, "refresh-jti", Instant.now().plusSeconds(60))))
+        assertThatCode(() -> service.store(new TokenClaims(7L, "refresh-jti", Instant.now().plusSeconds(60), 1L)))
                 .doesNotThrowAnyException();
         assertThatCode(() -> service.delete("refresh-jti"))
                 .doesNotThrowAnyException();

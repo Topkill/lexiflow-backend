@@ -27,6 +27,7 @@ public class AuthService {
     private final AuthRateLimitService authRateLimitService;
     private final JwtRevocationService jwtRevocationService;
     private final RefreshTokenSessionService refreshTokenSessionService;
+    private final TokenVersionService tokenVersionService;
 
     @Transactional
     public RegisterResponse register(RegisterRequest request) {
@@ -48,8 +49,9 @@ public class AuthService {
         authRateLimitService.clearLoginFailures(request.email());
         userService.updateLoginInfo(user.getId(), clientIp);
 
-        String accessToken = jwtTokenService.createAccessToken(user);
-        String refreshToken = jwtTokenService.createRefreshToken(user);
+        long tokenVersion = tokenVersionService.currentVersion(user.getId());
+        String accessToken = jwtTokenService.createAccessToken(user, tokenVersion);
+        String refreshToken = jwtTokenService.createRefreshToken(user, tokenVersion);
         refreshTokenSessionService.store(jwtTokenService.parseRefreshToken(refreshToken));
         LoginResponse response = new LoginResponse(
                 accessToken,
@@ -68,9 +70,12 @@ public class AuthService {
         if (refreshTokenSessionService.getStatus(claims) == RefreshTokenSessionStatus.MISSING) {
             throw new BizException(ErrorCode.UNAUTHORIZED);
         }
+        if (!tokenVersionService.isCurrent(claims)) {
+            throw new BizException(ErrorCode.UNAUTHORIZED);
+        }
         User user = userService.getActiveUserById(claims.userId());
         return new LoginResponse(
-                jwtTokenService.createAccessToken(user),
+                jwtTokenService.createAccessToken(user, claims.tokenVersion()),
                 jwtTokenService.accessTokenTtlSeconds(),
                 "csrf-token-placeholder",
                 UserBriefResponse.from(user)

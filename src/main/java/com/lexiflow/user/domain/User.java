@@ -1,6 +1,7 @@
 package com.lexiflow.user.domain;
 
 import com.baomidou.mybatisplus.annotation.FieldFill;
+import com.baomidou.mybatisplus.annotation.FieldStrategy;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
@@ -29,6 +30,9 @@ public class User {
     private UserRole role;
 
     private UserStatus status;
+
+    @TableField(updateStrategy = FieldStrategy.NEVER)
+    private Long tokenVersion;
 
     private LocalDateTime lastLoginAt;
 
