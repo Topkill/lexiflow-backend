@@ -26,6 +26,7 @@ public class AuthService {
     private final JwtTokenService jwtTokenService;
     private final AuthRateLimitService authRateLimitService;
     private final JwtRevocationService jwtRevocationService;
+    private final RefreshTokenSessionService refreshTokenSessionService;
 
     @Transactional
     public RegisterResponse register(RegisterRequest request) {
@@ -49,6 +50,7 @@ public class AuthService {
 
         String accessToken = jwtTokenService.createAccessToken(user);
         String refreshToken = jwtTokenService.createRefreshToken(user);
+        refreshTokenSessionService.store(jwtTokenService.parseRefreshToken(refreshToken));
         LoginResponse response = new LoginResponse(
                 accessToken,
                 jwtTokenService.accessTokenTtlSeconds(),
@@ -61,6 +63,9 @@ public class AuthService {
     public LoginResponse refresh(String refreshToken) {
         TokenClaims claims = jwtTokenService.parseRefreshToken(refreshToken);
         if (jwtRevocationService.isRefreshTokenRevoked(claims.tokenId())) {
+            throw new BizException(ErrorCode.UNAUTHORIZED);
+        }
+        if (refreshTokenSessionService.getStatus(claims) == RefreshTokenSessionStatus.MISSING) {
             throw new BizException(ErrorCode.UNAUTHORIZED);
         }
         User user = userService.getActiveUserById(claims.userId());
@@ -87,6 +92,7 @@ public class AuthService {
         }
         try {
             TokenClaims claims = jwtTokenService.parseRefreshToken(refreshToken);
+            refreshTokenSessionService.delete(claims.tokenId());
             jwtRevocationService.revokeRefreshToken(claims.tokenId(), claims.expiresAt());
         } catch (BizException ignored) {
             // 退出登录保持幂等，非法或过期 token 不影响清 Cookie。

@@ -50,6 +50,10 @@ public final class RedisKeys {
         return "lexiflow:auth:revoked:refresh:" + sha256(tokenId).substring(0, 32);
     }
 
+    public static String authRefreshSessionKey(String tokenId) {
+        return "lexiflow:auth:refresh:session:" + sha256(tokenId).substring(0, 32);
+    }
+
     public static String promptEvictPayload(AiPromptFeatureType featureType) {
         return PROMPT_EVICT_PREFIX + featureType.name();
     }
