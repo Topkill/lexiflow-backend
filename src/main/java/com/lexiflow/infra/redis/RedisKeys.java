@@ -26,6 +26,11 @@ public final class RedisKeys {
         return "lexiflow:ai:lock:" + contentType.name().toLowerCase() + ":" + sha256(cacheKey).substring(0, 32);
     }
 
+    public static String aiClozeTaskCreateLockKey(Long userId, Long dailyTaskId, String sourceType, int targetWordCount) {
+        String raw = userId + ":" + dailyTaskId + ":" + sourceType + ":" + targetWordCount;
+        return "lexiflow:ai:cloze-task:create:" + sha256(raw).substring(0, 32);
+    }
+
     public static String aiHitCountHashKey(AiContentType contentType) {
         return "lexiflow:ai:hit:" + contentType.name().toLowerCase();
     }

@@ -7,6 +7,7 @@ import com.lexiflow.quiz.cloze.domain.ClozeAttempt;
 import com.lexiflow.quiz.cloze.domain.ClozeQuiz;
 import com.lexiflow.quiz.cloze.mapper.ClozeAttemptMapper;
 import com.lexiflow.quiz.cloze.mapper.ClozeQuizMapper;
+import com.lexiflow.quiz.cloze.service.ClozeQuizService;
 import com.lexiflow.study.domain.StudyPlan;
 import com.lexiflow.study.mapper.StudyPlanMapper;
 import com.lexiflow.study.progress.domain.FavoriteWord;
@@ -78,6 +79,7 @@ public class DailyTaskService {
     private final FavoriteWordMapper favoriteWordMapper;
     private final ClozeQuizMapper clozeQuizMapper;
     private final ClozeAttemptMapper clozeAttemptMapper;
+    private final ClozeQuizService clozeQuizService;
     private final SpacedRepetitionService spacedRepetitionService;
     private final WordChoiceQuestionService wordChoiceQuestionService;
 
@@ -639,6 +641,7 @@ public class DailyTaskService {
         if (task == null) {
             throw new BizException(ErrorCode.TODAY_TASK_NOT_FOUND);
         }
+        DailyTaskStatus previousStatus = task.getStatus();
         task.setNewCount(countTaskItems(dailyTaskId, DailyTaskItemType.NEW));
         task.setReviewCount(countTaskItems(dailyTaskId, DailyTaskItemType.REVIEW));
         task.setExtraCount(countTaskItems(dailyTaskId, DailyTaskItemType.EXTRA));
@@ -651,6 +654,11 @@ public class DailyTaskService {
             task.setCompletedAt(null);
         }
         dailyTaskMapper.updateById(task);
+        if (previousStatus != DailyTaskStatus.DONE
+                && task.getStatus() == DailyTaskStatus.DONE
+                && task.getTaskType() == DailyTaskType.DAILY) {
+            clozeQuizService.prefetchCompletedGroupCloze(task.getUserId(), task.getId());
+        }
         return task;
     }
 

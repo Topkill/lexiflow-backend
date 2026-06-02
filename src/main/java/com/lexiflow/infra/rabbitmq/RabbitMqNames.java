@@ -9,6 +9,13 @@ public final class RabbitMqNames {
     public static final String WORD_IMPORT_DEAD_LETTER_QUEUE = "lexiflow.word-import.dlq";
     public static final String WORD_IMPORT_DEAD_LETTER_ROUTING_KEY = "lexiflow.word-import.dead";
 
+    public static final String CLOZE_GENERATION_EXCHANGE = "lexiflow.cloze-generation.exchange";
+    public static final String CLOZE_GENERATION_QUEUE = "lexiflow.cloze-generation.queue";
+    public static final String CLOZE_GENERATION_ROUTING_KEY = "lexiflow.cloze-generation.task";
+    public static final String CLOZE_GENERATION_DEAD_LETTER_EXCHANGE = "lexiflow.cloze-generation.dlx";
+    public static final String CLOZE_GENERATION_DEAD_LETTER_QUEUE = "lexiflow.cloze-generation.dlq";
+    public static final String CLOZE_GENERATION_DEAD_LETTER_ROUTING_KEY = "lexiflow.cloze-generation.dead";
+
     private RabbitMqNames() {
     }
 }

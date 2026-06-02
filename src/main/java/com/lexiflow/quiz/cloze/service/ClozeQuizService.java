@@ -14,6 +14,7 @@ import com.lexiflow.ai.prompt.service.AiPromptOutputSchemaService;
 import com.lexiflow.ai.prompt.service.AiPromptTemplateService;
 import com.lexiflow.ai.prompt.service.ResolvedAiPromptTemplate;
 import com.lexiflow.async.domain.AsyncTask;
+import com.lexiflow.async.domain.AsyncTaskStatus;
 import com.lexiflow.async.domain.AsyncTaskType;
 import com.lexiflow.async.service.AsyncTaskService;
 import com.lexiflow.common.error.ErrorCode;
@@ -39,6 +40,7 @@ import com.lexiflow.quiz.cloze.mapper.ClozeAttemptAnswerMapper;
 import com.lexiflow.quiz.cloze.mapper.ClozeAttemptMapper;
 import com.lexiflow.quiz.cloze.mapper.ClozeQuizBlankMapper;
 import com.lexiflow.quiz.cloze.mapper.ClozeQuizMapper;
+import com.lexiflow.quiz.cloze.mq.ClozeGenerationTaskPublisher;
 import com.lexiflow.study.progress.domain.StudyEvent;
 import com.lexiflow.study.progress.domain.StudyFeedback;
 import com.lexiflow.study.progress.domain.StudyScene;
@@ -76,17 +78,23 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.amqp.AmqpException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StringUtils;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class ClozeQuizService {
 
     private static final int COMPLETED_GROUP_MAX_BLANK_COUNT = 10;
+    private static final int RECENT_REUSABLE_TASK_LIMIT = 50;
     private static final int MIN_BACKGROUND_WORD_COUNT = 5;
     private static final int MAX_BACKGROUND_WORD_COUNT = 10;
     private static final List<String> DEFINITION_TEXT_FIELDS = List.of("cn", "definition", "definitionZh", "zh", "chinese", "meaning");
@@ -94,6 +102,9 @@ public class ClozeQuizService {
     private static final Duration AI_CACHE_LOCK_TTL = Duration.ofSeconds(130);
     private static final Duration AI_CACHE_LOCK_WAIT_TIMEOUT = Duration.ofSeconds(115);
     private static final Duration AI_CACHE_LOCK_POLL_INTERVAL = Duration.ofMillis(500);
+    private static final Duration CLOZE_TASK_CREATE_LOCK_TTL = Duration.ofSeconds(10);
+    private static final Duration CLOZE_TASK_CREATE_LOCK_WAIT_TIMEOUT = Duration.ofSeconds(3);
+    private static final Duration CLOZE_TASK_CREATE_LOCK_POLL_INTERVAL = Duration.ofMillis(50);
 
     private final AsyncTaskService asyncTaskService;
     private final AiGatewayService aiGatewayService;
@@ -114,29 +125,274 @@ public class ClozeQuizService {
     private final TransactionTemplate transactionTemplate;
     private final RedisAiHitCountBuffer redisAiHitCountBuffer;
     private final RedisDistributedLockService redisDistributedLockService;
+    private final ClozeGenerationTaskPublisher clozeGenerationTaskPublisher;
 
     public CreateClozeTaskResponse createClozeTask(Long userId, CreateClozeTaskRequest request) {
         DailyTask dailyTask = getOwnedDailyTask(userId, request.dailyTaskId());
         Long wordbookId = dailyTaskWordbookId(dailyTask);
         ClozeSourceType sourceType = request.safeSourceType();
-        String requestJson = toJson(Map.of(
-                "dailyTaskId", String.valueOf(request.dailyTaskId()),
-                "sourceType", sourceType.name(),
-                "targetWordCount", request.safeTargetWordCount(),
-                "regenerate", request.safeRegenerate()
-        ));
-        AsyncTask task = asyncTaskService.createTask(userId, AsyncTaskType.AI_CLOZE, requestJson);
+        int targetWordCount = request.safeTargetWordCount();
+        boolean regenerate = request.safeRegenerate();
+        if (sourceType == ClozeSourceType.COMPLETED_GROUP && dailyTask.getStatus() != DailyTaskStatus.DONE) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "完成本组单词后才能生成本组完形填空");
+        }
+        String requestJson = buildClozeTaskRequestJson(dailyTask.getId(), wordbookId, sourceType, targetWordCount, regenerate, ClozeTaskTrigger.USER);
+        ClozeTaskCreation creation = createOrReuseClozeTask(userId, dailyTask.getId(), sourceType, targetWordCount, regenerate, requestJson);
+        AsyncTask task = creation.task();
         try {
-            asyncTaskService.markRunning(task.getId(), "正在生成完形填空", 20);
-            ClozeQuiz quiz = generateQuiz(userId, dailyTask, wordbookId, task.getId(), sourceType, request.safeTargetWordCount(), request.safeRegenerate());
+            if (creation.created()) {
+                publishClozeTask(task.getId(), true);
+            }
+            return CreateClozeTaskResponse.from(task);
+        } catch (AmqpException ex) {
+            throw new BizException(ErrorCode.ASYNC_TASK_FAILED, "完形填空生成任务入队失败，请稍后重试");
+        }
+    }
+
+    public void prefetchCompletedGroupCloze(Long userId, Long dailyTaskId) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    doPrefetchCompletedGroupCloze(userId, dailyTaskId);
+                }
+            });
+            return;
+        }
+        doPrefetchCompletedGroupCloze(userId, dailyTaskId);
+    }
+
+    private void doPrefetchCompletedGroupCloze(Long userId, Long dailyTaskId) {
+        try {
+            DailyTask dailyTask = getOwnedDailyTask(userId, dailyTaskId);
+            if (dailyTask.getTaskType() != DailyTaskType.DAILY || dailyTask.getStatus() != DailyTaskStatus.DONE) {
+                return;
+            }
+            int targetWordCount = COMPLETED_GROUP_MAX_BLANK_COUNT;
+            Long wordbookId = dailyTaskWordbookId(dailyTask);
+            String requestJson = buildClozeTaskRequestJson(
+                    dailyTask.getId(),
+                    wordbookId,
+                    ClozeSourceType.COMPLETED_GROUP,
+                    targetWordCount,
+                    false,
+                    ClozeTaskTrigger.PREFETCH
+            );
+            ClozeTaskCreation creation = createOrReuseClozeTask(userId, dailyTask.getId(), ClozeSourceType.COMPLETED_GROUP, targetWordCount, false, requestJson);
+            if (creation.created()) {
+                publishClozeTask(creation.task().getId(), false);
+            }
+        } catch (RuntimeException ex) {
+            log.warn("完形填空预热任务创建失败，userId={}, dailyTaskId={}", userId, dailyTaskId, ex);
+        }
+    }
+
+    public void processClozeTask(Long taskId, boolean redelivered) {
+        if (taskId == null) {
+            return;
+        }
+        AsyncTask task = asyncTaskService.getTaskEntity(taskId);
+        if (task == null) {
+            log.warn("完形填空生成任务不存在，taskId={}", taskId);
+            return;
+        }
+        if (task.getTaskType() != AsyncTaskType.AI_CLOZE || isTerminalStatus(task.getStatus())) {
+            return;
+        }
+        if (!prepareClozeTaskForProcessing(task, redelivered)) {
+            return;
+        }
+        try {
+            ClozeTaskPayload payload = parseClozeTaskPayload(task.getRequestJson());
+            DailyTask dailyTask = getOwnedDailyTask(task.getUserId(), payload.dailyTaskId());
+            Long wordbookId = payload.wordbookId() == null ? dailyTaskWordbookId(dailyTask) : payload.wordbookId();
+            ClozeQuiz quiz = generateQuiz(
+                    task.getUserId(),
+                    dailyTask,
+                    wordbookId,
+                    task.getId(),
+                    payload.sourceType(),
+                    payload.targetWordCount(),
+                    payload.regenerate()
+            );
             asyncTaskService.markSuccess(task.getId(), quiz.getId(), "完形填空生成完成");
-            return CreateClozeTaskResponse.from(asyncTaskService.getOwnedTaskEntity(userId, task.getId()));
         } catch (BizException ex) {
             asyncTaskService.markFailed(task.getId(), String.valueOf(ex.getErrorCode().getCode()), ex.getCustomMessage());
-            throw ex;
-        } catch (Exception ex) {
+        } catch (RuntimeException ex) {
             asyncTaskService.markFailed(task.getId(), String.valueOf(ErrorCode.ASYNC_TASK_FAILED.getCode()), ex.getMessage());
-            throw new BizException(ErrorCode.ASYNC_TASK_FAILED, "完形填空生成失败，请稍后重试");
+            log.warn("完形填空生成任务执行失败，taskId={}", taskId, ex);
+        }
+    }
+
+    private AsyncTask findReusableClozeTask(Long userId, Long dailyTaskId, ClozeSourceType sourceType, int targetWordCount, boolean requestedRegenerate) {
+        return asyncTaskService.listRecentTasks(userId, AsyncTaskType.AI_CLOZE, RECENT_REUSABLE_TASK_LIMIT).stream()
+                .filter(task -> isReusableClozeTask(task, dailyTaskId, sourceType, targetWordCount, requestedRegenerate))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private ClozeTaskCreation createOrReuseClozeTask(Long userId, Long dailyTaskId, ClozeSourceType sourceType, int targetWordCount, boolean requestedRegenerate, String requestJson) {
+        String lockKey = RedisKeys.aiClozeTaskCreateLockKey(userId, dailyTaskId, sourceType.name(), targetWordCount);
+        RedisLockAttempt lockAttempt = redisDistributedLockService.tryLock(lockKey, CLOZE_TASK_CREATE_LOCK_TTL);
+        if (isLockHeld(lockAttempt)) {
+            AsyncTask reusableTask = waitForReusableClozeTask(userId, dailyTaskId, sourceType, targetWordCount, requestedRegenerate, lockKey);
+            if (reusableTask != null) {
+                return new ClozeTaskCreation(reusableTask, false);
+            }
+            lockAttempt = redisDistributedLockService.tryLock(lockKey, CLOZE_TASK_CREATE_LOCK_TTL);
+            if (isLockHeld(lockAttempt)) {
+                throw new BizException(ErrorCode.ASYNC_TASK_FAILED, "完形填空生成任务正在创建，请稍后重试");
+            }
+        }
+
+        try {
+            AsyncTask reusableTask = findReusableClozeTask(userId, dailyTaskId, sourceType, targetWordCount, requestedRegenerate);
+            if (reusableTask != null) {
+                return new ClozeTaskCreation(reusableTask, false);
+            }
+            return new ClozeTaskCreation(asyncTaskService.createTask(userId, AsyncTaskType.AI_CLOZE, requestJson), true);
+        } finally {
+            releaseClozeLock(lockAttempt);
+        }
+    }
+
+    private AsyncTask waitForReusableClozeTask(Long userId, Long dailyTaskId, ClozeSourceType sourceType, int targetWordCount, boolean requestedRegenerate, String lockKey) {
+        long deadline = System.nanoTime() + CLOZE_TASK_CREATE_LOCK_WAIT_TIMEOUT.toNanos();
+        while (System.nanoTime() < deadline) {
+            AsyncTask reusableTask = findReusableClozeTask(userId, dailyTaskId, sourceType, targetWordCount, requestedRegenerate);
+            if (reusableTask != null) {
+                return reusableTask;
+            }
+            if (!redisDistributedLockService.isLocked(lockKey)) {
+                return null;
+            }
+            try {
+                Thread.sleep(CLOZE_TASK_CREATE_LOCK_POLL_INTERVAL.toMillis());
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+                return null;
+            }
+        }
+        return findReusableClozeTask(userId, dailyTaskId, sourceType, targetWordCount, requestedRegenerate);
+    }
+
+    private boolean isReusableClozeTask(AsyncTask task, Long dailyTaskId, ClozeSourceType sourceType, int targetWordCount, boolean requestedRegenerate) {
+        if (task == null || task.getStatus() == AsyncTaskStatus.FAILED) {
+            return false;
+        }
+        if (task.getStatus() == AsyncTaskStatus.SUCCESS && (requestedRegenerate || task.getResultId() == null)) {
+            return false;
+        }
+        ClozeTaskPayload payload = readClozeTaskPayloadOrNull(task.getRequestJson());
+        return payload != null
+                && Objects.equals(payload.dailyTaskId(), dailyTaskId)
+                && payload.sourceType() == sourceType
+                && payload.targetWordCount() == targetWordCount;
+    }
+
+    private boolean prepareClozeTaskForProcessing(AsyncTask task, boolean redelivered) {
+        if (task.getStatus() == AsyncTaskStatus.PENDING) {
+            return asyncTaskService.markRunningIfPending(task.getId(), "正在生成完形填空", 20);
+        }
+        if (task.getStatus() == AsyncTaskStatus.RUNNING && redelivered) {
+            log.warn("恢复处理 RabbitMQ 重投的完形填空生成任务，taskId={}", task.getId());
+            return true;
+        }
+        return false;
+    }
+
+    private boolean isTerminalStatus(AsyncTaskStatus status) {
+        return status == AsyncTaskStatus.SUCCESS || status == AsyncTaskStatus.FAILED;
+    }
+
+    private String buildClozeTaskRequestJson(Long dailyTaskId, Long wordbookId, ClozeSourceType sourceType, int targetWordCount, boolean regenerate, ClozeTaskTrigger trigger) {
+        LinkedHashMap<String, Object> payload = new LinkedHashMap<>();
+        payload.put("dailyTaskId", String.valueOf(dailyTaskId));
+        payload.put("wordbookId", wordbookId == null ? null : String.valueOf(wordbookId));
+        payload.put("sourceType", sourceType.name());
+        payload.put("targetWordCount", targetWordCount);
+        payload.put("regenerate", regenerate);
+        payload.put("trigger", trigger.name());
+        return toJson(payload);
+    }
+
+    private ClozeTaskPayload parseClozeTaskPayload(String requestJson) {
+        ClozeTaskPayload payload = readClozeTaskPayloadOrNull(requestJson);
+        if (payload == null) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "完形填空任务参数格式错误");
+        }
+        return payload;
+    }
+
+    private ClozeTaskPayload readClozeTaskPayloadOrNull(String requestJson) {
+        if (!StringUtils.hasText(requestJson)) {
+            return null;
+        }
+        try {
+            JsonNode root = objectMapper.readTree(requestJson);
+            Long dailyTaskId = readLong(root.path("dailyTaskId"));
+            if (dailyTaskId == null) {
+                return null;
+            }
+            Long wordbookId = readLong(root.path("wordbookId"));
+            ClozeSourceType sourceType = readSourceType(root.path("sourceType").asText(""));
+            int targetWordCount = normalizeTargetWordCount(root.path("targetWordCount").asInt(10));
+            boolean regenerate = root.path("regenerate").asBoolean(false);
+            String triggerText = root.path("trigger").asText(ClozeTaskTrigger.USER.name());
+            ClozeTaskTrigger trigger = readTrigger(triggerText);
+            return new ClozeTaskPayload(dailyTaskId, wordbookId, sourceType, targetWordCount, regenerate, trigger);
+        } catch (RuntimeException ex) {
+            return null;
+        } catch (Exception ex) {
+            return null;
+        }
+    }
+
+    private Long readLong(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return null;
+        }
+        if (node.isNumber()) {
+            return node.asLong();
+        }
+        String text = node.asText("");
+        if (!StringUtils.hasText(text)) {
+            return null;
+        }
+        try {
+            return Long.parseLong(text.trim());
+        } catch (NumberFormatException ex) {
+            return null;
+        }
+    }
+
+    private ClozeSourceType readSourceType(String value) {
+        if (!StringUtils.hasText(value)) {
+            return ClozeSourceType.MIXED;
+        }
+        return ClozeSourceType.valueOf(value.trim());
+    }
+
+    private ClozeTaskTrigger readTrigger(String value) {
+        if (!StringUtils.hasText(value)) {
+            return ClozeTaskTrigger.USER;
+        }
+        return ClozeTaskTrigger.valueOf(value.trim());
+    }
+
+    private int normalizeTargetWordCount(int value) {
+        return Math.min(10, Math.max(5, value));
+    }
+
+    private void publishClozeTask(Long taskId, boolean failFast) {
+        try {
+            clozeGenerationTaskPublisher.publish(taskId);
+        } catch (AmqpException ex) {
+            asyncTaskService.markFailed(taskId, String.valueOf(ErrorCode.ASYNC_TASK_FAILED.getCode()), "完形填空生成任务入队失败");
+            if (failFast) {
+                throw ex;
+            }
+            log.warn("完形填空预热任务入队失败，taskId={}", taskId, ex);
         }
     }
 
@@ -1253,6 +1509,24 @@ public class ClozeQuizService {
     }
 
     private record DefinitionGroup(String pos, List<String> definitions) {
+    }
+
+    private enum ClozeTaskTrigger {
+        USER,
+        PREFETCH
+    }
+
+    private record ClozeTaskPayload(
+            Long dailyTaskId,
+            Long wordbookId,
+            ClozeSourceType sourceType,
+            int targetWordCount,
+            boolean regenerate,
+            ClozeTaskTrigger trigger
+    ) {
+    }
+
+    private record ClozeTaskCreation(AsyncTask task, boolean created) {
     }
 
     private record ClozeWordSelection(List<Word> targetWords, List<Word> blankWords, List<Word> backgroundWords) {

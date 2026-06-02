@@ -1,6 +1,7 @@
 package com.lexiflow.async.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.lexiflow.async.domain.AsyncTask;
 import com.lexiflow.async.domain.AsyncTaskStatus;
 import com.lexiflow.async.domain.AsyncTaskType;
@@ -9,6 +10,7 @@ import com.lexiflow.async.mapper.AsyncTaskMapper;
 import com.lexiflow.common.error.ErrorCode;
 import com.lexiflow.common.exception.BizException;
 import java.time.LocalDateTime;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -37,6 +39,17 @@ public class AsyncTaskService {
         task.setProgress(progress);
         task.setStartedAt(LocalDateTime.now());
         asyncTaskMapper.updateById(task);
+    }
+
+    public boolean markRunningIfPending(Long taskId, String message, int progress) {
+        AsyncTask task = new AsyncTask();
+        task.setStatus(AsyncTaskStatus.RUNNING);
+        task.setMessage(message);
+        task.setProgress(progress);
+        task.setStartedAt(LocalDateTime.now());
+        return asyncTaskMapper.update(task, new LambdaUpdateWrapper<AsyncTask>()
+                .eq(AsyncTask::getId, taskId)
+                .eq(AsyncTask::getStatus, AsyncTaskStatus.PENDING)) > 0;
     }
 
     public void markSuccess(Long taskId, Long resultId, String message) {
@@ -68,6 +81,18 @@ public class AsyncTaskService {
             throw new BizException(ErrorCode.ASYNC_TASK_NOT_FOUND);
         }
         return task;
+    }
+
+    public AsyncTask getTaskEntity(Long taskId) {
+        return asyncTaskMapper.selectById(taskId);
+    }
+
+    public List<AsyncTask> listRecentTasks(Long userId, AsyncTaskType taskType, int limit) {
+        return asyncTaskMapper.selectList(new LambdaQueryWrapper<AsyncTask>()
+                .eq(AsyncTask::getUserId, userId)
+                .eq(AsyncTask::getTaskType, taskType)
+                .orderByDesc(AsyncTask::getId)
+                .last("LIMIT " + Math.max(1, limit)));
     }
 
     public AsyncTaskResponse getTask(Long userId, Long taskId) {

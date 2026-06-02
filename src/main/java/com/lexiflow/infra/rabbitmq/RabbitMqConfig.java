@@ -26,6 +26,16 @@ public class RabbitMqConfig {
     }
 
     @Bean
+    public DirectExchange clozeGenerationExchange() {
+        return new DirectExchange(RabbitMqNames.CLOZE_GENERATION_EXCHANGE, true, false);
+    }
+
+    @Bean
+    public DirectExchange clozeGenerationDeadLetterExchange() {
+        return new DirectExchange(RabbitMqNames.CLOZE_GENERATION_DEAD_LETTER_EXCHANGE, true, false);
+    }
+
+    @Bean
     public Queue wordImportQueue() {
         return QueueBuilder.durable(RabbitMqNames.WORD_IMPORT_QUEUE)
                 .deadLetterExchange(RabbitMqNames.WORD_IMPORT_DEAD_LETTER_EXCHANGE)
@@ -36,6 +46,19 @@ public class RabbitMqConfig {
     @Bean
     public Queue wordImportDeadLetterQueue() {
         return QueueBuilder.durable(RabbitMqNames.WORD_IMPORT_DEAD_LETTER_QUEUE).build();
+    }
+
+    @Bean
+    public Queue clozeGenerationQueue() {
+        return QueueBuilder.durable(RabbitMqNames.CLOZE_GENERATION_QUEUE)
+                .deadLetterExchange(RabbitMqNames.CLOZE_GENERATION_DEAD_LETTER_EXCHANGE)
+                .deadLetterRoutingKey(RabbitMqNames.CLOZE_GENERATION_DEAD_LETTER_ROUTING_KEY)
+                .build();
+    }
+
+    @Bean
+    public Queue clozeGenerationDeadLetterQueue() {
+        return QueueBuilder.durable(RabbitMqNames.CLOZE_GENERATION_DEAD_LETTER_QUEUE).build();
     }
 
     @Bean
@@ -56,6 +79,26 @@ public class RabbitMqConfig {
         return BindingBuilder.bind(wordImportDeadLetterQueue)
                 .to(wordImportDeadLetterExchange)
                 .with(RabbitMqNames.WORD_IMPORT_DEAD_LETTER_ROUTING_KEY);
+    }
+
+    @Bean
+    public Binding clozeGenerationBinding(
+            @Qualifier("clozeGenerationQueue") Queue clozeGenerationQueue,
+            @Qualifier("clozeGenerationExchange") DirectExchange clozeGenerationExchange
+    ) {
+        return BindingBuilder.bind(clozeGenerationQueue)
+                .to(clozeGenerationExchange)
+                .with(RabbitMqNames.CLOZE_GENERATION_ROUTING_KEY);
+    }
+
+    @Bean
+    public Binding clozeGenerationDeadLetterBinding(
+            @Qualifier("clozeGenerationDeadLetterQueue") Queue clozeGenerationDeadLetterQueue,
+            @Qualifier("clozeGenerationDeadLetterExchange") DirectExchange clozeGenerationDeadLetterExchange
+    ) {
+        return BindingBuilder.bind(clozeGenerationDeadLetterQueue)
+                .to(clozeGenerationDeadLetterExchange)
+                .with(RabbitMqNames.CLOZE_GENERATION_DEAD_LETTER_ROUTING_KEY);
     }
 
     @Bean
