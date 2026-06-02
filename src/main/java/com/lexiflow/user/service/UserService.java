@@ -32,6 +32,7 @@ public class UserService {
     private final PasswordEncoder passwordEncoder;
     private final AuthUserCacheService authUserCacheService;
     private final TokenVersionService tokenVersionService;
+    private final UserSettingsCacheService userSettingsCacheService;
 
     @Transactional
     public User createUser(String email, String rawPassword, String nickname) {
@@ -104,10 +105,15 @@ public class UserService {
     }
 
     public UserSettings getOrCreateSettings(Long userId) {
+        UserSettings cached = userSettingsCacheService.get(userId);
+        if (cached != null) {
+            return cached;
+        }
         UserSettings settings = userSettingsMapper.selectOne(new LambdaQueryWrapper<UserSettings>()
                 .eq(UserSettings::getUserId, userId)
                 .last("LIMIT 1"));
         if (settings != null) {
+            userSettingsCacheService.put(settings);
             return settings;
         }
         return createDefaultSettings(userId);
@@ -121,7 +127,8 @@ public class UserService {
         settings.setEnableDailyReport(request.enableDailyReport());
         settings.setTimezone(request.timezone().trim());
         userSettingsMapper.updateById(settings);
-        return getOrCreateSettings(userId);
+        userSettingsCacheService.put(settings);
+        return settings;
     }
 
     private UserSettings createDefaultSettings(Long userId) {
@@ -134,6 +141,7 @@ public class UserService {
         settings.setTimezone("Asia/Shanghai");
         settings.setDeleted(0);
         userSettingsMapper.insert(settings);
+        userSettingsCacheService.put(settings);
         return settings;
     }
 

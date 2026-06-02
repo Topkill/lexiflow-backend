@@ -1,16 +1,22 @@
 package com.lexiflow.user.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.lexiflow.auth.service.AuthUserCacheService;
 import com.lexiflow.auth.service.TokenVersionService;
+import com.lexiflow.user.domain.AiKeyMode;
+import com.lexiflow.user.domain.TargetExam;
 import com.lexiflow.user.domain.User;
 import com.lexiflow.user.domain.UserRole;
+import com.lexiflow.user.domain.UserSettings;
 import com.lexiflow.user.domain.UserStatus;
 import com.lexiflow.user.dto.ChangePasswordRequest;
 import com.lexiflow.user.dto.UpdateProfileRequest;
+import com.lexiflow.user.dto.UpdateUserSettingsRequest;
 import com.lexiflow.user.mapper.UserMapper;
 import com.lexiflow.user.mapper.UserSettingsMapper;
 import org.junit.jupiter.api.Test;
@@ -33,6 +39,8 @@ class UserServiceTest {
     private AuthUserCacheService authUserCacheService;
     @Mock
     private TokenVersionService tokenVersionService;
+    @Mock
+    private UserSettingsCacheService userSettingsCacheService;
 
     @Test
     void updateProfileShouldEvictAuthUserCache() {
@@ -70,8 +78,52 @@ class UserServiceTest {
         assertThat(method.getAnnotation(Transactional.class)).isNotNull();
     }
 
+    @Test
+    void getOrCreateSettingsShouldReturnRedisCacheHitWithoutQueryingDatabase() {
+        UserService service = userService();
+        UserSettings cached = userSettings();
+        when(userSettingsCacheService.get(7L)).thenReturn(cached);
+
+        UserSettings settings = service.getOrCreateSettings(7L);
+
+        assertThat(settings).isSameAs(cached);
+        verify(userSettingsMapper, never()).selectOne(any());
+    }
+
+    @Test
+    void getOrCreateSettingsShouldCacheDatabaseResult() {
+        UserService service = userService();
+        UserSettings settings = userSettings();
+        when(userSettingsCacheService.get(7L)).thenReturn(null);
+        when(userSettingsMapper.selectOne(any())).thenReturn(settings);
+
+        UserSettings result = service.getOrCreateSettings(7L);
+
+        assertThat(result).isSameAs(settings);
+        verify(userSettingsCacheService).put(settings);
+    }
+
+    @Test
+    void updateSettingsShouldRefreshUserSettingsCacheAfterDatabaseUpdate() {
+        UserService service = userService();
+        UserSettings settings = userSettings();
+        when(userSettingsCacheService.get(7L)).thenReturn(settings);
+
+        UserSettings updated = service.updateSettings(
+                7L,
+                new UpdateUserSettingsRequest(TargetExam.CET6, 50, AiKeyMode.PRIVATE, false, "Asia/Shanghai")
+        );
+
+        assertThat(updated.getTargetExam()).isEqualTo(TargetExam.CET6);
+        assertThat(updated.getDailyNewWords()).isEqualTo(50);
+        assertThat(updated.getAiKeyMode()).isEqualTo(AiKeyMode.PRIVATE);
+        assertThat(updated.getEnableDailyReport()).isFalse();
+        verify(userSettingsMapper).updateById(settings);
+        verify(userSettingsCacheService).put(settings);
+    }
+
     private UserService userService() {
-        return new UserService(userMapper, userSettingsMapper, passwordEncoder, authUserCacheService, tokenVersionService);
+        return new UserService(userMapper, userSettingsMapper, passwordEncoder, authUserCacheService, tokenVersionService, userSettingsCacheService);
     }
 
     private User activeUser() {
@@ -83,5 +135,18 @@ class UserServiceTest {
         user.setRole(UserRole.USER);
         user.setStatus(UserStatus.ACTIVE);
         return user;
+    }
+
+    private UserSettings userSettings() {
+        UserSettings settings = new UserSettings();
+        settings.setId(11L);
+        settings.setUserId(7L);
+        settings.setTargetExam(TargetExam.CET4);
+        settings.setDailyNewWords(30);
+        settings.setAiKeyMode(AiKeyMode.PUBLIC);
+        settings.setEnableDailyReport(true);
+        settings.setTimezone("Asia/Shanghai");
+        settings.setDeleted(0);
+        return settings;
     }
 }
