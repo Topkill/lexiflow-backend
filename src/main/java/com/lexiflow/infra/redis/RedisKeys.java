@@ -30,6 +30,10 @@ public final class RedisKeys {
         return "lexiflow:ai:hit:" + contentType.name().toLowerCase();
     }
 
+    public static String aiPublicConfigKey() {
+        return "lexiflow:ai:public-config";
+    }
+
     public static String studyStatisticsOverviewKey(Long userId) {
         return "lexiflow:study:stats:overview:" + userId;
     }

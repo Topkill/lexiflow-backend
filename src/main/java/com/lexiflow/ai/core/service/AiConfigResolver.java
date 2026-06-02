@@ -11,25 +11,31 @@ import com.lexiflow.common.error.ErrorCode;
 import com.lexiflow.common.exception.BizException;
 import com.lexiflow.infra.crypto.ApiKeyCryptoService;
 import com.lexiflow.infra.redis.RedisCacheInvalidationListener;
+import com.lexiflow.infra.redis.RedisJsonCacheService;
 import com.lexiflow.infra.redis.RedisKeys;
 import com.lexiflow.user.domain.AiKeyMode;
 import com.lexiflow.user.domain.UserSettings;
 import com.lexiflow.user.service.UserService;
+import java.math.BigDecimal;
 import java.time.Duration;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class AiConfigResolver implements RedisCacheInvalidationListener {
 
     private static final long PUBLIC_CONFIG_CACHE_TTL_MILLIS = Duration.ofSeconds(30).toMillis();
+    private static final Duration PUBLIC_CONFIG_REDIS_TTL = Duration.ofMinutes(30);
 
     private final UserService userService;
     private final UserAiConfigMapper userAiConfigMapper;
     private final AiPublicConfigMapper aiPublicConfigMapper;
     private final ApiKeyCryptoService apiKeyCryptoService;
+    private final RedisJsonCacheService redisJsonCacheService;
     private volatile CachedPublicConfig cachedPublicConfig;
 
     public AiRuntimeConfig resolve(Long userId) {
@@ -71,6 +77,34 @@ public class AiConfigResolver implements RedisCacheInvalidationListener {
     }
 
     private AiRuntimeConfig loadPublicConfig() {
+        PublicConfigSnapshot cached = redisJsonCacheService.get(RedisKeys.aiPublicConfigKey(), PublicConfigSnapshot.class);
+        AiRuntimeConfig cachedConfig = toRuntimeConfigOrNull(cached);
+        if (cachedConfig != null) {
+            return cachedConfig;
+        }
+        AiPublicConfig config = loadPublicConfigFromDatabase();
+        redisJsonCacheService.set(RedisKeys.aiPublicConfigKey(), PublicConfigSnapshot.from(config), PUBLIC_CONFIG_REDIS_TTL);
+        return toRuntimeConfig(config);
+    }
+
+    private AiRuntimeConfig toRuntimeConfigOrNull(PublicConfigSnapshot cached) {
+        if (cached == null) {
+            return null;
+        }
+        if (!cached.isUsable()) {
+            redisJsonCacheService.delete(RedisKeys.aiPublicConfigKey());
+            return null;
+        }
+        try {
+            return cached.toRuntimeConfig(apiKeyCryptoService);
+        } catch (RuntimeException ex) {
+            redisJsonCacheService.delete(RedisKeys.aiPublicConfigKey());
+            log.warn("Redis public AI config decrypt failed, fallback to database", ex);
+            return null;
+        }
+    }
+
+    private AiPublicConfig loadPublicConfigFromDatabase() {
         AiPublicConfig config = aiPublicConfigMapper.selectOne(new LambdaQueryWrapper<AiPublicConfig>()
                 .eq(AiPublicConfig::getActive, true)
                 .eq(AiPublicConfig::getEnabled, true)
@@ -78,6 +112,10 @@ public class AiConfigResolver implements RedisCacheInvalidationListener {
         if (config == null || !StringUtils.hasText(config.getEncryptedApiKey())) {
             throw new BizException(ErrorCode.AI_CONFIG_UNAVAILABLE, "公共 AI 配置不可用");
         }
+        return config;
+    }
+
+    private AiRuntimeConfig toRuntimeConfig(AiPublicConfig config) {
         return new AiRuntimeConfig(
                 AiConfigScope.PUBLIC,
                 config.getApiBaseUrl(),
@@ -91,6 +129,7 @@ public class AiConfigResolver implements RedisCacheInvalidationListener {
 
     public void evictPublicConfigCache() {
         cachedPublicConfig = null;
+        redisJsonCacheService.delete(RedisKeys.aiPublicConfigKey());
     }
 
     @Override
@@ -101,5 +140,44 @@ public class AiConfigResolver implements RedisCacheInvalidationListener {
     }
 
     private record CachedPublicConfig(AiRuntimeConfig config, long expiresAtMillis) {
+    }
+
+    public record PublicConfigSnapshot(
+            String apiBaseUrl,
+            String encryptedApiKey,
+            String modelName,
+            BigDecimal temperature,
+            Boolean streamEnabled,
+            Integer dailyQuotaPerUser
+    ) {
+
+        static PublicConfigSnapshot from(AiPublicConfig config) {
+            return new PublicConfigSnapshot(
+                    config.getApiBaseUrl(),
+                    config.getEncryptedApiKey(),
+                    config.getModelName(),
+                    config.getTemperature(),
+                    config.getStreamEnabled(),
+                    config.getDailyQuotaPerUser()
+            );
+        }
+
+        boolean isUsable() {
+            return StringUtils.hasText(apiBaseUrl)
+                    && StringUtils.hasText(encryptedApiKey)
+                    && StringUtils.hasText(modelName);
+        }
+
+        AiRuntimeConfig toRuntimeConfig(ApiKeyCryptoService apiKeyCryptoService) {
+            return new AiRuntimeConfig(
+                    AiConfigScope.PUBLIC,
+                    apiBaseUrl,
+                    apiKeyCryptoService.decrypt(encryptedApiKey),
+                    modelName,
+                    temperature,
+                    streamEnabled,
+                    dailyQuotaPerUser
+            );
+        }
     }
 }
