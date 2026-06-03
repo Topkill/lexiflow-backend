@@ -133,7 +133,7 @@ public class WordAiContentService {
             wordQaTaskPublisher.publish(task.getId());
             return buildWordQaTaskResponse(task, context);
         } catch (AmqpException ex) {
-            asyncTaskService.markFailed(task.getId(), String.valueOf(ErrorCode.ASYNC_TASK_FAILED.getCode()), "AI 问答任务入队失败");
+            asyncTaskService.markPendingFailed(task.getId(), String.valueOf(ErrorCode.ASYNC_TASK_FAILED.getCode()), "AI 问答任务入队失败");
             throw new BizException(ErrorCode.ASYNC_TASK_FAILED, "AI 问答任务入队失败");
         }
     }

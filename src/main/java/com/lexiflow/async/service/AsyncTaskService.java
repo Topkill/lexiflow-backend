@@ -12,10 +12,12 @@ import com.lexiflow.common.exception.BizException;
 import java.time.LocalDateTime;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class AsyncTaskService {
 
     private final AsyncTaskMapper asyncTaskMapper;
@@ -52,24 +54,44 @@ public class AsyncTaskService {
                 .eq(AsyncTask::getStatus, AsyncTaskStatus.PENDING)) > 0;
     }
 
-    public void markSuccess(Long taskId, Long resultId, String message) {
-        AsyncTask task = asyncTaskMapper.selectById(taskId);
+    public boolean markSuccess(Long taskId, Long resultId, String message) {
+        AsyncTask task = new AsyncTask();
         task.setStatus(AsyncTaskStatus.SUCCESS);
         task.setProgress(100);
         task.setResultId(resultId);
         task.setMessage(message);
         task.setFinishedAt(LocalDateTime.now());
-        asyncTaskMapper.updateById(task);
+        boolean updated = asyncTaskMapper.update(task, new LambdaUpdateWrapper<AsyncTask>()
+                .eq(AsyncTask::getId, taskId)
+                .eq(AsyncTask::getStatus, AsyncTaskStatus.RUNNING)) > 0;
+        if (!updated) {
+            log.warn("忽略异步任务成功终态更新，任务不是 RUNNING，taskId={}", taskId);
+        }
+        return updated;
     }
 
-    public void markFailed(Long taskId, String errorCode, String errorMessage) {
-        AsyncTask task = asyncTaskMapper.selectById(taskId);
+    public boolean markFailed(Long taskId, String errorCode, String errorMessage) {
+        return markFailedFromStatus(taskId, AsyncTaskStatus.RUNNING, errorCode, errorMessage);
+    }
+
+    public boolean markPendingFailed(Long taskId, String errorCode, String errorMessage) {
+        return markFailedFromStatus(taskId, AsyncTaskStatus.PENDING, errorCode, errorMessage);
+    }
+
+    private boolean markFailedFromStatus(Long taskId, AsyncTaskStatus expectedStatus, String errorCode, String errorMessage) {
+        AsyncTask task = new AsyncTask();
         task.setStatus(AsyncTaskStatus.FAILED);
         task.setMessage("任务执行失败");
         task.setErrorCode(errorCode);
         task.setErrorMessage(abbreviate(errorMessage));
         task.setFinishedAt(LocalDateTime.now());
-        asyncTaskMapper.updateById(task);
+        boolean updated = asyncTaskMapper.update(task, new LambdaUpdateWrapper<AsyncTask>()
+                .eq(AsyncTask::getId, taskId)
+                .eq(AsyncTask::getStatus, expectedStatus)) > 0;
+        if (!updated) {
+            log.warn("忽略异步任务失败终态更新，任务不是 {}，taskId={}", expectedStatus, taskId);
+        }
+        return updated;
     }
 
     public AsyncTask getOwnedTaskEntity(Long userId, Long taskId) {

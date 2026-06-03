@@ -226,7 +226,7 @@ class ClozeQuizServiceAsyncTaskTest {
                 .extracting("errorCode")
                 .isEqualTo(ErrorCode.ASYNC_TASK_FAILED);
 
-        verify(asyncTaskService).markFailed(eq(ASYNC_TASK_ID), eq(String.valueOf(ErrorCode.ASYNC_TASK_FAILED.getCode())), any());
+        verify(asyncTaskService).markPendingFailed(eq(ASYNC_TASK_ID), eq(String.valueOf(ErrorCode.ASYNC_TASK_FAILED.getCode())), any());
     }
 
     @Test

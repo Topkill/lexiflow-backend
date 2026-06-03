@@ -388,7 +388,7 @@ public class ClozeQuizService {
         try {
             clozeGenerationTaskPublisher.publish(taskId);
         } catch (AmqpException ex) {
-            asyncTaskService.markFailed(taskId, String.valueOf(ErrorCode.ASYNC_TASK_FAILED.getCode()), "完形填空生成任务入队失败");
+            asyncTaskService.markPendingFailed(taskId, String.valueOf(ErrorCode.ASYNC_TASK_FAILED.getCode()), "完形填空生成任务入队失败");
             if (failFast) {
                 throw ex;
             }

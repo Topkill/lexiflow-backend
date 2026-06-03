@@ -77,7 +77,7 @@ public class StudyReportService {
             studyReportTaskPublisher.publish(task.getId());
             return CreateReportTaskResponse.from(task);
         } catch (AmqpException ex) {
-            asyncTaskService.markFailed(task.getId(), String.valueOf(ErrorCode.ASYNC_TASK_FAILED.getCode()), "学习报告生成任务入队失败");
+            asyncTaskService.markPendingFailed(task.getId(), String.valueOf(ErrorCode.ASYNC_TASK_FAILED.getCode()), "学习报告生成任务入队失败");
             throw new BizException(ErrorCode.ASYNC_TASK_FAILED, "学习报告生成任务入队失败，请稍后重试");
         }
     }

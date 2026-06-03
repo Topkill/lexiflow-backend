@@ -121,7 +121,7 @@ public class ClozeAttemptAiReviewService {
             clozeReviewTaskPublisher.publish(task.getId());
             return ClozeAttemptAiReviewResponse.none(attemptId, task);
         } catch (AmqpException ex) {
-            asyncTaskService.markFailed(task.getId(), String.valueOf(ErrorCode.ASYNC_TASK_FAILED.getCode()), "AI 评阅任务入队失败");
+            asyncTaskService.markPendingFailed(task.getId(), String.valueOf(ErrorCode.ASYNC_TASK_FAILED.getCode()), "AI 评阅任务入队失败");
             throw new BizException(ErrorCode.ASYNC_TASK_FAILED, "AI 评阅任务入队失败");
         }
     }
