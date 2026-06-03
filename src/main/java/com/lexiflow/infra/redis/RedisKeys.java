@@ -31,6 +31,16 @@ public final class RedisKeys {
         return "lexiflow:ai:cloze-task:create:" + sha256(raw).substring(0, 32);
     }
 
+    public static String aiWordQaTaskCreateLockKey(Long userId, Long wordbookId, Long wordId, String sourceHash) {
+        String raw = userId + ":" + wordbookId + ":" + wordId + ":" + sourceHash;
+        return "lexiflow:ai:word-qa-task:create:" + sha256(raw).substring(0, 32);
+    }
+
+    public static String aiClozeReviewTaskCreateLockKey(Long userId, Long attemptId, String sourceHash) {
+        String raw = userId + ":" + attemptId + ":" + sourceHash;
+        return "lexiflow:ai:cloze-review-task:create:" + sha256(raw).substring(0, 32);
+    }
+
     public static String aiHitCountHashKey(AiContentType contentType) {
         return "lexiflow:ai:hit:" + contentType.name().toLowerCase();
     }

@@ -23,6 +23,20 @@ public final class RabbitMqNames {
     public static final String STUDY_REPORT_DEAD_LETTER_QUEUE = "lexiflow.study-report.dlq";
     public static final String STUDY_REPORT_DEAD_LETTER_ROUTING_KEY = "lexiflow.study-report.dead";
 
+    public static final String WORD_QA_EXCHANGE = "lexiflow.word-qa.exchange";
+    public static final String WORD_QA_QUEUE = "lexiflow.word-qa.queue";
+    public static final String WORD_QA_ROUTING_KEY = "lexiflow.word-qa.task";
+    public static final String WORD_QA_DEAD_LETTER_EXCHANGE = "lexiflow.word-qa.dlx";
+    public static final String WORD_QA_DEAD_LETTER_QUEUE = "lexiflow.word-qa.dlq";
+    public static final String WORD_QA_DEAD_LETTER_ROUTING_KEY = "lexiflow.word-qa.dead";
+
+    public static final String CLOZE_REVIEW_EXCHANGE = "lexiflow.cloze-review.exchange";
+    public static final String CLOZE_REVIEW_QUEUE = "lexiflow.cloze-review.queue";
+    public static final String CLOZE_REVIEW_ROUTING_KEY = "lexiflow.cloze-review.task";
+    public static final String CLOZE_REVIEW_DEAD_LETTER_EXCHANGE = "lexiflow.cloze-review.dlx";
+    public static final String CLOZE_REVIEW_DEAD_LETTER_QUEUE = "lexiflow.cloze-review.dlq";
+    public static final String CLOZE_REVIEW_DEAD_LETTER_ROUTING_KEY = "lexiflow.cloze-review.dead";
+
     private RabbitMqNames() {
     }
 }

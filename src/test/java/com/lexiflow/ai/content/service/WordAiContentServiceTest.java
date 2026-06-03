@@ -15,6 +15,7 @@ import com.lexiflow.ai.content.domain.AiContentType;
 import com.lexiflow.ai.content.domain.WordAiQa;
 import com.lexiflow.ai.content.dto.WordAiContentResponse;
 import com.lexiflow.ai.content.mapper.WordAiQaMapper;
+import com.lexiflow.ai.content.mq.WordQaTaskPublisher;
 import com.lexiflow.ai.core.client.AiStreamDeltaHandler;
 import com.lexiflow.ai.core.dto.AiChatCompletionResult;
 import com.lexiflow.ai.core.service.AiGatewayService;
@@ -66,7 +67,8 @@ class WordAiContentServiceTest {
                 mock(AiPromptOutputSchemaService.class),
                 transactionTemplate(),
                 mock(RedisAiHitCountBuffer.class),
-                mock(RedisDistributedLockService.class)
+                mock(RedisDistributedLockService.class),
+                mock(WordQaTaskPublisher.class)
         );
         Word word = new Word();
         word.setWord("namely");
@@ -123,7 +125,8 @@ class WordAiContentServiceTest {
                 outputSchemaService,
                 transactionTemplate(),
                 mock(RedisAiHitCountBuffer.class),
-                mock(RedisDistributedLockService.class)
+                mock(RedisDistributedLockService.class),
+                mock(WordQaTaskPublisher.class)
         );
         Wordbook wordbook = new Wordbook();
         wordbook.setId(1L);
@@ -211,7 +214,8 @@ class WordAiContentServiceTest {
                 outputSchemaService,
                 transactionTemplate(),
                 mock(RedisAiHitCountBuffer.class),
-                mock(RedisDistributedLockService.class)
+                mock(RedisDistributedLockService.class),
+                mock(WordQaTaskPublisher.class)
         );
         Wordbook wordbook = new Wordbook();
         wordbook.setId(1L);

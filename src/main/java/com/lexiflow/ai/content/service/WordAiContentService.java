@@ -9,6 +9,7 @@ import com.lexiflow.ai.content.domain.AiContentType;
 import com.lexiflow.ai.content.domain.WordAiQa;
 import com.lexiflow.ai.content.dto.WordAiContentResponse;
 import com.lexiflow.ai.content.mapper.WordAiQaMapper;
+import com.lexiflow.ai.content.mq.WordQaTaskPublisher;
 import com.lexiflow.ai.core.dto.AiChatCompletionResult;
 import com.lexiflow.ai.core.dto.AiPrompt;
 import com.lexiflow.ai.core.service.AiGatewayService;
@@ -18,6 +19,7 @@ import com.lexiflow.ai.prompt.service.AiPromptOutputSchemaService;
 import com.lexiflow.ai.prompt.service.AiPromptTemplateService;
 import com.lexiflow.ai.prompt.service.ResolvedAiPromptTemplate;
 import com.lexiflow.async.domain.AsyncTask;
+import com.lexiflow.async.domain.AsyncTaskStatus;
 import com.lexiflow.async.domain.AsyncTaskType;
 import com.lexiflow.async.service.AsyncTaskService;
 import com.lexiflow.common.error.ErrorCode;
@@ -44,12 +46,15 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.amqp.AmqpException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.util.StringUtils;
 
 @Service
 @RequiredArgsConstructor
@@ -62,6 +67,10 @@ public class WordAiContentService {
     private static final Duration AI_CACHE_LOCK_TTL = Duration.ofSeconds(130);
     private static final Duration AI_CACHE_LOCK_WAIT_TIMEOUT = Duration.ofSeconds(115);
     private static final Duration AI_CACHE_LOCK_POLL_INTERVAL = Duration.ofMillis(500);
+    private static final int RECENT_REUSABLE_TASK_LIMIT = 50;
+    private static final Duration WORD_QA_TASK_CREATE_LOCK_TTL = Duration.ofSeconds(10);
+    private static final Duration WORD_QA_TASK_CREATE_LOCK_WAIT_TIMEOUT = Duration.ofSeconds(3);
+    private static final Duration WORD_QA_TASK_CREATE_LOCK_POLL_INTERVAL = Duration.ofMillis(50);
 
     private final WordAiQaMapper wordAiQaMapper;
     private final AsyncTaskService asyncTaskService;
@@ -75,6 +84,7 @@ public class WordAiContentService {
     private final TransactionTemplate transactionTemplate;
     private final RedisAiHitCountBuffer redisAiHitCountBuffer;
     private final RedisDistributedLockService redisDistributedLockService;
+    private final WordQaTaskPublisher wordQaTaskPublisher;
     private final Object[] wordQaCacheLocks = createWordQaCacheLocks();
 
     private static Object[] createWordQaCacheLocks() {
@@ -92,6 +102,72 @@ public class WordAiContentService {
         return generateWordQaContent(userId, wordbookId, wordId, question.trim(), regenerate);
     }
 
+    public WordAiContentResponse getWordQuestionState(Long userId, Long wordbookId, Long wordId, String question) {
+        if (question == null || question.isBlank()) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "问题不能为空");
+        }
+        WordQaContext context = buildWordQaContext(userId, wordbookId, wordId, question.trim());
+        AsyncTask reusableTask = findReusableWordQaTask(userId, context, false);
+        if (reusableTask != null) {
+            return buildWordQaTaskResponse(reusableTask, context);
+        }
+        WordAiQa cached = findActiveWordQa(context.cacheKey());
+        if (cached == null) {
+            return WordAiContentResponse.of(false, AiContentType.WORD_QA, null, wordId, wordbookId, null, context.outputSchema(), null, "NONE", null);
+        }
+        incrementWordQaHit(cached);
+        return WordAiContentResponse.of(true, AiContentType.WORD_QA, cached.getId(), wordId, wordbookId, parseJson(cached.getContentJson()), context.outputSchema(), null, "SUCCESS", "AI 问答命中缓存");
+    }
+
+    public WordAiContentResponse createWordQuestionTask(Long userId, Long wordbookId, Long wordId, String question, boolean regenerate) {
+        if (question == null || question.isBlank()) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "问题不能为空");
+        }
+        WordQaContext context = buildWordQaContext(userId, wordbookId, wordId, question.trim());
+        WordQaTaskCreation creation = createOrReuseWordQaTask(userId, context, regenerate);
+        AsyncTask task = creation.task();
+        if (!creation.created()) {
+            return buildWordQaTaskResponse(task, context);
+        }
+        try {
+            wordQaTaskPublisher.publish(task.getId());
+            return buildWordQaTaskResponse(task, context);
+        } catch (AmqpException ex) {
+            asyncTaskService.markFailed(task.getId(), String.valueOf(ErrorCode.ASYNC_TASK_FAILED.getCode()), "AI 问答任务入队失败");
+            throw new BizException(ErrorCode.ASYNC_TASK_FAILED, "AI 问答任务入队失败");
+        }
+    }
+
+    public void processWordQaTask(Long taskId, boolean redelivered) {
+        if (taskId == null) {
+            return;
+        }
+        AsyncTask task = asyncTaskService.getTaskEntity(taskId);
+        if (task == null) {
+            log.warn("AI 问答任务不存在，taskId={}", taskId);
+            return;
+        }
+        if (task.getTaskType() != AsyncTaskType.AI_WORD_QA || isTerminalStatus(task.getStatus())) {
+            return;
+        }
+        WordQaTaskPayload payload = parseWordQaTaskPayload(task.getRequestJson());
+        if (!prepareWordQaTaskForProcessing(task, redelivered)) {
+            return;
+        }
+        try {
+            WordQaContext context = buildWordQaContext(task.getUserId(), payload.wordbookId(), payload.wordId(), payload.question());
+            if (!Objects.equals(context.sourceHash(), payload.sourceHash())) {
+                throw new BizException(ErrorCode.BAD_REQUEST, "AI 问答任务上下文已变化，请重新生成");
+            }
+            generateWordQaForTask(task, context, payload.regenerate());
+        } catch (BizException ex) {
+            markWordQaTaskFailed(task, ex);
+        } catch (RuntimeException ex) {
+            markWordQaTaskFailed(task, ex);
+            log.warn("AI 问答任务执行失败，taskId={}", taskId, ex);
+        }
+    }
+
     public void streamWordQuestion(Long userId, Long wordbookId, Long wordId, String question, boolean regenerate, OutputStream outputStream) {
         if (question == null || question.isBlank()) {
             throw new BizException(ErrorCode.BAD_REQUEST, "问题不能为空");
@@ -99,76 +175,77 @@ public class WordAiContentService {
         OutputStreamWriter writer = new OutputStreamWriter(outputStream, StandardCharsets.UTF_8);
         AsyncTask task = null;
         boolean taskFinished = false;
+        boolean taskCreated = false;
         try {
             String safeQuestion = question.trim();
-            Wordbook wordbook = wordbookService.getEnabledWordbook(wordbookId);
-            Word word = getEnabledWord(wordbookId, wordId);
-            UserSettings settings = userService.getOrCreateSettings(userId);
-            String sourceJson = buildSourceJson(AiContentType.WORD_QA, wordbook, word, settings, safeQuestion);
-            ResolvedAiPromptTemplate promptTemplate = aiPromptTemplateService.resolve(AiPromptFeatureType.WORD_QA, wordbookId);
-            JsonNode outputSchema = outputSchemaService.schemaNode(promptTemplate.outputSchemaJson());
-            String sourceHash = sha256(sourceJson + "\n#prompt:" + promptTemplate.cacheFingerprint());
-            String cacheKey = buildCacheKey(AiContentType.WORD_QA, wordbookId, wordId, sourceHash);
-            task = createWordQaTask(userId, wordbookId, wordId, safeQuestion, regenerate);
+            WordQaContext context = buildWordQaContext(userId, wordbookId, wordId, safeQuestion);
+            WordQaTaskCreation creation = createOrReuseWordQaTask(userId, context, regenerate);
+            task = creation.task();
+            taskCreated = creation.created();
+            if (!taskCreated) {
+                streamReusableWordQaTask(writer, task, context);
+                taskFinished = true;
+                return;
+            }
             asyncTaskService.markRunning(task.getId(), "正在生成 AI 回答", 20);
 
-            synchronized (wordQaCacheLock(cacheKey)) {
+            synchronized (wordQaCacheLock(context.cacheKey())) {
                 if (!regenerate) {
-                    WordAiQa cached = findActiveWordQa(cacheKey);
+                    WordAiQa cached = findActiveWordQa(context.cacheKey());
                     if (cached != null) {
                         incrementWordQaHit(cached);
                         JsonNode content = parseJson(cached.getContentJson());
                         asyncTaskService.markSuccess(task.getId(), cached.getId(), "AI 问答命中缓存");
                         taskFinished = true;
-                        writeEvent(writer, "status", buildWordQaStatusPayload("CACHE_HIT", "已命中缓存", outputSchema));
+                        writeEvent(writer, "status", buildWordQaStatusPayload("CACHE_HIT", "已命中缓存", context.outputSchema(), task));
                         streamCachedAnswer(writer, content);
-                        streamWordQaFieldItems(writer, content, outputSchema);
-                        writeEvent(writer, "done", WordAiContentResponse.of(true, AiContentType.WORD_QA, cached.getId(), wordId, wordbookId, content, outputSchema));
+                        streamWordQaFieldItems(writer, content, context.outputSchema());
+                        writeEvent(writer, "done", WordAiContentResponse.of(true, AiContentType.WORD_QA, cached.getId(), wordId, wordbookId, content, context.outputSchema(), task.getId(), "SUCCESS", "AI 问答命中缓存"));
                         return;
                     }
                 }
 
-                RedisLockAttempt lockAttempt = tryAcquireWordQaLock(cacheKey, regenerate);
+                RedisLockAttempt lockAttempt = tryAcquireWordQaLock(context.cacheKey(), regenerate);
                 try {
                     if (isLockHeld(lockAttempt)) {
-                        writeEvent(writer, "status", buildWordQaStatusPayload("RUNNING", "正在等待相同 AI 回答生成", outputSchema));
-                        WordAiQa cached = waitForWordQaCache(cacheKey, lockAttempt.lock().key());
+                        writeEvent(writer, "status", buildWordQaStatusPayload("RUNNING", "正在等待相同 AI 回答生成", context.outputSchema(), task));
+                        WordAiQa cached = waitForWordQaCache(context.cacheKey(), lockAttempt.lock().key());
                         if (cached != null) {
                             incrementWordQaHit(cached);
                             JsonNode content = parseJson(cached.getContentJson());
                             asyncTaskService.markSuccess(task.getId(), cached.getId(), "AI 问答命中缓存");
                             taskFinished = true;
-                            writeEvent(writer, "status", buildWordQaStatusPayload("CACHE_HIT", "已命中缓存", outputSchema));
+                            writeEvent(writer, "status", buildWordQaStatusPayload("CACHE_HIT", "已命中缓存", context.outputSchema(), task));
                             streamCachedAnswer(writer, content);
-                            streamWordQaFieldItems(writer, content, outputSchema);
-                            writeEvent(writer, "done", WordAiContentResponse.of(true, AiContentType.WORD_QA, cached.getId(), wordId, wordbookId, content, outputSchema));
+                            streamWordQaFieldItems(writer, content, context.outputSchema());
+                            writeEvent(writer, "done", WordAiContentResponse.of(true, AiContentType.WORD_QA, cached.getId(), wordId, wordbookId, content, context.outputSchema(), task.getId(), "SUCCESS", "AI 问答命中缓存"));
                             return;
                         }
-                        lockAttempt = tryAcquireWordQaLock(cacheKey, regenerate);
+                        lockAttempt = tryAcquireWordQaLock(context.cacheKey(), regenerate);
                         if (isLockHeld(lockAttempt)) {
                             throw new BizException(ErrorCode.AI_CALL_FAILED, "相同 AI 回答仍在生成中，请稍后重试");
                         }
                     }
 
                     if (!regenerate) {
-                        WordAiQa cached = findActiveWordQa(cacheKey);
+                        WordAiQa cached = findActiveWordQa(context.cacheKey());
                         if (cached != null) {
                             incrementWordQaHit(cached);
                             JsonNode cachedContent = parseJson(cached.getContentJson());
                             asyncTaskService.markSuccess(task.getId(), cached.getId(), "AI 问答命中缓存");
                             taskFinished = true;
-                            writeEvent(writer, "status", buildWordQaStatusPayload("CACHE_HIT", "已命中缓存", outputSchema));
+                            writeEvent(writer, "status", buildWordQaStatusPayload("CACHE_HIT", "已命中缓存", context.outputSchema(), task));
                             streamCachedAnswer(writer, cachedContent);
-                            streamWordQaFieldItems(writer, cachedContent, outputSchema);
-                            writeEvent(writer, "done", WordAiContentResponse.of(true, AiContentType.WORD_QA, cached.getId(), wordId, wordbookId, cachedContent, outputSchema));
+                            streamWordQaFieldItems(writer, cachedContent, context.outputSchema());
+                            writeEvent(writer, "done", WordAiContentResponse.of(true, AiContentType.WORD_QA, cached.getId(), wordId, wordbookId, cachedContent, context.outputSchema(), task.getId(), "SUCCESS", "AI 问答命中缓存"));
                             return;
                         }
                     }
 
-                    writeEvent(writer, "status", buildWordQaStatusPayload("RUNNING", "正在生成 AI 回答", outputSchema));
-                    WordQaJsonStreamExtractor streamExtractor = new WordQaJsonStreamExtractor(outputSchema, objectMapper);
-                    AiPrompt prompt = buildPrompt(AiContentType.WORD_QA, sourceJson, sourceHash, promptTemplate, STREAM_OUTPUT_CONSTRAINT);
-                    AiChatCompletionResult result = generateQuestionStreamWithFallback(userId, prompt, writer, streamExtractor, outputSchema, task.getId());
+                    writeEvent(writer, "status", buildWordQaStatusPayload("RUNNING", "正在生成 AI 回答", context.outputSchema(), task));
+                    WordQaJsonStreamExtractor streamExtractor = new WordQaJsonStreamExtractor(context.outputSchema(), objectMapper);
+                    AiPrompt prompt = buildPrompt(AiContentType.WORD_QA, context.sourceJson(), context.sourceHash(), context.promptTemplate(), STREAM_OUTPUT_CONSTRAINT);
+                    AiChatCompletionResult result = generateQuestionStreamWithFallback(userId, prompt, writer, streamExtractor, context.outputSchema(), task.getId());
                     JsonNode content = parseJson(result.content());
                     if (!streamExtractor.hasAnswerEmitted()) {
                         String answer = content.path("answer").asText("");
@@ -176,17 +253,17 @@ public class WordAiContentService {
                             writeEvent(writer, "chunk", Map.of("text", answer));
                         }
                     }
-                    WordAiQa qa = saveWordQaResult(userId, wordId, wordbookId, safeQuestion, sourceHash, cacheKey, content, outputSchema);
+                    WordAiQa qa = saveWordQaResult(userId, wordId, wordbookId, safeQuestion, context.sourceHash(), context.cacheKey(), content, context.outputSchema());
                     JsonNode savedContent = parseJson(qa.getContentJson());
                     asyncTaskService.markSuccess(task.getId(), qa.getId(), "AI 问答生成完成");
                     taskFinished = true;
-                    writeEvent(writer, "done", WordAiContentResponse.of(false, AiContentType.WORD_QA, qa.getId(), wordId, wordbookId, savedContent, outputSchema));
+                    writeEvent(writer, "done", WordAiContentResponse.of(false, AiContentType.WORD_QA, qa.getId(), wordId, wordbookId, savedContent, context.outputSchema(), task.getId(), "SUCCESS", "AI 问答生成完成"));
                 } finally {
                     releaseWordQaLock(lockAttempt);
                 }
             }
         } catch (Exception ex) {
-            if (task != null && !taskFinished) {
+            if (taskCreated && task != null && !taskFinished) {
                 markWordQaTaskFailed(task, ex);
             }
             log.warn("AI 单词问答流式输出失败，wordId={}, wordbookId={}", wordId, wordbookId, ex);
@@ -259,62 +336,15 @@ public class WordAiContentService {
     }
 
     private WordAiContentResponse generateWordQaContent(Long userId, Long wordbookId, Long wordId, String question, boolean regenerate) {
-        Wordbook wordbook = wordbookService.getEnabledWordbook(wordbookId);
-        Word word = getEnabledWord(wordbookId, wordId);
-        UserSettings settings = userService.getOrCreateSettings(userId);
-        String sourceJson = buildSourceJson(AiContentType.WORD_QA, wordbook, word, settings, question);
-        ResolvedAiPromptTemplate promptTemplate = aiPromptTemplateService.resolve(AiPromptFeatureType.WORD_QA, wordbookId);
-        JsonNode outputSchema = outputSchemaService.schemaNode(promptTemplate.outputSchemaJson());
-        String sourceHash = sha256(sourceJson + "\n#prompt:" + promptTemplate.cacheFingerprint());
-        String cacheKey = buildCacheKey(AiContentType.WORD_QA, wordbookId, wordId, sourceHash);
-        AsyncTask task = createWordQaTask(userId, wordbookId, wordId, question, regenerate);
+        WordQaContext context = buildWordQaContext(userId, wordbookId, wordId, question);
+        WordQaTaskCreation creation = createOrReuseWordQaTask(userId, context, regenerate);
+        AsyncTask task = creation.task();
+        if (!creation.created()) {
+            return buildWordQaTaskResponse(task, context);
+        }
         try {
             asyncTaskService.markRunning(task.getId(), "正在生成 AI 回答", 20);
-            synchronized (wordQaCacheLock(cacheKey)) {
-                if (!regenerate) {
-                    WordAiQa cached = findActiveWordQa(cacheKey);
-                    if (cached != null) {
-                        incrementWordQaHit(cached);
-                        asyncTaskService.markSuccess(task.getId(), cached.getId(), "AI 问答命中缓存");
-                        return WordAiContentResponse.of(true, AiContentType.WORD_QA, cached.getId(), wordId, wordbookId, parseJson(cached.getContentJson()), outputSchema);
-                    }
-                }
-
-                RedisLockAttempt lockAttempt = tryAcquireWordQaLock(cacheKey, regenerate);
-                try {
-                    if (isLockHeld(lockAttempt)) {
-                        WordAiQa cached = waitForWordQaCache(cacheKey, lockAttempt.lock().key());
-                        if (cached != null) {
-                            incrementWordQaHit(cached);
-                            asyncTaskService.markSuccess(task.getId(), cached.getId(), "AI 问答命中缓存");
-                            return WordAiContentResponse.of(true, AiContentType.WORD_QA, cached.getId(), wordId, wordbookId, parseJson(cached.getContentJson()), outputSchema);
-                        }
-                        lockAttempt = tryAcquireWordQaLock(cacheKey, regenerate);
-                        if (isLockHeld(lockAttempt)) {
-                            throw new BizException(ErrorCode.AI_CALL_FAILED, "相同 AI 回答仍在生成中，请稍后重试");
-                        }
-                    }
-
-                    if (!regenerate) {
-                        WordAiQa cached = findActiveWordQa(cacheKey);
-                        if (cached != null) {
-                            incrementWordQaHit(cached);
-                            asyncTaskService.markSuccess(task.getId(), cached.getId(), "AI 问答命中缓存");
-                            return WordAiContentResponse.of(true, AiContentType.WORD_QA, cached.getId(), wordId, wordbookId, parseJson(cached.getContentJson()), outputSchema);
-                        }
-                    }
-
-                    AiPrompt prompt = buildPrompt(AiContentType.WORD_QA, sourceJson, sourceHash, promptTemplate);
-                    AiChatCompletionResult result = aiGatewayService.generateJson(userId, AiContentType.WORD_QA, prompt, task.getId());
-                    JsonNode content = parseJson(result.content());
-                    WordAiQa qa = saveWordQaResult(userId, wordId, wordbookId, question, sourceHash, cacheKey, content, outputSchema);
-                    JsonNode savedContent = parseJson(qa.getContentJson());
-                    asyncTaskService.markSuccess(task.getId(), qa.getId(), "AI 问答生成完成");
-                    return WordAiContentResponse.of(false, AiContentType.WORD_QA, qa.getId(), wordId, wordbookId, savedContent, outputSchema);
-                } finally {
-                    releaseWordQaLock(lockAttempt);
-                }
-            }
+            return generateWordQaForTask(task, context, regenerate);
         } catch (BizException ex) {
             markWordQaTaskFailed(task, ex);
             throw ex;
@@ -336,14 +366,242 @@ public class WordAiContentService {
         return word;
     }
 
-    private AsyncTask createWordQaTask(Long userId, Long wordbookId, Long wordId, String question, boolean regenerate) {
+    private WordQaContext buildWordQaContext(Long userId, Long wordbookId, Long wordId, String question) {
+        Wordbook wordbook = wordbookService.getEnabledWordbook(wordbookId);
+        Word word = getEnabledWord(wordbookId, wordId);
+        UserSettings settings = userService.getOrCreateSettings(userId);
+        String sourceJson = buildSourceJson(AiContentType.WORD_QA, wordbook, word, settings, question);
+        ResolvedAiPromptTemplate promptTemplate = aiPromptTemplateService.resolve(AiPromptFeatureType.WORD_QA, wordbookId);
+        JsonNode outputSchema = outputSchemaService.schemaNode(promptTemplate.outputSchemaJson());
+        String sourceHash = sha256(sourceJson + "\n#prompt:" + promptTemplate.cacheFingerprint());
+        String cacheKey = buildCacheKey(AiContentType.WORD_QA, wordbookId, wordId, sourceHash);
+        return new WordQaContext(wordbookId, wordId, question, sourceJson, sourceHash, cacheKey, promptTemplate, outputSchema);
+    }
+
+    private WordAiContentResponse generateWordQaForTask(AsyncTask task, WordQaContext context, boolean regenerate) {
+        synchronized (wordQaCacheLock(context.cacheKey())) {
+            if (!regenerate) {
+                WordAiQa cached = findActiveWordQa(context.cacheKey());
+                if (cached != null) {
+                    incrementWordQaHit(cached);
+                    asyncTaskService.markSuccess(task.getId(), cached.getId(), "AI 问答命中缓存");
+                    return WordAiContentResponse.of(true, AiContentType.WORD_QA, cached.getId(), context.wordId(), context.wordbookId(), parseJson(cached.getContentJson()), context.outputSchema(), task.getId(), "SUCCESS", "AI 问答命中缓存");
+                }
+            }
+
+            RedisLockAttempt lockAttempt = tryAcquireWordQaLock(context.cacheKey(), regenerate);
+            try {
+                if (isLockHeld(lockAttempt)) {
+                    WordAiQa cached = waitForWordQaCache(context.cacheKey(), lockAttempt.lock().key());
+                    if (cached != null) {
+                        incrementWordQaHit(cached);
+                        asyncTaskService.markSuccess(task.getId(), cached.getId(), "AI 问答命中缓存");
+                        return WordAiContentResponse.of(true, AiContentType.WORD_QA, cached.getId(), context.wordId(), context.wordbookId(), parseJson(cached.getContentJson()), context.outputSchema(), task.getId(), "SUCCESS", "AI 问答命中缓存");
+                    }
+                    lockAttempt = tryAcquireWordQaLock(context.cacheKey(), regenerate);
+                    if (isLockHeld(lockAttempt)) {
+                        throw new BizException(ErrorCode.AI_CALL_FAILED, "相同 AI 回答仍在生成中，请稍后重试");
+                    }
+                }
+
+                if (!regenerate) {
+                    WordAiQa cached = findActiveWordQa(context.cacheKey());
+                    if (cached != null) {
+                        incrementWordQaHit(cached);
+                        asyncTaskService.markSuccess(task.getId(), cached.getId(), "AI 问答命中缓存");
+                        return WordAiContentResponse.of(true, AiContentType.WORD_QA, cached.getId(), context.wordId(), context.wordbookId(), parseJson(cached.getContentJson()), context.outputSchema(), task.getId(), "SUCCESS", "AI 问答命中缓存");
+                    }
+                }
+
+                AiPrompt prompt = buildPrompt(AiContentType.WORD_QA, context.sourceJson(), context.sourceHash(), context.promptTemplate());
+                AiChatCompletionResult result = aiGatewayService.generateJson(task.getUserId(), AiContentType.WORD_QA, prompt, task.getId());
+                JsonNode content = parseJson(result.content());
+                WordAiQa qa = saveWordQaResult(task.getUserId(), context.wordId(), context.wordbookId(), context.question(), context.sourceHash(), context.cacheKey(), content, context.outputSchema());
+                JsonNode savedContent = parseJson(qa.getContentJson());
+                asyncTaskService.markSuccess(task.getId(), qa.getId(), "AI 问答生成完成");
+                return WordAiContentResponse.of(false, AiContentType.WORD_QA, qa.getId(), context.wordId(), context.wordbookId(), savedContent, context.outputSchema(), task.getId(), "SUCCESS", "AI 问答生成完成");
+            } finally {
+                releaseWordQaLock(lockAttempt);
+            }
+        }
+    }
+
+    private WordQaTaskCreation createOrReuseWordQaTask(Long userId, WordQaContext context, boolean requestedRegenerate) {
+        String lockKey = RedisKeys.aiWordQaTaskCreateLockKey(userId, context.wordbookId(), context.wordId(), context.sourceHash());
+        RedisLockAttempt lockAttempt = redisDistributedLockService.tryLock(lockKey, WORD_QA_TASK_CREATE_LOCK_TTL);
+        if (isLockHeld(lockAttempt)) {
+            AsyncTask reusableTask = waitForReusableWordQaTask(userId, context, requestedRegenerate, lockKey);
+            if (reusableTask != null) {
+                return new WordQaTaskCreation(reusableTask, false);
+            }
+            lockAttempt = redisDistributedLockService.tryLock(lockKey, WORD_QA_TASK_CREATE_LOCK_TTL);
+            if (isLockHeld(lockAttempt)) {
+                throw new BizException(ErrorCode.ASYNC_TASK_FAILED, "AI 问答任务正在创建，请稍后重试");
+            }
+        }
+
+        try {
+            AsyncTask reusableTask = findReusableWordQaTask(userId, context, requestedRegenerate);
+            if (reusableTask != null) {
+                return new WordQaTaskCreation(reusableTask, false);
+            }
+            return new WordQaTaskCreation(createWordQaTask(userId, context, requestedRegenerate), true);
+        } finally {
+            releaseWordQaLock(lockAttempt);
+        }
+    }
+
+    private AsyncTask waitForReusableWordQaTask(Long userId, WordQaContext context, boolean requestedRegenerate, String lockKey) {
+        long deadline = System.nanoTime() + WORD_QA_TASK_CREATE_LOCK_WAIT_TIMEOUT.toNanos();
+        while (System.nanoTime() < deadline) {
+            AsyncTask reusableTask = findReusableWordQaTask(userId, context, requestedRegenerate);
+            if (reusableTask != null) {
+                return reusableTask;
+            }
+            if (!redisDistributedLockService.isLocked(lockKey)) {
+                return null;
+            }
+            try {
+                Thread.sleep(WORD_QA_TASK_CREATE_LOCK_POLL_INTERVAL.toMillis());
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+                return null;
+            }
+        }
+        return findReusableWordQaTask(userId, context, requestedRegenerate);
+    }
+
+    private AsyncTask findReusableWordQaTask(Long userId, WordQaContext context, boolean requestedRegenerate) {
+        List<AsyncTask> tasks = asyncTaskService.listRecentTasks(userId, AsyncTaskType.AI_WORD_QA, RECENT_REUSABLE_TASK_LIMIT);
+        if (tasks == null) {
+            return null;
+        }
+        return tasks.stream()
+                .filter(task -> isReusableWordQaTask(task, context, requestedRegenerate))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private boolean isReusableWordQaTask(AsyncTask task, WordQaContext context, boolean requestedRegenerate) {
+        if (task == null || task.getStatus() == AsyncTaskStatus.FAILED) {
+            return false;
+        }
+        if (task.getStatus() == AsyncTaskStatus.SUCCESS && (requestedRegenerate || task.getResultId() == null)) {
+            return false;
+        }
+        WordQaTaskPayload payload = readWordQaTaskPayloadOrNull(task.getRequestJson());
+        return payload != null
+                && Objects.equals(payload.wordbookId(), context.wordbookId())
+                && Objects.equals(payload.wordId(), context.wordId())
+                && Objects.equals(payload.question(), context.question())
+                && Objects.equals(payload.sourceHash(), context.sourceHash());
+    }
+
+    private WordAiContentResponse buildWordQaTaskResponse(AsyncTask task, WordQaContext context) {
+        if (task != null && task.getStatus() == AsyncTaskStatus.SUCCESS && task.getResultId() != null) {
+            WordAiQa qa = findWordQaById(task.getResultId(), context.wordbookId(), context.wordId());
+            if (qa != null) {
+                boolean cacheHit = task.getMessage() != null && task.getMessage().contains("命中缓存");
+                return WordAiContentResponse.of(cacheHit, AiContentType.WORD_QA, qa.getId(), context.wordId(), context.wordbookId(), parseJson(qa.getContentJson()), context.outputSchema(), task.getId(), task.getStatus().name(), task.getMessage());
+            }
+        }
+        return WordAiContentResponse.of(false, AiContentType.WORD_QA, task == null ? null : task.getResultId(), context.wordId(), context.wordbookId(), null, context.outputSchema(), task == null ? null : task.getId(), task == null || task.getStatus() == null ? null : task.getStatus().name(), task == null ? null : task.getMessage());
+    }
+
+    private void streamReusableWordQaTask(OutputStreamWriter writer, AsyncTask task, WordQaContext context) throws Exception {
+        WordAiContentResponse response = buildWordQaTaskResponse(task, context);
+        String status = response.taskStatus() == null ? "RUNNING" : response.taskStatus();
+        writeEvent(writer, "status", buildWordQaStatusPayload(status, response.taskMessage(), context.outputSchema(), task));
+        if (response.content() == null) {
+            return;
+        }
+        streamCachedAnswer(writer, response.content());
+        streamWordQaFieldItems(writer, response.content(), context.outputSchema());
+        writeEvent(writer, "done", response);
+    }
+
+    private boolean prepareWordQaTaskForProcessing(AsyncTask task, boolean redelivered) {
+        if (task.getStatus() == AsyncTaskStatus.PENDING) {
+            return asyncTaskService.markRunningIfPending(task.getId(), "正在生成 AI 回答", 20);
+        }
+        if (task.getStatus() == AsyncTaskStatus.RUNNING && redelivered) {
+            log.warn("恢复处理 RabbitMQ 重投的 AI 问答任务，taskId={}", task.getId());
+            return true;
+        }
+        return false;
+    }
+
+    private boolean isTerminalStatus(AsyncTaskStatus status) {
+        return status == AsyncTaskStatus.SUCCESS || status == AsyncTaskStatus.FAILED;
+    }
+
+    private WordQaTaskPayload parseWordQaTaskPayload(String requestJson) {
+        WordQaTaskPayload payload = readWordQaTaskPayloadOrNull(requestJson);
+        if (payload == null) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "AI 问答任务参数格式错误");
+        }
+        return payload;
+    }
+
+    private WordQaTaskPayload readWordQaTaskPayloadOrNull(String requestJson) {
+        if (!StringUtils.hasText(requestJson)) {
+            return null;
+        }
+        try {
+            JsonNode root = objectMapper.readTree(requestJson);
+            Long wordbookId = readLong(root.path("wordbookId"));
+            Long wordId = readLong(root.path("wordId"));
+            String question = root.path("question").asText("");
+            String sourceHash = root.path("sourceHash").asText("");
+            boolean regenerate = root.path("regenerate").asBoolean(false);
+            if (wordbookId == null || wordId == null || !StringUtils.hasText(question) || !StringUtils.hasText(sourceHash)) {
+                return null;
+            }
+            return new WordQaTaskPayload(wordbookId, wordId, question, sourceHash, regenerate);
+        } catch (Exception ex) {
+            return null;
+        }
+    }
+
+    private Long readLong(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return null;
+        }
+        if (node.isNumber()) {
+            return node.asLong();
+        }
+        String text = node.asText("");
+        if (!StringUtils.hasText(text)) {
+            return null;
+        }
+        try {
+            return Long.parseLong(text.trim());
+        } catch (NumberFormatException ex) {
+            return null;
+        }
+    }
+
+    private AsyncTask createWordQaTask(Long userId, WordQaContext context, boolean regenerate) {
         String requestJson = toJson(Map.of(
-                "wordbookId", String.valueOf(wordbookId),
-                "wordId", String.valueOf(wordId),
-                "question", question,
+                "wordbookId", String.valueOf(context.wordbookId()),
+                "wordId", String.valueOf(context.wordId()),
+                "question", context.question(),
+                "sourceHash", context.sourceHash(),
                 "regenerate", regenerate
         ));
         return asyncTaskService.createTask(userId, AsyncTaskType.AI_WORD_QA, requestJson);
+    }
+
+    private WordAiQa findWordQaById(Long resultId, Long wordbookId, Long wordId) {
+        if (resultId == null) {
+            return null;
+        }
+        return wordAiQaMapper.selectOne(new LambdaQueryWrapper<WordAiQa>()
+                .eq(WordAiQa::getId, resultId)
+                .eq(WordAiQa::getWordbookId, wordbookId)
+                .eq(WordAiQa::getWordId, wordId)
+                .eq(WordAiQa::getDeleted, 0)
+                .last("LIMIT 1"));
     }
 
     private WordAiQa findActiveWordQa(String cacheKey) {
@@ -581,10 +839,21 @@ public class WordAiContentService {
     }
 
     private Map<String, Object> buildWordQaStatusPayload(String status, String message, JsonNode outputSchema) {
+        return buildWordQaStatusPayload(status, message, outputSchema, null);
+    }
+
+    private Map<String, Object> buildWordQaStatusPayload(String status, String message, JsonNode outputSchema, AsyncTask task) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("status", status);
         payload.put("message", message);
         payload.put("outputSchema", outputSchema);
+        if (task != null) {
+            payload.put("taskId", String.valueOf(task.getId()));
+            payload.put("taskStatus", task.getStatus() == null ? status : task.getStatus().name());
+            if (task.getResultId() != null) {
+                payload.put("resultId", String.valueOf(task.getResultId()));
+            }
+        }
         return payload;
     }
 
@@ -1009,6 +1278,30 @@ public class WordAiContentService {
             case 't' -> '\t';
             default -> escaped;
         };
+    }
+
+    private record WordQaContext(
+            Long wordbookId,
+            Long wordId,
+            String question,
+            String sourceJson,
+            String sourceHash,
+            String cacheKey,
+            ResolvedAiPromptTemplate promptTemplate,
+            JsonNode outputSchema
+    ) {
+    }
+
+    private record WordQaTaskPayload(
+            Long wordbookId,
+            Long wordId,
+            String question,
+            String sourceHash,
+            boolean regenerate
+    ) {
+    }
+
+    private record WordQaTaskCreation(AsyncTask task, boolean created) {
     }
 
     private record WordQaStreamDelta(String answer, List<WordQaFieldItem> items) {

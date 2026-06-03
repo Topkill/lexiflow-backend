@@ -12,6 +12,8 @@ public record AsyncTaskResponse(
         @Schema(description = "进度") Integer progress,
         @Schema(description = "状态消息") String message,
         @Schema(description = "结果 ID") String resultId,
+        @Schema(description = "错误码") String errorCode,
+        @Schema(description = "错误信息") String errorMessage,
         @Schema(description = "创建时间") LocalDateTime createdAt
 ) {
     public static AsyncTaskResponse from(AsyncTask task) {
@@ -22,6 +24,8 @@ public record AsyncTaskResponse(
                 task.getProgress(),
                 task.getMessage(),
                 task.getResultId() == null ? null : String.valueOf(task.getResultId()),
+                task.getErrorCode(),
+                task.getErrorMessage(),
                 task.getCreatedAt()
         );
     }

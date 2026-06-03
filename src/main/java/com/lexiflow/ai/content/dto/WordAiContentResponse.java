@@ -12,7 +12,10 @@ public record WordAiContentResponse(
         @Schema(description = "单词 ID") String wordId,
         @Schema(description = "词库 ID") String wordbookId,
         @Schema(description = "结构化内容") JsonNode content,
-        @Schema(description = "输出 JSON 结构") JsonNode outputSchema
+        @Schema(description = "输出 JSON 结构") JsonNode outputSchema,
+        @Schema(description = "异步任务 ID") String taskId,
+        @Schema(description = "异步任务状态") String taskStatus,
+        @Schema(description = "异步任务消息") String taskMessage
 ) {
     public static WordAiContentResponse of(boolean cacheHit, AiContentType contentType, Long wordId, Long wordbookId, JsonNode content) {
         return of(cacheHit, contentType, wordId, wordbookId, content, null);
@@ -23,6 +26,21 @@ public record WordAiContentResponse(
     }
 
     public static WordAiContentResponse of(boolean cacheHit, AiContentType contentType, Long resultId, Long wordId, Long wordbookId, JsonNode content, JsonNode outputSchema) {
+        return of(cacheHit, contentType, resultId, wordId, wordbookId, content, outputSchema, null, null, null);
+    }
+
+    public static WordAiContentResponse of(
+            boolean cacheHit,
+            AiContentType contentType,
+            Long resultId,
+            Long wordId,
+            Long wordbookId,
+            JsonNode content,
+            JsonNode outputSchema,
+            Long taskId,
+            String taskStatus,
+            String taskMessage
+    ) {
         return new WordAiContentResponse(
                 cacheHit,
                 contentType,
@@ -30,7 +48,10 @@ public record WordAiContentResponse(
                 String.valueOf(wordId),
                 String.valueOf(wordbookId),
                 content,
-                outputSchema
+                outputSchema,
+                taskId == null ? null : String.valueOf(taskId),
+                taskStatus,
+                taskMessage
         );
     }
 }

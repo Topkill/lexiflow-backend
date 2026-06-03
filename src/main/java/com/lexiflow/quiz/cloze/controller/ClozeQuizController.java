@@ -71,6 +71,15 @@ public class ClozeQuizController {
         return ApiResponse.success(clozeAttemptAiReviewService.getReview(AuthContext.currentUserId(), attemptId));
     }
 
+    @Operation(summary = "创建完形填空 AI 评阅任务")
+    @PostMapping("/api/v1/quizzes/cloze/attempts/{attemptId}/ai-review-tasks")
+    public ApiResponse<ClozeAttemptAiReviewResponse> createAttemptAiReviewTask(
+            @PathVariable @Positive Long attemptId,
+            @RequestParam(defaultValue = "false") boolean regenerate
+    ) {
+        return ApiResponse.success(clozeAttemptAiReviewService.createReviewTask(AuthContext.currentUserId(), attemptId, regenerate));
+    }
+
     @Operation(summary = "流式生成完形填空 AI 评阅")
     @GetMapping(value = "/api/v1/quizzes/cloze/attempts/{attemptId}/ai-review/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public ResponseEntity<StreamingResponseBody> streamAttemptAiReview(

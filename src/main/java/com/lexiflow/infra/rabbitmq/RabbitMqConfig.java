@@ -46,6 +46,26 @@ public class RabbitMqConfig {
     }
 
     @Bean
+    public DirectExchange wordQaExchange() {
+        return new DirectExchange(RabbitMqNames.WORD_QA_EXCHANGE, true, false);
+    }
+
+    @Bean
+    public DirectExchange wordQaDeadLetterExchange() {
+        return new DirectExchange(RabbitMqNames.WORD_QA_DEAD_LETTER_EXCHANGE, true, false);
+    }
+
+    @Bean
+    public DirectExchange clozeReviewExchange() {
+        return new DirectExchange(RabbitMqNames.CLOZE_REVIEW_EXCHANGE, true, false);
+    }
+
+    @Bean
+    public DirectExchange clozeReviewDeadLetterExchange() {
+        return new DirectExchange(RabbitMqNames.CLOZE_REVIEW_DEAD_LETTER_EXCHANGE, true, false);
+    }
+
+    @Bean
     public Queue wordImportQueue() {
         return QueueBuilder.durable(RabbitMqNames.WORD_IMPORT_QUEUE)
                 .deadLetterExchange(RabbitMqNames.WORD_IMPORT_DEAD_LETTER_EXCHANGE)
@@ -82,6 +102,32 @@ public class RabbitMqConfig {
     @Bean
     public Queue studyReportDeadLetterQueue() {
         return QueueBuilder.durable(RabbitMqNames.STUDY_REPORT_DEAD_LETTER_QUEUE).build();
+    }
+
+    @Bean
+    public Queue wordQaQueue() {
+        return QueueBuilder.durable(RabbitMqNames.WORD_QA_QUEUE)
+                .deadLetterExchange(RabbitMqNames.WORD_QA_DEAD_LETTER_EXCHANGE)
+                .deadLetterRoutingKey(RabbitMqNames.WORD_QA_DEAD_LETTER_ROUTING_KEY)
+                .build();
+    }
+
+    @Bean
+    public Queue wordQaDeadLetterQueue() {
+        return QueueBuilder.durable(RabbitMqNames.WORD_QA_DEAD_LETTER_QUEUE).build();
+    }
+
+    @Bean
+    public Queue clozeReviewQueue() {
+        return QueueBuilder.durable(RabbitMqNames.CLOZE_REVIEW_QUEUE)
+                .deadLetterExchange(RabbitMqNames.CLOZE_REVIEW_DEAD_LETTER_EXCHANGE)
+                .deadLetterRoutingKey(RabbitMqNames.CLOZE_REVIEW_DEAD_LETTER_ROUTING_KEY)
+                .build();
+    }
+
+    @Bean
+    public Queue clozeReviewDeadLetterQueue() {
+        return QueueBuilder.durable(RabbitMqNames.CLOZE_REVIEW_DEAD_LETTER_QUEUE).build();
     }
 
     @Bean
@@ -142,6 +188,46 @@ public class RabbitMqConfig {
         return BindingBuilder.bind(studyReportDeadLetterQueue)
                 .to(studyReportDeadLetterExchange)
                 .with(RabbitMqNames.STUDY_REPORT_DEAD_LETTER_ROUTING_KEY);
+    }
+
+    @Bean
+    public Binding wordQaBinding(
+            @Qualifier("wordQaQueue") Queue wordQaQueue,
+            @Qualifier("wordQaExchange") DirectExchange wordQaExchange
+    ) {
+        return BindingBuilder.bind(wordQaQueue)
+                .to(wordQaExchange)
+                .with(RabbitMqNames.WORD_QA_ROUTING_KEY);
+    }
+
+    @Bean
+    public Binding wordQaDeadLetterBinding(
+            @Qualifier("wordQaDeadLetterQueue") Queue wordQaDeadLetterQueue,
+            @Qualifier("wordQaDeadLetterExchange") DirectExchange wordQaDeadLetterExchange
+    ) {
+        return BindingBuilder.bind(wordQaDeadLetterQueue)
+                .to(wordQaDeadLetterExchange)
+                .with(RabbitMqNames.WORD_QA_DEAD_LETTER_ROUTING_KEY);
+    }
+
+    @Bean
+    public Binding clozeReviewBinding(
+            @Qualifier("clozeReviewQueue") Queue clozeReviewQueue,
+            @Qualifier("clozeReviewExchange") DirectExchange clozeReviewExchange
+    ) {
+        return BindingBuilder.bind(clozeReviewQueue)
+                .to(clozeReviewExchange)
+                .with(RabbitMqNames.CLOZE_REVIEW_ROUTING_KEY);
+    }
+
+    @Bean
+    public Binding clozeReviewDeadLetterBinding(
+            @Qualifier("clozeReviewDeadLetterQueue") Queue clozeReviewDeadLetterQueue,
+            @Qualifier("clozeReviewDeadLetterExchange") DirectExchange clozeReviewDeadLetterExchange
+    ) {
+        return BindingBuilder.bind(clozeReviewDeadLetterQueue)
+                .to(clozeReviewDeadLetterExchange)
+                .with(RabbitMqNames.CLOZE_REVIEW_DEAD_LETTER_ROUTING_KEY);
     }
 
     @Bean
