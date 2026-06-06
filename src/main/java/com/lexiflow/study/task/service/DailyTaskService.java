@@ -1,6 +1,7 @@
 package com.lexiflow.study.task.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.lexiflow.common.error.ErrorCode;
 import com.lexiflow.common.exception.BizException;
 import com.lexiflow.quiz.cloze.domain.ClozeAttempt;
@@ -171,20 +172,8 @@ public class DailyTaskService {
     public SubmitFeedbackResponse submitFeedback(Long userId, Long itemId, SubmitFeedbackRequest request) {
         DailyTaskItem item = getOwnedTaskItem(userId, itemId);
         DailyTask sourceTask = getOwnedTask(userId, item.getDailyTaskId());
-        if (item.getStatus() != DailyTaskItemStatus.PENDING) {
-            throw new BizException(ErrorCode.TASK_ITEM_NOT_SUBMITTABLE);
-        }
-        if (request.feedback() == StudyFeedback.UNKNOWN && StudyFeedback.UNKNOWN.name().equals(item.getFeedback())) {
-            UserWordState state = findUserWordState(userId, item.getWordbookId(), item.getWordId());
-            DailyTask task = updateDailyTaskProgress(item.getDailyTaskId());
-            TaskProgressResponse progress = TaskProgressResponse.from(task.getDoneCount(), totalCount(task));
-            return SubmitFeedbackResponse.from(
-                    item,
-                    request.feedback(),
-                    state == null ? null : state.getNextReviewDate(),
-                    task.getStatus() == DailyTaskStatus.DONE,
-                    progress
-            );
+        if (!claimFeedbackSubmission(userId, item, request.feedback())) {
+            return buildAlreadyAppliedFeedbackResponse(userId, item, request.feedback());
         }
 
         if (sourceTask.getTaskType() == DailyTaskType.WRONG_WORD_PRACTICE) {
@@ -209,12 +198,7 @@ public class DailyTaskService {
         boolean completed = request.feedback() == StudyFeedback.KNOWN;
         updateStudyPlanProgress(item, scene, repetitionResult, completed);
 
-        item.setStatus(completed ? DailyTaskItemStatus.DONE : DailyTaskItemStatus.PENDING);
-        item.setFeedback(request.feedback().name());
-        item.setDoneAt(completed ? LocalDateTime.now() : null);
-        dailyTaskItemMapper.updateById(item);
-
-        DailyTask task = updateDailyTaskProgress(item.getDailyTaskId());
+        DailyTask task = completed ? incrementDoneCountAndRefreshTask(item.getDailyTaskId()) : getDailyTaskForProgress(item.getDailyTaskId());
         TaskProgressResponse progress = TaskProgressResponse.from(task.getDoneCount(), totalCount(task));
         return SubmitFeedbackResponse.from(item, request.feedback(), repetitionResult.nextReviewDate(), task.getStatus() == DailyTaskStatus.DONE, progress);
     }
@@ -229,14 +213,100 @@ public class DailyTaskService {
             upsertWrongWord(userId, item, event.getId(), scene);
         }
 
-        item.setStatus(completed ? DailyTaskItemStatus.DONE : DailyTaskItemStatus.PENDING);
-        item.setFeedback(request.feedback().name());
-        item.setDoneAt(completed ? LocalDateTime.now() : null);
-        dailyTaskItemMapper.updateById(item);
-
-        DailyTask task = updateDailyTaskProgress(item.getDailyTaskId());
+        DailyTask task = completed ? incrementDoneCountAndRefreshTask(item.getDailyTaskId()) : getDailyTaskForProgress(item.getDailyTaskId());
         TaskProgressResponse progress = TaskProgressResponse.from(task.getDoneCount(), totalCount(task));
         return SubmitFeedbackResponse.from(item, request.feedback(), null, task.getStatus() == DailyTaskStatus.DONE, progress);
+    }
+
+    private boolean claimFeedbackSubmission(Long userId, DailyTaskItem item, StudyFeedback feedback) {
+        DailyTaskItem update = new DailyTaskItem();
+        update.setFeedback(feedback.name());
+        if (feedback == StudyFeedback.KNOWN) {
+            update.setStatus(DailyTaskItemStatus.DONE);
+            update.setDoneAt(LocalDateTime.now());
+        } else {
+            update.setStatus(DailyTaskItemStatus.PENDING);
+        }
+
+        LambdaUpdateWrapper<DailyTaskItem> wrapper = new LambdaUpdateWrapper<DailyTaskItem>()
+                .eq(DailyTaskItem::getId, item.getId())
+                .eq(DailyTaskItem::getUserId, userId)
+                .eq(DailyTaskItem::getStatus, DailyTaskItemStatus.PENDING);
+        if (feedback == StudyFeedback.UNKNOWN) {
+            wrapper.and(nested -> nested
+                    .isNull(DailyTaskItem::getFeedback)
+                    .or()
+                    .ne(DailyTaskItem::getFeedback, StudyFeedback.UNKNOWN.name()));
+        }
+
+        boolean updated = dailyTaskItemMapper.update(update, wrapper) > 0;
+        if (updated) {
+            item.setFeedback(feedback.name());
+            item.setStatus(feedback == StudyFeedback.KNOWN ? DailyTaskItemStatus.DONE : DailyTaskItemStatus.PENDING);
+            item.setDoneAt(feedback == StudyFeedback.KNOWN ? update.getDoneAt() : null);
+        }
+        return updated;
+    }
+
+    private SubmitFeedbackResponse buildAlreadyAppliedFeedbackResponse(Long userId, DailyTaskItem item, StudyFeedback feedback) {
+        DailyTaskItem current = getOwnedTaskItem(userId, item.getId());
+        if (!isAlreadyAppliedFeedback(current, feedback)) {
+            throw new BizException(ErrorCode.TASK_ITEM_NOT_SUBMITTABLE);
+        }
+        UserWordState state = findUserWordState(userId, current.getWordbookId(), current.getWordId());
+        DailyTask task = getDailyTaskForProgress(current.getDailyTaskId());
+        TaskProgressResponse progress = TaskProgressResponse.from(task.getDoneCount(), totalCount(task));
+        LocalDate nextReviewDate = task.getTaskType() == DailyTaskType.WRONG_WORD_PRACTICE
+                ? null
+                : state == null ? null : state.getNextReviewDate();
+        return SubmitFeedbackResponse.from(
+                current,
+                feedback,
+                nextReviewDate,
+                task.getStatus() == DailyTaskStatus.DONE,
+                progress
+        );
+    }
+
+    private boolean isAlreadyAppliedFeedback(DailyTaskItem item, StudyFeedback feedback) {
+        if (!feedback.name().equals(item.getFeedback())) {
+            return false;
+        }
+        if (feedback == StudyFeedback.KNOWN) {
+            return item.getStatus() == DailyTaskItemStatus.DONE;
+        }
+        return item.getStatus() == DailyTaskItemStatus.PENDING;
+    }
+
+    private DailyTask incrementDoneCountAndRefreshTask(Long dailyTaskId) {
+        dailyTaskMapper.update(new DailyTask(), new LambdaUpdateWrapper<DailyTask>()
+                .eq(DailyTask::getId, dailyTaskId)
+                .setSql("done_count = COALESCE(done_count, 0) + 1"));
+        boolean completedNow = markTaskDoneIfComplete(dailyTaskId);
+        DailyTask task = getDailyTaskForProgress(dailyTaskId);
+        if (completedNow && task.getTaskType() == DailyTaskType.DAILY) {
+            clozeQuizService.prefetchCompletedGroupCloze(task.getUserId(), task.getId());
+        }
+        return task;
+    }
+
+    private boolean markTaskDoneIfComplete(Long dailyTaskId) {
+        DailyTask update = new DailyTask();
+        update.setStatus(DailyTaskStatus.DONE);
+        update.setCompletedAt(LocalDateTime.now());
+        return dailyTaskMapper.update(update, new LambdaUpdateWrapper<DailyTask>()
+                .eq(DailyTask::getId, dailyTaskId)
+                .ne(DailyTask::getStatus, DailyTaskStatus.DONE)
+                .apply("COALESCE(done_count, 0) >= COALESCE(new_count, 0) + COALESCE(review_count, 0) + COALESCE(extra_count, 0)")
+                .apply("COALESCE(new_count, 0) + COALESCE(review_count, 0) + COALESCE(extra_count, 0) > 0")) > 0;
+    }
+
+    private DailyTask getDailyTaskForProgress(Long dailyTaskId) {
+        DailyTask task = dailyTaskMapper.selectById(dailyTaskId);
+        if (task == null) {
+            throw new BizException(ErrorCode.TODAY_TASK_NOT_FOUND);
+        }
+        return task;
     }
 
     private int qualityScore(StudyFeedback feedback) {
@@ -691,7 +761,11 @@ public class DailyTaskService {
     }
 
     private int totalCount(DailyTask task) {
-        return task.getNewCount() + task.getReviewCount() + task.getExtraCount();
+        return safeCount(task.getNewCount()) + safeCount(task.getReviewCount()) + safeCount(task.getExtraCount());
+    }
+
+    private int safeCount(Integer count) {
+        return count == null ? 0 : count;
     }
 
     private int newWordsPerGroup(StudyPlan plan) {
