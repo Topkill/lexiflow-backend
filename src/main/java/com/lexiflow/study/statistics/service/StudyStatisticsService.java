@@ -1,7 +1,7 @@
 package com.lexiflow.study.statistics.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.lexiflow.quiz.cloze.domain.ClozeAttempt;
+import com.lexiflow.quiz.cloze.dto.ClozeAccuracyAggregate;
 import com.lexiflow.quiz.cloze.mapper.ClozeAttemptMapper;
 import com.lexiflow.infra.redis.RedisJsonCacheService;
 import com.lexiflow.infra.redis.RedisKeys;
@@ -9,7 +9,6 @@ import com.lexiflow.study.domain.StudyPlan;
 import com.lexiflow.study.domain.StudyPlanStatus;
 import com.lexiflow.study.mapper.StudyPlanMapper;
 import com.lexiflow.study.progress.domain.MasteryStatus;
-import com.lexiflow.study.progress.domain.StudyEvent;
 import com.lexiflow.study.progress.domain.UserWordState;
 import com.lexiflow.study.progress.domain.WrongWord;
 import com.lexiflow.study.progress.mapper.StudyEventMapper;
@@ -24,7 +23,6 @@ import java.math.RoundingMode;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -126,14 +124,7 @@ public class StudyStatisticsService {
     }
 
     private int calculateStreakDays(Long userId) {
-        List<StudyEvent> events = studyEventMapper.selectList(new LambdaQueryWrapper<StudyEvent>()
-                .select(StudyEvent::getCreatedAt)
-                .eq(StudyEvent::getUserId, userId)
-                .orderByDesc(StudyEvent::getCreatedAt));
-        Set<LocalDate> activeDates = new HashSet<>();
-        for (StudyEvent event : events) {
-            activeDates.add(event.getCreatedAt().toLocalDate());
-        }
+        Set<LocalDate> activeDates = new HashSet<>(studyEventMapper.selectActiveDates(userId));
         LocalDate cursor = LocalDate.now();
         if (!activeDates.contains(cursor)) {
             cursor = cursor.minusDays(1);
@@ -166,14 +157,9 @@ public class StudyStatisticsService {
     }
 
     private BigDecimal calculateClozeAccuracy(Long userId, Long wordbookId) {
-        LambdaQueryWrapper<ClozeAttempt> wrapper = new LambdaQueryWrapper<ClozeAttempt>()
-                .eq(ClozeAttempt::getUserId, userId);
-        if (wordbookId != null) {
-            wrapper.eq(ClozeAttempt::getWordbookId, wordbookId);
-        }
-        List<ClozeAttempt> attempts = clozeAttemptMapper.selectList(wrapper);
-        int total = attempts.stream().mapToInt(attempt -> safe(attempt.getTotalBlanks())).sum();
-        int correct = attempts.stream().mapToInt(attempt -> safe(attempt.getCorrectCount())).sum();
+        ClozeAccuracyAggregate aggregate = clozeAttemptMapper.sumAccuracy(userId, wordbookId);
+        long total = safe(aggregate == null ? null : aggregate.getTotalBlanks());
+        long correct = safe(aggregate == null ? null : aggregate.getCorrectCount());
         if (total <= 0) {
             return BigDecimal.ZERO.setScale(2);
         }
@@ -193,5 +179,9 @@ public class StudyStatisticsService {
 
     private int safe(Integer value) {
         return value == null ? 0 : value;
+    }
+
+    private long safe(Long value) {
+        return value == null ? 0L : value;
     }
 }

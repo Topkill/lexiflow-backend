@@ -7,7 +7,6 @@ import com.lexiflow.ai.content.domain.AiCallStatus;
 import com.lexiflow.ai.content.mapper.AiCallLogMapper;
 import com.lexiflow.infra.redis.RedisJsonCacheService;
 import com.lexiflow.infra.redis.RedisKeys;
-import com.lexiflow.study.progress.domain.StudyEvent;
 import com.lexiflow.study.progress.mapper.StudyEventMapper;
 import com.lexiflow.user.domain.User;
 import com.lexiflow.user.domain.UserStatus;
@@ -45,14 +44,7 @@ public class AdminDashboardService {
         LocalDate today = LocalDate.now();
         long registeredUsers = userMapper.selectCount(new LambdaQueryWrapper<User>());
         long activeUsers = userMapper.selectCount(new LambdaQueryWrapper<User>().eq(User::getStatus, UserStatus.ACTIVE));
-        long todayLearners = studyEventMapper.selectList(new LambdaQueryWrapper<StudyEvent>()
-                        .select(StudyEvent::getUserId)
-                        .ge(StudyEvent::getCreatedAt, today.atStartOfDay())
-                        .lt(StudyEvent::getCreatedAt, today.plusDays(1).atStartOfDay()))
-                .stream()
-                .map(StudyEvent::getUserId)
-                .distinct()
-                .count();
+        long todayLearners = studyEventMapper.countDistinctUsersBetween(today.atStartOfDay(), today.plusDays(1).atStartOfDay());
         long wordbookCount = wordbookMapper.selectCount(new LambdaQueryWrapper<Wordbook>());
         long wordCount = wordMapper.selectCount(new LambdaQueryWrapper<Word>());
         long aiCallCount = aiCallLogMapper.selectCount(new LambdaQueryWrapper<AiCallLog>());

@@ -1,6 +1,9 @@
 package com.lexiflow.admin.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -51,5 +54,29 @@ class AdminDashboardServiceTest {
 
         assertThat(response).isSameAs(cached);
         verifyNoInteractions(userMapper, wordbookMapper, wordMapper, studyEventMapper, aiCallLogMapper);
+    }
+
+    @Test
+    void overviewShouldUseSqlAggregateForTodayLearnersOnCacheMiss() {
+        AdminDashboardService service = new AdminDashboardService(
+                userMapper,
+                wordbookMapper,
+                wordMapper,
+                studyEventMapper,
+                aiCallLogMapper,
+                redisJsonCacheService
+        );
+        when(userMapper.selectCount(any())).thenReturn(10L, 8L);
+        when(studyEventMapper.countDistinctUsersBetween(any(), any())).thenReturn(3L);
+        when(wordbookMapper.selectCount(any())).thenReturn(2L);
+        when(wordMapper.selectCount(any())).thenReturn(500L);
+        when(aiCallLogMapper.selectCount(any())).thenReturn(20L, 15L, 5L);
+
+        AdminOverviewResponse response = service.overview();
+
+        assertThat(response.todayLearners()).isEqualTo(3L);
+        assertThat(response.aiSuccessRate()).isEqualByComparingTo(new BigDecimal("75.00"));
+        verify(studyEventMapper).countDistinctUsersBetween(any(), any());
+        verify(studyEventMapper, never()).selectList(any());
     }
 }

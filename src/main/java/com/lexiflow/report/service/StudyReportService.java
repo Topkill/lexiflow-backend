@@ -16,7 +16,7 @@ import com.lexiflow.async.service.AsyncTaskService;
 import com.lexiflow.common.api.PageResponse;
 import com.lexiflow.common.error.ErrorCode;
 import com.lexiflow.common.exception.BizException;
-import com.lexiflow.quiz.cloze.domain.ClozeAttempt;
+import com.lexiflow.quiz.cloze.dto.ClozeAccuracyAggregate;
 import com.lexiflow.quiz.cloze.mapper.ClozeAttemptMapper;
 import com.lexiflow.report.domain.StudyReport;
 import com.lexiflow.report.dto.CreateReportTaskRequest;
@@ -27,8 +27,7 @@ import com.lexiflow.report.mapper.StudyReportMapper;
 import com.lexiflow.report.mq.StudyReportTaskPublisher;
 import com.lexiflow.study.domain.StudyPlan;
 import com.lexiflow.study.mapper.StudyPlanMapper;
-import com.lexiflow.study.progress.domain.StudyEvent;
-import com.lexiflow.study.progress.domain.StudyScene;
+import com.lexiflow.study.progress.dto.StudyEventCorrectWrongCount;
 import com.lexiflow.study.progress.domain.WrongWord;
 import com.lexiflow.study.progress.mapper.StudyEventMapper;
 import com.lexiflow.study.progress.mapper.WrongWordMapper;
@@ -183,18 +182,7 @@ public class StudyReportService {
     private ReportStats buildStats(Long userId, DailyTask dailyTask, StudyPlan plan, LocalDate reportDate) {
         LocalDateTime start = reportDate.atStartOfDay();
         LocalDateTime end = reportDate.plusDays(1).atStartOfDay();
-        Long correctEvents = studyEventMapper.selectCount(new LambdaQueryWrapper<StudyEvent>()
-                .eq(StudyEvent::getUserId, userId)
-                .eq(StudyEvent::getWordbookId, plan.getWordbookId())
-                .ge(StudyEvent::getCreatedAt, start)
-                .lt(StudyEvent::getCreatedAt, end)
-                .eq(StudyEvent::getIsCorrect, true));
-        Long wrongEvents = studyEventMapper.selectCount(new LambdaQueryWrapper<StudyEvent>()
-                .eq(StudyEvent::getUserId, userId)
-                .eq(StudyEvent::getWordbookId, plan.getWordbookId())
-                .ge(StudyEvent::getCreatedAt, start)
-                .lt(StudyEvent::getCreatedAt, end)
-                .eq(StudyEvent::getIsCorrect, false));
+        StudyEventCorrectWrongCount eventStats = studyEventMapper.countCorrectWrongEvents(userId, plan.getWordbookId(), start, end);
         List<WrongWord> wrongWords = wrongWordMapper.selectList(new LambdaQueryWrapper<WrongWord>()
                 .eq(WrongWord::getUserId, userId)
                 .eq(WrongWord::getWordbookId, plan.getWordbookId())
@@ -202,12 +190,8 @@ public class StudyReportService {
                 .orderByDesc(WrongWord::getWrongCount)
                 .orderByDesc(WrongWord::getLastWrongAt)
                 .last("LIMIT 10"));
-        List<ClozeAttempt> attempts = clozeAttemptMapper.selectList(new LambdaQueryWrapper<ClozeAttempt>()
-                .eq(ClozeAttempt::getUserId, userId)
-                .eq(ClozeAttempt::getWordbookId, plan.getWordbookId())
-                .ge(ClozeAttempt::getSubmittedAt, start)
-                .lt(ClozeAttempt::getSubmittedAt, end));
-        BigDecimal quizAccuracy = calculateQuizAccuracy(attempts);
+        ClozeAccuracyAggregate quizStats = clozeAttemptMapper.sumAccuracyBetween(userId, plan.getWordbookId(), start, end);
+        BigDecimal quizAccuracy = calculateQuizAccuracy(quizStats);
         return new ReportStats(
                 dailyTask.getId(),
                 plan.getId(),
@@ -215,8 +199,8 @@ public class StudyReportService {
                 reportDate,
                 dailyTask.getNewCount(),
                 dailyTask.getReviewCount(),
-                correctEvents.intValue(),
-                wrongEvents.intValue(),
+                safeInt(eventStats == null ? null : eventStats.getCorrectCount()),
+                safeInt(eventStats == null ? null : eventStats.getWrongCount()),
                 quizAccuracy,
                 wrongWords.stream().map(WrongWord::getWordId).map(String::valueOf).toList()
         );
@@ -280,15 +264,23 @@ public class StudyReportService {
         return task;
     }
 
-    private BigDecimal calculateQuizAccuracy(List<ClozeAttempt> attempts) {
-        int total = attempts.stream().mapToInt(ClozeAttempt::getTotalBlanks).sum();
-        int correct = attempts.stream().mapToInt(ClozeAttempt::getCorrectCount).sum();
+    private BigDecimal calculateQuizAccuracy(ClozeAccuracyAggregate aggregate) {
+        long total = safeLong(aggregate == null ? null : aggregate.getTotalBlanks());
+        long correct = safeLong(aggregate == null ? null : aggregate.getCorrectCount());
         if (total <= 0) {
             return null;
         }
         return BigDecimal.valueOf(correct)
                 .multiply(new BigDecimal("100"))
                 .divide(BigDecimal.valueOf(total), 2, RoundingMode.HALF_UP);
+    }
+
+    private int safeInt(Long value) {
+        return value == null ? 0 : value.intValue();
+    }
+
+    private long safeLong(Long value) {
+        return value == null ? 0L : value;
     }
 
     private JsonNode parseJsonNode(String json) {

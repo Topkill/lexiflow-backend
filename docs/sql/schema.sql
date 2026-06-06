@@ -281,6 +281,8 @@ CREATE TABLE IF NOT EXISTS `study_event` (
   `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
   PRIMARY KEY (`id`),
   KEY `idx_study_event_user_time` (`user_id`, `created_at`),
+  KEY `idx_study_event_time_user` (`created_at`, `user_id`),
+  KEY `idx_study_event_user_wordbook_time_correct` (`user_id`, `wordbook_id`, `created_at`, `is_correct`),
   KEY `idx_study_event_word` (`user_id`, `wordbook_id`, `word_id`),
   KEY `idx_study_event_scene` (`scene`),
   KEY `idx_study_event_task` (`daily_task_id`)
@@ -532,6 +534,7 @@ CREATE TABLE IF NOT EXISTS `cloze_attempt` (
   `deleted` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '逻辑删除，0 未删除，1 已删除',
   PRIMARY KEY (`id`),
   KEY `idx_cloze_attempt_user_time` (`user_id`, `submitted_at`),
+  KEY `idx_cloze_attempt_user_wordbook_time` (`user_id`, `wordbook_id`, `submitted_at`),
   KEY `idx_cloze_attempt_quiz` (`quiz_id`),
   KEY `idx_cloze_attempt_wordbook` (`wordbook_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='完形填空作答主表';
