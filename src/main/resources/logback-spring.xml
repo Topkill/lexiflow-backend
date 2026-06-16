@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+    <include resource="org/springframework/boot/logging/logback/console-appender.xml"/>
+
+    <springProperty scope="context" name="LEXIFLOW_LOG_ASYNC_QUEUE_SIZE"
+                    source="lexiflow.logging.async.queue-size" defaultValue="8192"/>
+    <springProperty scope="context" name="LEXIFLOW_LOG_ASYNC_MAX_FLUSH_TIME"
+                    source="lexiflow.logging.async.max-flush-time" defaultValue="5000"/>
+
+    <appender name="ASYNC_CONSOLE" class="ch.qos.logback.classic.AsyncAppender">
+        <queueSize>${LEXIFLOW_LOG_ASYNC_QUEUE_SIZE}</queueSize>
+        <discardingThreshold>0</discardingThreshold>
+        <neverBlock>false</neverBlock>
+        <maxFlushTime>${LEXIFLOW_LOG_ASYNC_MAX_FLUSH_TIME}</maxFlushTime>
+        <includeCallerData>false</includeCallerData>
+        <appender-ref ref="CONSOLE"/>
+    </appender>
+
+    <logger name="org.springframework.security" level="WARN"/>
+    <logger name="org.mybatis" level="WARN"/>
+    <logger name="com.baomidou.mybatisplus" level="WARN"/>
+
+    <springProfile name="local">
+        <logger name="com.lexiflow" level="DEBUG"/>
+    </springProfile>
+
+    <springProfile name="prod">
+        <include resource="org/springframework/boot/logging/logback/file-appender.xml"/>
+
+        <appender name="ASYNC_FILE" class="ch.qos.logback.classic.AsyncAppender">
+            <queueSize>${LEXIFLOW_LOG_ASYNC_QUEUE_SIZE}</queueSize>
+            <discardingThreshold>0</discardingThreshold>
+            <neverBlock>false</neverBlock>
+            <maxFlushTime>${LEXIFLOW_LOG_ASYNC_MAX_FLUSH_TIME}</maxFlushTime>
+            <includeCallerData>false</includeCallerData>
+            <appender-ref ref="FILE"/>
+        </appender>
+
+        <logger name="com.lexiflow" level="INFO"/>
+
+        <root level="INFO">
+            <appender-ref ref="ASYNC_FILE"/>
+        </root>
+    </springProfile>
+
+    <springProfile name="!prod">
+        <root level="INFO">
+            <appender-ref ref="ASYNC_CONSOLE"/>
+        </root>
+    </springProfile>
+</configuration>
