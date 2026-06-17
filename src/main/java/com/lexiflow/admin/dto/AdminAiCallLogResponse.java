@@ -24,7 +24,14 @@ public record AdminAiCallLogResponse(
         @Schema(description = "错误信息") String errorMessage,
         @Schema(description = "创建时间") LocalDateTime createdAt
 ) {
+    /**
+     * 将领域对象 AiCallLog 转换为响应对象 AdminAiCallLogResponse。
+     *
+     * @param log 领域对象，包含 AI 调用日志的详细信息
+     * @return 转换后的响应对象 AdminAiCallLogResponse，若输入为 null 则可能抛出异常（取决于构造函数实现）
+     */
     public static AdminAiCallLogResponse from(AiCallLog log) {
+        // 处理可能为 null 的字段，将其转换为字符串或保持 null，确保响应对象的字段格式一致
         return new AdminAiCallLogResponse(
                 String.valueOf(log.getId()),
                 log.getUserId() == null ? null : String.valueOf(log.getUserId()),

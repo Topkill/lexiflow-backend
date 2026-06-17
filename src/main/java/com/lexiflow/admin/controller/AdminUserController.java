@@ -27,6 +27,9 @@ import org.springframework.web.bind.annotation.RestController;
 public class AdminUserController {
 
     private final AdminUserService adminUserService;
+    /**
+     * 管理端-用户管理。
+     */
 
     @Operation(summary = "用户分页列表")
     @GetMapping

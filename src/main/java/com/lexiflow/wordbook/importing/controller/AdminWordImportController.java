@@ -40,6 +40,9 @@ import org.springframework.web.multipart.MultipartFile;
 public class AdminWordImportController {
 
     private final WordImportService wordImportService;
+    /**
+     * 执行单词导入。
+     */
 
     @Operation(summary = "下载单词导入模板")
     @GetMapping("/imports/word-template")

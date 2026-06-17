@@ -3,7 +3,7 @@ package com.lexiflow.admin.dto;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 
-@Schema(description = "后台看板概览响应")
+@Schema(description = "后台数据看板概览响应")
 public record AdminOverviewResponse(
         @Schema(description = "注册用户数") Long registeredUsers,
         @Schema(description = "活跃用户数") Long activeUsers,

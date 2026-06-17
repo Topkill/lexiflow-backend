@@ -34,7 +34,12 @@ import org.springframework.web.bind.annotation.RestController;
 public class AdminWordbookController {
 
     private final AdminWordbookService adminWordbookService;
-
+    /**
+     * 分页查询词库列表。
+     *
+     * @param request 词库查询请求参数，包含分页信息及筛选条件
+     * @return 包含分页词库数据的统一响应结果
+     */
     @Operation(summary = "词库分页列表")
     @GetMapping
     public ApiResponse<PageResponse<AdminWordbookResponse>> pageWordbooks(@Valid @ModelAttribute AdminWordbookQueryRequest request) {

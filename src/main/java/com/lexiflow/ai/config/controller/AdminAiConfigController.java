@@ -28,6 +28,9 @@ import org.springframework.web.bind.annotation.RestController;
 public class AdminAiConfigController {
 
     private final AiPublicConfigService aiPublicConfigService;
+    /**
+     * 查询AI公共配置列表。
+     */
 
     @Operation(summary = "公共配置列表")
     @GetMapping

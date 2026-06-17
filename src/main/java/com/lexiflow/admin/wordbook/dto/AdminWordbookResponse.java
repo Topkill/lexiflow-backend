@@ -19,6 +19,12 @@ public record AdminWordbookResponse(
         @Schema(description = "创建时间") LocalDateTime createdAt,
         @Schema(description = "更新时间") LocalDateTime updatedAt
 ) {
+        /**
+     * 将 Wordbook 实体对象转换为 AdminWordbookResponse 响应对象。
+     *
+     * @param wordbook 源单词本实体对象，不能为 null
+     * @return 转换后的管理员端单词本响应对象，包含 ID、名称、编码、类型、描述、封面URL、难度等级、单词数量、启用状态、排序顺序以及创建和更新时间等信息
+     */
     public static AdminWordbookResponse from(Wordbook wordbook) {
         return new AdminWordbookResponse(
                 String.valueOf(wordbook.getId()),
@@ -35,4 +41,5 @@ public record AdminWordbookResponse(
                 wordbook.getUpdatedAt()
         );
     }
+
 }

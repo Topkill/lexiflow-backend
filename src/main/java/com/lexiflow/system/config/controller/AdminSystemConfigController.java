@@ -31,6 +31,9 @@ import org.springframework.web.bind.annotation.RestController;
 public class AdminSystemConfigController {
 
     private final SystemConfigService systemConfigService;
+    /**
+     * 分页查询系统配置相关数据。
+     */
 
     @Operation(summary = "系统配置分页列表")
     @GetMapping

@@ -33,6 +33,9 @@ import org.springframework.web.bind.annotation.RestController;
 public class AdminAiPromptController {
 
     private final AiPromptTemplateService aiPromptTemplateService;
+    /**
+     * 查询 AI 提示词模板数据。
+     */
 
     @Operation(summary = "AI 提示词模板分组列表")
     @GetMapping("/prompt-templates")

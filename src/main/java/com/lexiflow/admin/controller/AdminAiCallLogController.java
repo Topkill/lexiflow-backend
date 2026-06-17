@@ -23,6 +23,9 @@ import org.springframework.web.bind.annotation.RestController;
 public class AdminAiCallLogController {
 
     private final AdminAiCallLogService adminAiCallLogService;
+    /**
+     * 管理端-AI调用日志分页查询。
+     */
 
     @Operation(summary = "AI 调用日志分页")
     @GetMapping

@@ -17,8 +17,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class AdminDashboardController {
 
     private final AdminDashboardService adminDashboardService;
+    /**
+     * 管理端-数据看板。
+     */
 
-    @Operation(summary = "看板概览")
+    @Operation(summary = "数据看板概览")
     @GetMapping("/overview")
     public ApiResponse<AdminOverviewResponse> overview() {
         return ApiResponse.success(adminDashboardService.overview());
