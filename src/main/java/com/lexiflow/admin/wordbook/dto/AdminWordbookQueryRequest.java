@@ -13,11 +13,8 @@ public record AdminWordbookQueryRequest(
         @Schema(description = "是否启用") Boolean enabled,
         @Schema(description = "关键词") String keyword
 ) {
-    public long safePage() {
-        return page == null ? 1L : page;
-    }
-
-    public long safeSize() {
-        return size == null ? 20L : size;
+    public AdminWordbookQueryRequest {
+        page = page == null ? 1L : page;
+        size = size == null ? 20L : size;
     }
 }

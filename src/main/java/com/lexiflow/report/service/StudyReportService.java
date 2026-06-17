@@ -149,18 +149,17 @@ public class StudyReportService {
     }
 
     public PageResponse<StudyReportResponse> pageReports(Long userId, ReportQueryRequest request) {
-        ReportQueryRequest safeRequest = request == null ? new ReportQueryRequest(null, null, null, null) : request;
         LambdaQueryWrapper<StudyReport> wrapper = new LambdaQueryWrapper<StudyReport>()
                 .eq(StudyReport::getUserId, userId)
                 .orderByDesc(StudyReport::getReportDate)
                 .orderByDesc(StudyReport::getId);
-        if (safeRequest.startDate() != null) {
-            wrapper.ge(StudyReport::getReportDate, safeRequest.startDate());
+        if (request.startDate() != null) {
+            wrapper.ge(StudyReport::getReportDate, request.startDate());
         }
-        if (safeRequest.endDate() != null) {
-            wrapper.le(StudyReport::getReportDate, safeRequest.endDate());
+        if (request.endDate() != null) {
+            wrapper.le(StudyReport::getReportDate, request.endDate());
         }
-        Page<StudyReport> page = studyReportMapper.selectPage(Page.of(safeRequest.safePage(), safeRequest.safeSize()), wrapper);
+        Page<StudyReport> page = studyReportMapper.selectPage(Page.of(request.page(), request.size()), wrapper);
         List<StudyReportResponse> records = page.getRecords().stream()
                 .map(report -> StudyReportResponse.of(report, parseJsonNode(report.getSummaryJson())))
                 .toList();

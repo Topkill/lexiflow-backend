@@ -17,6 +17,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -34,13 +35,13 @@ public class ReviewController {
 
     @Operation(summary = "查询到期复习词")
     @GetMapping("/due-words")
-    public ApiResponse<PageResponse<ReviewWordResponse>> dueWords(@Valid ReviewQueryRequest request) {
+    public ApiResponse<PageResponse<ReviewWordResponse>> dueWords(@Valid @ModelAttribute ReviewQueryRequest request) {
         return ApiResponse.success(reviewService.pageDueWords(AuthContext.currentUserId(), request));
     }
 
     @Operation(summary = "查询错词本")
     @GetMapping("/wrong-words")
-    public ApiResponse<PageResponse<WrongWordResponse>> wrongWords(@Valid ReviewQueryRequest request) {
+    public ApiResponse<PageResponse<WrongWordResponse>> wrongWords(@Valid @ModelAttribute ReviewQueryRequest request) {
         return ApiResponse.success(reviewService.pageWrongWords(AuthContext.currentUserId(), request));
     }
 
@@ -53,7 +54,7 @@ public class ReviewController {
 
     @Operation(summary = "查询收藏词")
     @GetMapping("/favorite-words")
-    public ApiResponse<PageResponse<FavoriteWordResponse>> favoriteWords(@Valid ReviewQueryRequest request) {
+    public ApiResponse<PageResponse<FavoriteWordResponse>> favoriteWords(@Valid @ModelAttribute ReviewQueryRequest request) {
         return ApiResponse.success(reviewService.pageFavoriteWords(AuthContext.currentUserId(), request));
     }
 

@@ -14,15 +14,9 @@ public record CreateClozeTaskRequest(
         @Schema(description = "目标词数量，默认 10，最多 10 个空", example = "10") @Min(5) @Max(10) Integer targetWordCount,
         @Schema(description = "是否强制重新生成，true 时跳过缓存", example = "false") Boolean regenerate
 ) {
-    public ClozeSourceType safeSourceType() {
-        return sourceType == null ? ClozeSourceType.MIXED : sourceType;
-    }
-
-    public int safeTargetWordCount() {
-        return targetWordCount == null ? 10 : targetWordCount;
-    }
-
-    public boolean safeRegenerate() {
-        return Boolean.TRUE.equals(regenerate);
+    public CreateClozeTaskRequest {
+        sourceType = sourceType == null ? ClozeSourceType.MIXED : sourceType;
+        targetWordCount = targetWordCount == null ? 10 : targetWordCount;
+        regenerate = Boolean.TRUE.equals(regenerate);
     }
 }

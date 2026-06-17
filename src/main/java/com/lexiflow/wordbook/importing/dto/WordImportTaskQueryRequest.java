@@ -10,11 +10,8 @@ public record WordImportTaskQueryRequest(
         @Schema(description = "每页数量") @Min(1) @Max(100) Long size,
         @Schema(description = "词库 ID") @Min(1) Long wordbookId
 ) {
-    public long safePage() {
-        return page == null ? 1L : page;
-    }
-
-    public long safeSize() {
-        return size == null ? 5L : size;
+    public WordImportTaskQueryRequest {
+        page = page == null ? 1L : page;
+        size = size == null ? 5L : size;
     }
 }

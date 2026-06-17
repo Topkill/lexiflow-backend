@@ -37,24 +37,21 @@ public class StudyNoteService {
     private final WordMapper wordMapper;
 
     public PageResponse<StudyNoteResponse> pageNotes(Long userId, StudyNoteQueryRequest request) {
-        StudyNoteQueryRequest safeRequest = request == null
-                ? new StudyNoteQueryRequest(null, null, null, null, null, null)
-                : request;
         LambdaQueryWrapper<StudyNote> wrapper = new LambdaQueryWrapper<StudyNote>()
                 .eq(StudyNote::getUserId, userId)
                 .orderByDesc(StudyNote::getCreatedAt)
                 .orderByDesc(StudyNote::getId);
-        if (safeRequest.sourceType() != null) {
-            wrapper.eq(StudyNote::getSourceType, safeRequest.sourceType());
+        if (request.sourceType() != null) {
+            wrapper.eq(StudyNote::getSourceType, request.sourceType());
         }
-        if (safeRequest.wordbookId() != null) {
-            wrapper.eq(StudyNote::getWordbookId, safeRequest.wordbookId());
+        if (request.wordbookId() != null) {
+            wrapper.eq(StudyNote::getWordbookId, request.wordbookId());
         }
-        if (safeRequest.wordId() != null) {
-            wrapper.eq(StudyNote::getWordId, safeRequest.wordId());
+        if (request.wordId() != null) {
+            wrapper.eq(StudyNote::getWordId, request.wordId());
         }
-        if (StringUtils.hasText(safeRequest.keyword())) {
-            String keyword = safeRequest.keyword().trim();
+        if (StringUtils.hasText(request.keyword())) {
+            String keyword = request.keyword().trim();
             wrapper.and(item -> item
                     .like(StudyNote::getTitle, keyword)
                     .or()
@@ -62,7 +59,7 @@ public class StudyNoteService {
                     .or()
                     .like(StudyNote::getContentMd, keyword));
         }
-        Page<StudyNote> page = studyNoteMapper.selectPage(Page.of(safeRequest.safePage(), safeRequest.safeSize()), wrapper);
+        Page<StudyNote> page = studyNoteMapper.selectPage(Page.of(request.page(), request.size()), wrapper);
         List<StudyNoteResponse> records = page.getRecords().stream()
                 .map(StudyNoteResponse::from)
                 .toList();

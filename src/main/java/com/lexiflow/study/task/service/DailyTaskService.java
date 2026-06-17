@@ -143,7 +143,7 @@ public class DailyTaskService {
                 .orderByDesc(WrongWord::getWrongCount)
                 .orderByDesc(WrongWord::getLastWrongAt)
                 .orderByAsc(WrongWord::getId)
-                .last("LIMIT " + request.safeLimit()));
+                .last("LIMIT " + request.limit()));
         if (wrongWords.isEmpty()) {
             throw new BizException(ErrorCode.TODAY_TASK_NOT_FOUND);
         }

@@ -11,11 +11,8 @@ public record WordImportJsonUrlRequest(
         @Schema(description = "重复处理策略") WordImportDuplicateStrategy duplicateStrategy,
         @Schema(description = "是否先替换目标词库内现有关联") Boolean replaceWordbook
 ) {
-    public WordImportDuplicateStrategy safeDuplicateStrategy() {
-        return duplicateStrategy == null ? WordImportDuplicateStrategy.SKIP : duplicateStrategy;
-    }
-
-    public boolean shouldReplaceWordbook() {
-        return Boolean.TRUE.equals(replaceWordbook);
+    public WordImportJsonUrlRequest {
+        duplicateStrategy = duplicateStrategy == null ? WordImportDuplicateStrategy.SKIP : duplicateStrategy;
+        replaceWordbook = Boolean.TRUE.equals(replaceWordbook);
     }
 }

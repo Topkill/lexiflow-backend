@@ -16,6 +16,7 @@ import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -32,7 +33,7 @@ public class WordbookController {
 
     @Operation(summary = "词库列表")
     @GetMapping
-    public ApiResponse<List<WordbookResponse>> list(@Valid WordbookQueryRequest request) {
+    public ApiResponse<List<WordbookResponse>> list(@Valid @ModelAttribute WordbookQueryRequest request) {
         return ApiResponse.success(wordbookService.listWordbooks(request));
     }
 
@@ -46,7 +47,7 @@ public class WordbookController {
     @GetMapping("/{wordbookId}/words")
     public ApiResponse<PageResponse<WordResponse>> words(
             @PathVariable @Positive Long wordbookId,
-            @Valid WordQueryRequest request
+            @Valid @ModelAttribute WordQueryRequest request
     ) {
         return ApiResponse.success(wordbookService.pageWords(wordbookId, request));
     }

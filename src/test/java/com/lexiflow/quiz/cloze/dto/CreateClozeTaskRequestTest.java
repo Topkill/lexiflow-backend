@@ -7,15 +7,23 @@ import org.junit.jupiter.api.Test;
 class CreateClozeTaskRequestTest {
 
     @Test
-    void safeRegenerateShouldDefaultToFalse() {
+    void regenerateShouldDefaultToFalse() {
         CreateClozeTaskRequest request = new CreateClozeTaskRequest(1L, null, null, null);
 
-        assertThat(request.safeRegenerate()).isFalse();
+        assertThat(request.regenerate()).isFalse();
     }
 
     @Test
-    void safeRegenerateShouldReturnTrueOnlyWhenExplicitlyTrue() {
-        assertThat(new CreateClozeTaskRequest(1L, null, null, true).safeRegenerate()).isTrue();
-        assertThat(new CreateClozeTaskRequest(1L, null, null, false).safeRegenerate()).isFalse();
+    void regenerateShouldReturnTrueOnlyWhenExplicitlyTrue() {
+        assertThat(new CreateClozeTaskRequest(1L, null, null, true).regenerate()).isTrue();
+        assertThat(new CreateClozeTaskRequest(1L, null, null, false).regenerate()).isFalse();
+    }
+
+    @Test
+    void optionalFieldsShouldUseDefaults() {
+        CreateClozeTaskRequest request = new CreateClozeTaskRequest(1L, null, null, null);
+
+        assertThat(request.sourceType()).isEqualTo(com.lexiflow.quiz.cloze.domain.ClozeSourceType.MIXED);
+        assertThat(request.targetWordCount()).isEqualTo(10);
     }
 }

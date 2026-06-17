@@ -13,11 +13,8 @@ public record SystemConfigQueryRequest(
         @Schema(description = "是否可编辑") Boolean editable,
         @Schema(description = "关键词，匹配配置键或说明") String keyword
 ) {
-    public long safePage() {
-        return page == null ? 1L : page;
-    }
-
-    public long safeSize() {
-        return size == null ? 20L : size;
+    public SystemConfigQueryRequest {
+        page = page == null ? 1L : page;
+        size = size == null ? 20L : size;
     }
 }

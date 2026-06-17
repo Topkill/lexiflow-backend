@@ -128,8 +128,8 @@ public class WordImportService {
     public WordImportTaskResponse importWordsFromJsonUrl(Long adminUserId, Long wordbookId, WordImportJsonUrlRequest request) {
         getWordbook(wordbookId);
         URI sourceUri = validateJsonUrl(request.sourceUrl());
-        WordImportDuplicateStrategy duplicateStrategy = request.safeDuplicateStrategy();
-        WordImportTask task = createJsonUrlTask(adminUserId, wordbookId, duplicateStrategy, sourceUri, request.shouldReplaceWordbook());
+        WordImportDuplicateStrategy duplicateStrategy = request.duplicateStrategy();
+        WordImportTask task = createJsonUrlTask(adminUserId, wordbookId, duplicateStrategy, sourceUri, request.replaceWordbook());
         try {
             publishImportTask(task);
             return WordImportTaskResponse.from(task);
@@ -184,14 +184,13 @@ public class WordImportService {
     }
 
     public PageResponse<WordImportTaskResponse> pageTasks(WordImportTaskQueryRequest request) {
-        WordImportTaskQueryRequest safeRequest = request == null ? new WordImportTaskQueryRequest(null, null, null) : request;
         LambdaQueryWrapper<WordImportTask> wrapper = new LambdaQueryWrapper<WordImportTask>()
                 .orderByDesc(WordImportTask::getCreatedAt)
                 .orderByDesc(WordImportTask::getId);
-        if (safeRequest.wordbookId() != null) {
-            wrapper.eq(WordImportTask::getWordbookId, safeRequest.wordbookId());
+        if (request.wordbookId() != null) {
+            wrapper.eq(WordImportTask::getWordbookId, request.wordbookId());
         }
-        Page<WordImportTask> page = wordImportTaskMapper.selectPage(Page.of(safeRequest.safePage(), safeRequest.safeSize()), wrapper);
+        Page<WordImportTask> page = wordImportTaskMapper.selectPage(Page.of(request.page(), request.size()), wrapper);
         return PageResponse.of(
                 page.getRecords().stream().map(WordImportTaskResponse::from).toList(),
                 page.getTotal(),
@@ -202,9 +201,8 @@ public class WordImportService {
 
     public PageResponse<WordImportErrorResponse> pageErrors(Long importTaskId, WordImportErrorQueryRequest request) {
         getTask(importTaskId);
-        WordImportErrorQueryRequest safeRequest = request == null ? new WordImportErrorQueryRequest(null, null) : request;
         Page<WordImportError> page = wordImportErrorMapper.selectPage(
-                Page.of(safeRequest.safePage(), safeRequest.safeSize()),
+                Page.of(request.page(), request.size()),
                 new LambdaQueryWrapper<WordImportError>()
                         .eq(WordImportError::getImportTaskId, importTaskId)
                         .orderByAsc(WordImportError::getRowNo)

@@ -15,11 +15,8 @@ public record StudyNoteQueryRequest(
         @Schema(description = "当前页码", example = "1") @Min(1) Long page,
         @Schema(description = "每页数量", example = "20") @Min(1) @Max(100) Long size
 ) {
-    public long safePage() {
-        return page == null ? 1 : page;
-    }
-
-    public long safeSize() {
-        return size == null ? 20 : size;
+    public StudyNoteQueryRequest {
+        page = page == null ? 1L : page;
+        size = size == null ? 20L : size;
     }
 }

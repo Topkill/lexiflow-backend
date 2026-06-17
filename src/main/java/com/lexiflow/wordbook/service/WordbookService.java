@@ -57,9 +57,8 @@ public class WordbookService {
 
     public PageResponse<WordResponse> pageWords(Long wordbookId, WordQueryRequest request) {
         getEnabledWordbook(wordbookId);
-        WordQueryRequest safeRequest = request == null ? new WordQueryRequest(null, null, null) : request;
-        Page<WordRow> page = Page.of(safeRequest.safePage(), safeRequest.safeSize());
-        String keyword = StringUtils.hasText(safeRequest.keyword()) ? safeRequest.keyword().trim() : null;
+        Page<WordRow> page = Page.of(request.page(), request.size());
+        String keyword = StringUtils.hasText(request.keyword()) ? request.keyword().trim() : null;
         IPage<WordRow> result = wordMapper.selectWordPage(page, wordbookId, keyword);
         List<WordResponse> records = result.getRecords().stream()
                 .map(WordResponse::from)

@@ -10,7 +10,7 @@ public record CreateWrongWordPracticeRequest(
         @Schema(description = "词库 ID，不传则使用当前计划词库") @Positive Long wordbookId,
         @Schema(description = "加入专项复习的错词数量", example = "10") @Min(1) @Max(50) Integer limit
 ) {
-    public int safeLimit() {
-        return limit == null ? 10 : limit;
+    public CreateWrongWordPracticeRequest {
+        limit = limit == null ? 10 : limit;
     }
 }

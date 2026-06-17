@@ -12,11 +12,8 @@ public record ReportQueryRequest(
         @Schema(description = "开始日期") LocalDate startDate,
         @Schema(description = "结束日期") LocalDate endDate
 ) {
-    public long safePage() {
-        return page == null ? 1L : page;
-    }
-
-    public long safeSize() {
-        return size == null ? 20L : size;
+    public ReportQueryRequest {
+        page = page == null ? 1L : page;
+        size = size == null ? 20L : size;
     }
 }

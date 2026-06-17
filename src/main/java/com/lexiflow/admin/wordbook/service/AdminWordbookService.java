@@ -31,13 +31,10 @@ public class AdminWordbookService {
      * 根据查询条件筛选词本，并按排序字段、创建时间和ID进行排序。
      * 支持按类型、启用状态和关键词（名称或编码）进行过滤。
      *
-     * @param request 查询请求参数，包含分页信息、类型、启用状态和关键词等。如果为null，则使用默认空参数构造。
+     * @param request 查询请求参数，包含分页信息、类型、启用状态和关键词等。
      * @return 分页响应对象，包含词本列表数据、总记录数、当前页码和每页大小。
      */
     public PageResponse<AdminWordbookResponse> pageWordbooks(AdminWordbookQueryRequest request) {
-        // 处理空请求，确保后续操作安全
-        AdminWordbookQueryRequest safeRequest = request == null ? new AdminWordbookQueryRequest(null, null, null, null, null) : request;
-
         // 构建查询条件，设置默认排序规则：升序排序字段 -> 降序创建时间 -> 降序ID
         LambdaQueryWrapper<Wordbook> wrapper = new LambdaQueryWrapper<Wordbook>()
                 .orderByAsc(Wordbook::getSortOrder)
@@ -45,23 +42,23 @@ public class AdminWordbookService {
                 .orderByDesc(Wordbook::getId);
 
         // 根据类型过滤
-        if (safeRequest.type() != null) {
-            wrapper.eq(Wordbook::getType, safeRequest.type());
+        if (request.type() != null) {
+            wrapper.eq(Wordbook::getType, request.type());
         }
 
         // 根据启用状态过滤
-        if (safeRequest.enabled() != null) {
-            wrapper.eq(Wordbook::getEnabled, safeRequest.enabled());
+        if (request.enabled() != null) {
+            wrapper.eq(Wordbook::getEnabled, request.enabled());
         }
 
         // 根据关键词模糊搜索名称或编码
-        if (StringUtils.hasText(safeRequest.keyword())) {
-            String keyword = safeRequest.keyword().trim();
+        if (StringUtils.hasText(request.keyword())) {
+            String keyword = request.keyword().trim();
             wrapper.and(query -> query.like(Wordbook::getName, keyword).or().like(Wordbook::getCode, keyword));
         }
 
         // 执行分页查询
-        Page<Wordbook> page = wordbookMapper.selectPage(Page.of(safeRequest.safePage(), safeRequest.safeSize()), wrapper);
+        Page<Wordbook> page = wordbookMapper.selectPage(Page.of(request.page(), request.size()), wrapper);
 
         // 转换结果并返回分页响应
         return PageResponse.of(
@@ -190,20 +187,18 @@ public class AdminWordbookService {
      * 分页查询单词本下的单词列表
      *
      * @param wordbookId 单词本ID，用于校验单词本是否存在
-     * @param request    查询请求参数，包含关键词、分页信息、启用状态等；若为null则使用默认空参数
+     * @param request    查询请求参数，包含关键词、分页信息、启用状态等
      * @return 分页响应结果，包含转换后的单词响应对象列表、总记录数、当前页码和每页大小
      */
     public PageResponse<AdminWordResponse> pageWords(Long wordbookId, AdminWordQueryRequest request) {
         // 校验单词本是否存在
         getWordbookEntity(wordbookId);
-        // 防止请求参数为空，确保后续操作安全
-        AdminWordQueryRequest safeRequest = request == null ? new AdminWordQueryRequest(null, null, null, null) : request;
         // 处理关键词：去除首尾空格，若为空则设为null
-        String keyword = StringUtils.hasText(safeRequest.keyword()) ? safeRequest.keyword().trim() : null;
-        // 构建分页对象，使用安全的页码和每页大小
-        Page<AdminWordRow> page = Page.of(safeRequest.safePage(), safeRequest.safeSize());
+        String keyword = StringUtils.hasText(request.keyword()) ? request.keyword().trim() : null;
+        // 构建分页对象
+        Page<AdminWordRow> page = Page.of(request.page(), request.size());
         // 执行数据库分页查询
-        var result = wordMapper.selectAdminWordPage(page, wordbookId, keyword, safeRequest.enabled());
+        var result = wordMapper.selectAdminWordPage(page, wordbookId, keyword, request.enabled());
         // 将查询结果转换为响应对象并构建分页响应
         return PageResponse.of(
                 result.getRecords().stream().map(this::toWordResponse).toList(),

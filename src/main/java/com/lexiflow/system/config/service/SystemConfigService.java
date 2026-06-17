@@ -30,23 +30,22 @@ public class SystemConfigService {
     private final ObjectMapper objectMapper;
 
     public PageResponse<SystemConfigResponse> pageConfigs(SystemConfigQueryRequest request) {
-        SystemConfigQueryRequest safeRequest = request == null ? new SystemConfigQueryRequest(null, null, null, null, null) : request;
         LambdaQueryWrapper<SystemConfig> wrapper = new LambdaQueryWrapper<SystemConfig>()
                 .orderByAsc(SystemConfig::getConfigKey)
                 .orderByDesc(SystemConfig::getCreatedAt);
-        if (safeRequest.valueType() != null) {
-            wrapper.eq(SystemConfig::getValueType, safeRequest.valueType());
+        if (request.valueType() != null) {
+            wrapper.eq(SystemConfig::getValueType, request.valueType());
         }
-        if (safeRequest.editable() != null) {
-            wrapper.eq(SystemConfig::getEditable, safeRequest.editable());
+        if (request.editable() != null) {
+            wrapper.eq(SystemConfig::getEditable, request.editable());
         }
-        if (StringUtils.hasText(safeRequest.keyword())) {
-            String keyword = safeRequest.keyword().trim();
+        if (StringUtils.hasText(request.keyword())) {
+            String keyword = request.keyword().trim();
             wrapper.and(query -> query.like(SystemConfig::getConfigKey, keyword)
                     .or()
                     .like(SystemConfig::getDescription, keyword));
         }
-        Page<SystemConfig> page = systemConfigMapper.selectPage(Page.of(safeRequest.safePage(), safeRequest.safeSize()), wrapper);
+        Page<SystemConfig> page = systemConfigMapper.selectPage(Page.of(request.page(), request.size()), wrapper);
         return PageResponse.of(
                 page.getRecords().stream().map(SystemConfigResponse::from).toList(),
                 page.getTotal(),

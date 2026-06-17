@@ -41,7 +41,6 @@ public class ReviewService {
     private final WordbookService wordbookService;
 
     public PageResponse<ReviewWordResponse> pageDueWords(Long userId, ReviewQueryRequest request) {
-        ReviewQueryRequest safeRequest = safeRequest(request);
         LambdaQueryWrapper<UserWordState> wrapper = new LambdaQueryWrapper<UserWordState>()
                 .eq(UserWordState::getUserId, userId)
                 .eq(UserWordState::getLearned, true)
@@ -49,10 +48,10 @@ public class ReviewService {
                 .le(UserWordState::getNextReviewDate, LocalDate.now())
                 .orderByAsc(UserWordState::getNextReviewDate)
                 .orderByDesc(UserWordState::getUpdatedAt);
-        if (safeRequest.wordbookId() != null) {
-            wrapper.eq(UserWordState::getWordbookId, safeRequest.wordbookId());
+        if (request.wordbookId() != null) {
+            wrapper.eq(UserWordState::getWordbookId, request.wordbookId());
         }
-        Page<UserWordState> page = userWordStateMapper.selectPage(Page.of(safeRequest.safePage(), safeRequest.safeSize()), wrapper);
+        Page<UserWordState> page = userWordStateMapper.selectPage(Page.of(request.page(), request.size()), wrapper);
         Map<Long, Word> wordMap = loadWords(page.getRecords().stream().map(UserWordState::getWordId).toList());
         List<ReviewWordResponse> records = page.getRecords().stream()
                 .map(state -> ReviewWordResponse.from(state, requireWord(wordMap, state.getWordId())))
@@ -61,21 +60,20 @@ public class ReviewService {
     }
 
     public PageResponse<WrongWordResponse> pageWrongWords(Long userId, ReviewQueryRequest request) {
-        ReviewQueryRequest safeRequest = safeRequest(request);
         LambdaQueryWrapper<WrongWord> wrapper = new LambdaQueryWrapper<WrongWord>()
                 .eq(WrongWord::getUserId, userId)
                 .eq(WrongWord::getResolved, false);
-        if (safeRequest.wordbookId() != null) {
-            wrapper.eq(WrongWord::getWordbookId, safeRequest.wordbookId());
+        if (request.wordbookId() != null) {
+            wrapper.eq(WrongWord::getWordbookId, request.wordbookId());
         }
-        boolean asc = "asc".equalsIgnoreCase(safeRequest.sortOrder());
-        if ("lastWrongAt".equalsIgnoreCase(safeRequest.sortBy())) {
+        boolean asc = "asc".equalsIgnoreCase(request.sortOrder());
+        if ("lastWrongAt".equalsIgnoreCase(request.sortBy())) {
             wrapper.orderBy(true, asc, WrongWord::getLastWrongAt);
         } else {
             wrapper.orderBy(true, asc, WrongWord::getWrongCount);
             wrapper.orderByDesc(WrongWord::getLastWrongAt);
         }
-        Page<WrongWord> page = wrongWordMapper.selectPage(Page.of(safeRequest.safePage(), safeRequest.safeSize()), wrapper);
+        Page<WrongWord> page = wrongWordMapper.selectPage(Page.of(request.page(), request.size()), wrapper);
         Map<Long, Word> wordMap = loadWords(page.getRecords().stream().map(WrongWord::getWordId).toList());
         List<WrongWordResponse> records = page.getRecords().stream()
                 .map(wrongWord -> WrongWordResponse.from(wrongWord, requireWord(wordMap, wrongWord.getWordId())))
@@ -98,14 +96,13 @@ public class ReviewService {
     }
 
     public PageResponse<FavoriteWordResponse> pageFavoriteWords(Long userId, ReviewQueryRequest request) {
-        ReviewQueryRequest safeRequest = safeRequest(request);
         LambdaQueryWrapper<FavoriteWord> wrapper = new LambdaQueryWrapper<FavoriteWord>()
                 .eq(FavoriteWord::getUserId, userId)
                 .orderByDesc(FavoriteWord::getCreatedAt);
-        if (safeRequest.wordbookId() != null) {
-            wrapper.eq(FavoriteWord::getWordbookId, safeRequest.wordbookId());
+        if (request.wordbookId() != null) {
+            wrapper.eq(FavoriteWord::getWordbookId, request.wordbookId());
         }
-        Page<FavoriteWord> page = favoriteWordMapper.selectPage(Page.of(safeRequest.safePage(), safeRequest.safeSize()), wrapper);
+        Page<FavoriteWord> page = favoriteWordMapper.selectPage(Page.of(request.page(), request.size()), wrapper);
         Map<Long, Word> wordMap = loadWords(page.getRecords().stream().map(FavoriteWord::getWordId).toList());
         List<FavoriteWordResponse> records = page.getRecords().stream()
                 .map(favoriteWord -> FavoriteWordResponse.from(favoriteWord, requireWord(wordMap, favoriteWord.getWordId())))
@@ -151,10 +148,6 @@ public class ReviewService {
             throw new BizException(ErrorCode.FAVORITE_WORD_NOT_FOUND);
         }
         favoriteWordMapper.deleteById(favoriteWord.getId());
-    }
-
-    private ReviewQueryRequest safeRequest(ReviewQueryRequest request) {
-        return request == null ? new ReviewQueryRequest(null, null, null, null, null) : request;
     }
 
     private Map<Long, Word> loadWords(List<Long> wordIds) {

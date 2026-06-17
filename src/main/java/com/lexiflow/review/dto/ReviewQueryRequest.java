@@ -13,11 +13,8 @@ public record ReviewQueryRequest(
         @Schema(description = "排序字段", example = "wrongCount") String sortBy,
         @Schema(description = "排序方向", example = "desc") String sortOrder
 ) {
-    public long safePage() {
-        return page == null ? 1 : page;
-    }
-
-    public long safeSize() {
-        return size == null ? 20 : size;
+    public ReviewQueryRequest {
+        page = page == null ? 1L : page;
+        size = size == null ? 20L : size;
     }
 }

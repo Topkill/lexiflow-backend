@@ -12,11 +12,8 @@ public record AdminUserQueryRequest(
         @Schema(description = "邮箱或昵称关键字") String keyword,
         @Schema(description = "用户状态") UserStatus status
 ) {
-    public long safePage() {
-        return page == null ? 1L : page;
-    }
-
-    public long safeSize() {
-        return size == null ? 20L : size;
+    public AdminUserQueryRequest {
+        page = page == null ? 1L : page;
+        size = size == null ? 20L : size;
     }
 }

@@ -106,9 +106,9 @@ public class ClozeQuizService {
     public CreateClozeTaskResponse createClozeTask(Long userId, CreateClozeTaskRequest request) {
         DailyTask dailyTask = getOwnedDailyTask(userId, request.dailyTaskId());
         Long wordbookId = dailyTaskWordbookId(dailyTask);
-        ClozeSourceType sourceType = request.safeSourceType();
-        int targetWordCount = request.safeTargetWordCount();
-        boolean regenerate = request.safeRegenerate();
+        ClozeSourceType sourceType = request.sourceType();
+        int targetWordCount = request.targetWordCount();
+        boolean regenerate = request.regenerate();
         if (sourceType == ClozeSourceType.COMPLETED_GROUP && dailyTask.getStatus() != DailyTaskStatus.DONE) {
             throw new BizException(ErrorCode.BAD_REQUEST, "完成本组单词后才能生成本组完形填空");
         }

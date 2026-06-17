@@ -11,11 +11,8 @@ public record WordQueryRequest(
         @Schema(description = "每页数量", example = "20") @Min(1) @Max(100) Long size,
         @Schema(description = "单词或释义关键字", example = "ability") @Size(max = 64) String keyword
 ) {
-    public long safePage() {
-        return page == null ? 1 : page;
-    }
-
-    public long safeSize() {
-        return size == null ? 20 : size;
+    public WordQueryRequest {
+        page = page == null ? 1L : page;
+        size = size == null ? 20L : size;
     }
 }
