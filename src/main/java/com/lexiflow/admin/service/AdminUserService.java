@@ -91,7 +91,7 @@ public class AdminUserService {
     }
 
     /**
-     * 停用指定业务数据。
+     * 停用指定用户。
      *
      * @param userId 用户ID
      */

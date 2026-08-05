@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.lexiflow.ai.content.domain.AiContentType;
 import io.swagger.v3.oas.annotations.media.Schema;
 
-@Schema(description = "AI 单词短内容响应")
+@Schema(description = "AI 单词问答响应")
 public record WordAiContentResponse(
         @Schema(description = "是否命中缓存", example = "true") Boolean cacheHit,
         @Schema(description = "AI 内容类型", example = "WORD_QA") AiContentType contentType,

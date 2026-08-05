@@ -13,7 +13,6 @@ import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -33,7 +32,7 @@ public class AdminUserController {
 
     @Operation(summary = "用户分页列表")
     @GetMapping
-    public ApiResponse<PageResponse<AdminUserResponse>> pageUsers(@Valid @ModelAttribute AdminUserQueryRequest request) {
+    public ApiResponse<PageResponse<AdminUserResponse>> pageUsers(@Valid AdminUserQueryRequest request) {
         return ApiResponse.success(adminUserService.pageUsers(request));
     }
 

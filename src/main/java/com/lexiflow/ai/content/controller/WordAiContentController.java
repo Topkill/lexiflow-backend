@@ -24,7 +24,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
-@Tag(name = "AI 单词短内容接口")
+@Tag(name = "AI 单词问答接口")
 @Validated
 @RestController
 @RequiredArgsConstructor
