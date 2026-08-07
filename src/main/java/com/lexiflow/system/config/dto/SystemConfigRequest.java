@@ -6,6 +6,10 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
+/**
+ * 系统配置保存请求 DTO。
+ * <p>用于新增或编辑系统配置时提交的请求体。</p>
+ */
 @Schema(description = "系统配置保存请求")
 public record SystemConfigRequest(
         @Schema(description = "配置键") @NotBlank @Size(max = 128) String configKey,

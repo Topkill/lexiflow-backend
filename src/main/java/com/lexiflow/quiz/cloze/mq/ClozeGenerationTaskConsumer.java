@@ -9,6 +9,12 @@ import org.springframework.amqp.support.AmqpHeaders;
 import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.stereotype.Component;
 
+/**
+ * 完形填空生成任务消费者。
+ * <p>监听 RabbitMQ 队列，处理完形填空生成任务消息。</p>
+ *
+ * @see ClozeQuizService
+ */
 @Component
 @RequiredArgsConstructor
 @Slf4j

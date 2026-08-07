@@ -30,6 +30,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+/**
+ * 复习与错词收藏服务。
+ * <p>提供到期复习词查询、错词本管理（查询/标记已解决）、收藏词管理（查询/收藏/取消收藏）等功能。</p>
+ */
 @Service
 @RequiredArgsConstructor
 public class ReviewService {
@@ -40,6 +44,13 @@ public class ReviewService {
     private final WordMapper wordMapper;
     private final WordbookService wordbookService;
 
+    /**
+     * 分页查询到期复习词。
+     *
+     * @param userId  当前用户 ID
+     * @param request 查询参数
+     * @return 分页复习词响应
+     */
     public PageResponse<ReviewWordResponse> pageDueWords(Long userId, ReviewQueryRequest request) {
         LambdaQueryWrapper<UserWordState> wrapper = new LambdaQueryWrapper<UserWordState>()
                 .eq(UserWordState::getUserId, userId)
@@ -59,6 +70,13 @@ public class ReviewService {
         return PageResponse.of(records, page.getTotal(), page.getCurrent(), page.getSize());
     }
 
+    /**
+     * 分页查询错词本。
+     *
+     * @param userId  当前用户 ID
+     * @param request 查询参数
+     * @return 分页错词响应
+     */
     public PageResponse<WrongWordResponse> pageWrongWords(Long userId, ReviewQueryRequest request) {
         LambdaQueryWrapper<WrongWord> wrapper = new LambdaQueryWrapper<WrongWord>()
                 .eq(WrongWord::getUserId, userId)
@@ -81,6 +99,12 @@ public class ReviewService {
         return PageResponse.of(records, page.getTotal(), page.getCurrent(), page.getSize());
     }
 
+    /**
+     * 标记指定错词为已解决。
+     *
+     * @param userId      当前用户 ID
+     * @param wrongWordId 错词记录 ID
+     */
     @Transactional
     public void resolveWrongWord(Long userId, Long wrongWordId) {
         WrongWord wrongWord = wrongWordMapper.selectOne(new LambdaQueryWrapper<WrongWord>()
@@ -95,6 +119,13 @@ public class ReviewService {
         wrongWordMapper.updateById(wrongWord);
     }
 
+    /**
+     * 分页查询收藏词列表。
+     *
+     * @param userId  当前用户 ID
+     * @param request 查询参数
+     * @return 分页收藏词响应
+     */
     public PageResponse<FavoriteWordResponse> pageFavoriteWords(Long userId, ReviewQueryRequest request) {
         LambdaQueryWrapper<FavoriteWord> wrapper = new LambdaQueryWrapper<FavoriteWord>()
                 .eq(FavoriteWord::getUserId, userId)
@@ -110,6 +141,13 @@ public class ReviewService {
         return PageResponse.of(records, page.getTotal(), page.getCurrent(), page.getSize());
     }
 
+    /**
+     * 收藏单词。若已收藏则更新备注，否则新建收藏记录。
+     *
+     * @param userId  当前用户 ID
+     * @param request 收藏请求
+     * @return 收藏响应
+     */
     @Transactional
     public FavoriteWordResponse favoriteWord(Long userId, FavoriteWordRequest request) {
         wordbookService.getEnabledWordbook(request.wordbookId());
@@ -138,6 +176,12 @@ public class ReviewService {
         return FavoriteWordResponse.from(favoriteWord, word);
     }
 
+    /**
+     * 取消收藏指定单词。
+     *
+     * @param userId          当前用户 ID
+     * @param favoriteWordId  收藏记录 ID
+     */
     @Transactional
     public void deleteFavoriteWord(Long userId, Long favoriteWordId) {
         FavoriteWord favoriteWord = favoriteWordMapper.selectOne(new LambdaQueryWrapper<FavoriteWord>()

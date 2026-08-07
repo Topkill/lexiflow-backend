@@ -7,6 +7,10 @@ import java.time.LocalDateTime;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 
+/**
+ * 完形填空作答 Mapper 接口。
+ * <p>提供对 {@link ClozeAttempt} 实体的数据库操作，包括正确率统计。</p>
+ */
 public interface ClozeAttemptMapper extends BaseMapper<ClozeAttempt> {
 
     @Select("""

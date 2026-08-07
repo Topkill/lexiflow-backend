@@ -19,6 +19,14 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 
+/**
+ * AI 公共配置管理服务
+ * <p>
+ * 提供对公共 AI 配置的增删改查操作，包括配置的创建、更新、启用/禁用、激活等功能。
+ * 系统同一时间只允许一个公共配置处于激活状态。API 密钥采用加密存储，
+ * 配置变更后会清除运行时缓存并发布缓存失效事件以保证分布式环境下的数据一致性。
+ * </p>
+ */
 @Service
 @RequiredArgsConstructor
 public class AiPublicConfigService {

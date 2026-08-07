@@ -8,6 +8,11 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
+/**
+ * 后台词库保存请求 DTO。
+ *
+ * <p>用于创建或更新词库，包含词库的基本信息和配置。</p>
+ */
 @Schema(description = "后台词库保存请求")
 public record AdminWordbookRequest(
         @Schema(description = "词库名称") @NotBlank @Size(max = 128) String name,

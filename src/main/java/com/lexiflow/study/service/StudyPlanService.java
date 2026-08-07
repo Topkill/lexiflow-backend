@@ -34,6 +34,11 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+/**
+ * 学习计划服务。
+ * <p>提供学习计划的创建、查询、更新、状态变更（暂停/恢复/结束）以及任务重新规划等功能。
+ * 支持主计划唯一性约束，更新计划时自动重新规划最新的待执行每日任务。</p>
+ */
 @Service
 @RequiredArgsConstructor
 public class StudyPlanService {
@@ -47,6 +52,14 @@ public class StudyPlanService {
     private final UserWordStateMapper userWordStateMapper;
     private final WordMapper wordMapper;
 
+    /**
+     * 创建学习计划。
+     * <p>若指定为主计划，会自动结束已有的主计划。</p>
+     *
+     * @param userId  当前用户 ID
+     * @param request 创建请求
+     * @return 计划响应
+     */
     @Transactional
     public StudyPlanResponse createPlan(Long userId, CreateStudyPlanRequest request) {
         Wordbook wordbook = wordbookService.getEnabledWordbook(request.wordbookId());
@@ -77,6 +90,12 @@ public class StudyPlanService {
         return StudyPlanResponse.from(plan, wordbook);
     }
 
+    /**
+     * 获取当前用户的主学习计划。
+     *
+     * @param userId 当前用户 ID
+     * @return 主计划响应
+     */
     public StudyPlanResponse getPrimaryPlan(Long userId) {
         StudyPlan plan = findPrimaryPlan(userId);
         if (plan == null) {
@@ -85,6 +104,12 @@ public class StudyPlanService {
         return toResponse(plan);
     }
 
+    /**
+     * 获取当前用户的主学习计划实体（仅 ACTIVE 状态）。
+     *
+     * @param userId 当前用户 ID
+     * @return 主计划实体
+     */
     public StudyPlan getPrimaryActivePlanEntity(Long userId) {
         StudyPlan plan = studyPlanMapper.selectOne(new LambdaQueryWrapper<StudyPlan>()
                 .eq(StudyPlan::getUserId, userId)
@@ -98,6 +123,14 @@ public class StudyPlanService {
         return plan;
     }
 
+    /**
+     * 更新学习计划设置，并重新规划最新的待执行任务。
+     *
+     * @param userId  当前用户 ID
+     * @param planId  计划 ID
+     * @param request 更新请求
+     * @return 计划响应
+     */
     @Transactional
     public StudyPlanResponse updatePlan(Long userId, Long planId, UpdateStudyPlanRequest request) {
         StudyPlan plan = getOwnedPlan(userId, planId);
@@ -113,6 +146,7 @@ public class StudyPlanService {
         return toResponse(plan);
     }
 
+    /** 暂停学习计划。 */
     @Transactional
     public StudyPlanResponse pausePlan(Long userId, Long planId) {
         StudyPlan plan = getOwnedPlan(userId, planId);
@@ -124,6 +158,7 @@ public class StudyPlanService {
         return toResponse(plan);
     }
 
+    /** 恢复已暂停的学习计划。 */
     @Transactional
     public StudyPlanResponse resumePlan(Long userId, Long planId) {
         StudyPlan plan = getOwnedPlan(userId, planId);
@@ -135,6 +170,7 @@ public class StudyPlanService {
         return toResponse(plan);
     }
 
+    /** 结束学习计划。 */
     @Transactional
     public StudyPlanResponse endPlan(Long userId, Long planId) {
         StudyPlan plan = getOwnedPlan(userId, planId);

@@ -22,6 +22,12 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+/**
+ * 词库查询控制器。
+ * <p>提供词库列表、词库详情、词库内单词分页查询以及精确查词等接口。</p>
+ *
+ * @see WordbookService
+ */
 @Tag(name = "词库接口")
 @Validated
 @RestController

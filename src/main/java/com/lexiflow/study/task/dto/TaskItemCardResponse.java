@@ -4,6 +4,10 @@ import com.lexiflow.study.progress.domain.MasteryStatus;
 import com.lexiflow.wordbook.domain.Word;
 import io.swagger.v3.oas.annotations.media.Schema;
 
+/**
+ * 学习卡片详情响应 DTO。
+ * <p>包含单词的完整信息（释义、音标、例句、短语、同近义词等），以及收藏状态、掌握状态和选择题。</p>
+ */
 @Schema(description = "学习卡片详情响应")
 public record TaskItemCardResponse(
         @Schema(description = "任务项 ID", example = "1900000000000005001") String itemId,
@@ -29,6 +33,7 @@ public record TaskItemCardResponse(
         @Schema(description = "掌握状态", example = "NEW") String masteryStatus,
         @Schema(description = "回忆阶段中文释义选择题") ChoiceQuestionResponse choiceQuestion
 ) {
+    /** 从实体对象构建响应。 */
     public static TaskItemCardResponse from(
             com.lexiflow.study.task.domain.DailyTaskItem item,
             Word word,

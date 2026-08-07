@@ -20,6 +20,10 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+/**
+ * 学习计划接口控制器。
+ * <p>提供创建、查询、更新、暂停、恢复和结束学习计划的 REST 端点。</p>
+ */
 @Tag(name = "学习计划接口")
 @Validated
 @RestController
@@ -29,18 +33,21 @@ public class StudyPlanController {
 
     private final StudyPlanService studyPlanService;
 
+    /** 创建新的学习计划。 */
     @Operation(summary = "创建学习计划")
     @PostMapping
     public ApiResponse<StudyPlanResponse> create(@Valid @RequestBody CreateStudyPlanRequest request) {
         return ApiResponse.success(studyPlanService.createPlan(AuthContext.currentUserId(), request));
     }
 
+    /** 查询当前用户的主学习计划。 */
     @Operation(summary = "查询主学习计划")
     @GetMapping("/primary")
     public ApiResponse<StudyPlanResponse> primary() {
         return ApiResponse.success(studyPlanService.getPrimaryPlan(AuthContext.currentUserId()));
     }
 
+    /** 更新学习计划的基本设置。 */
     @Operation(summary = "更新学习计划")
     @PutMapping("/{planId}")
     public ApiResponse<StudyPlanResponse> update(
@@ -50,18 +57,21 @@ public class StudyPlanController {
         return ApiResponse.success(studyPlanService.updatePlan(AuthContext.currentUserId(), planId, request));
     }
 
+    /** 暂停进行中的学习计划。 */
     @Operation(summary = "暂停学习计划")
     @PostMapping("/{planId}/pause")
     public ApiResponse<StudyPlanResponse> pause(@PathVariable @Positive Long planId) {
         return ApiResponse.success(studyPlanService.pausePlan(AuthContext.currentUserId(), planId));
     }
 
+    /** 恢复已暂停的学习计划。 */
     @Operation(summary = "恢复学习计划")
     @PostMapping("/{planId}/resume")
     public ApiResponse<StudyPlanResponse> resume(@PathVariable @Positive Long planId) {
         return ApiResponse.success(studyPlanService.resumePlan(AuthContext.currentUserId(), planId));
     }
 
+    /** 结束学习计划。 */
     @Operation(summary = "结束学习计划")
     @PostMapping("/{planId}/end")
     public ApiResponse<StudyPlanResponse> end(@PathVariable @Positive Long planId) {

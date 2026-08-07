@@ -5,6 +5,15 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Positive;
 
+/**
+ * 复习列表分页查询参数。
+ *
+ * @param wordbookId 词库 ID（可选）
+ * @param page       页码，默认 1
+ * @param size       每页数量，默认 20
+ * @param sortBy     排序字段（如 wrongCount、lastWrongAt）
+ * @param sortOrder  排序方向（asc/desc）
+ */
 @Schema(description = "复习列表查询参数")
 public record ReviewQueryRequest(
         @Schema(description = "词库 ID") @Positive Long wordbookId,

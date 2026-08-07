@@ -55,6 +55,10 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
+/**
+ * 单词导入服务。
+ * <p>处理 Excel 和 JSON URL 两种方式的单词导入，支持异步任务执行、错误记录、模板生成等功能。</p>
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j

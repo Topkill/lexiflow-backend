@@ -22,25 +22,62 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+/**
+ * 选择题生成服务。
+ * <p>根据当前学习的单词，从词库中智能选取干扰项，生成中文释义四选一选择题。
+ * 干扰项选取采用三级回退策略：
+ * <ol>
+ *   <li>优先从词库中选取释义相近的单词（基于评分排序）</li>
+ *   <li>不足时从当前任务组的单词中随机选取</li>
+ *   <li>仍不足时从词库候选中随机选取</li>
+ * </ol>
+ * 选项顺序基于任务项 ID 的确定性随机种子打乱，保证同一任务项的选项顺序稳定。</p>
+ */
 @Service
 @RequiredArgsConstructor
 public class WordChoiceQuestionService {
 
+    /** 选项总数 */
     private static final int OPTION_COUNT = 4;
+    /** 干扰项数量（选项数 - 1） */
     private static final int DISTRACTOR_COUNT = OPTION_COUNT - 1;
+    /** 完全匹配释义的权重 */
     private static final long EXACT_DEFINITION_WEIGHT = 1L << 16;
+    /** 单词字符重叠度权重 */
     private static final long WORD_COMMON_WEIGHT = 1L << 16;
+    /** 强关联词（包含关系/相关词）权重 */
     private static final long STRONG_RELATION_WEIGHT = 1L << 20;
+    /** 相同词性权重 */
     private static final long SAME_POS_WEIGHT = 1L << 10;
+    /** 释义 JSON 中用于提取文本的字段名列表 */
     private static final List<String> TEXT_FIELDS = List.of("cn", "definition", "definitionZh", "zh", "chinese", "meaning");
 
     private final WordMapper wordMapper;
     private final ObjectMapper objectMapper;
 
+    /**
+     * 构建选择题（不含额外任务词列表的回退）。
+     *
+     * @param taskItemId 任务项 ID
+     * @param wordbookId 词书 ID
+     * @param word       当前学习的单词
+     * @return 选择题响应，若无有效释义则返回 null
+     */
     public ChoiceQuestionResponse buildQuestion(Long taskItemId, Long wordbookId, Word word) {
         return buildQuestion(taskItemId, wordbookId, word, List.of());
     }
 
+    /**
+     * 构建中文释义选择题。
+     * <p>从词库中选取干扰项，生成 4 个选项的选择题。
+     * 干扰项按评分从高到低选取，不足时依次从任务组单词、词库候选中随机补充。</p>
+     *
+     * @param taskItemId     任务项 ID（用于确定性随机种子）
+     * @param wordbookId     词书 ID
+     * @param word           当前学习的单词
+     * @param dailyTaskWords 当前任务组的单词列表（作为回退干扰项来源）
+     * @return 选择题响应，若无有效释义则返回 null
+     */
     public ChoiceQuestionResponse buildQuestion(Long taskItemId, Long wordbookId, Word word, List<Word> dailyTaskWords) {
         WordChoice target = toChoice(word);
         if (!target.hasDefinition()) {
@@ -86,6 +123,7 @@ public class WordChoiceQuestionService {
         return new ChoiceQuestionResponse(correctIndex, responses);
     }
 
+    /** 将干扰项单词转换为选项响应，为正确选项显示完整释义，为干扰项显示最相关的释义。 */
     private ChoiceQuestionOptionResponse toOptionResponse(WordChoice target, WordChoice choice) {
         if (Objects.equals(target.wordId(), choice.wordId())) {
             return new ChoiceQuestionOptionResponse(String.valueOf(choice.wordId()), choice.primaryPos(), choice.definition());
@@ -98,12 +136,14 @@ public class WordChoiceQuestionService {
         return new ChoiceQuestionOptionResponse(String.valueOf(choice.wordId()), displayPos, displayDefinition);
     }
 
+    /** 从候选词的所有释义中找出与目标词最相关的释义。 */
     private Definition mostRelevantDefinition(WordChoice target, WordChoice choice) {
         return choice.definitions().stream()
                 .max(Comparator.comparingLong(definition -> definitionRelevance(target, definition)))
                 .orElse(null);
     }
 
+    /** 计算候选释义与目标词释义的相关度评分。 */
     private long definitionRelevance(WordChoice target, Definition definition) {
         long score = 0;
         for (Definition targetDefinition : target.definitions()) {
@@ -118,6 +158,7 @@ public class WordChoiceQuestionService {
         return score;
     }
 
+    /** 从当前任务组的单词中随机选取干扰项（第二级回退）。 */
     private void addRandomWordDistractors(
             WordChoice target,
             List<WordChoice> distractors,
@@ -138,6 +179,7 @@ public class WordChoiceQuestionService {
         addRandomChoiceDistractors(target, distractors, fallbackChoices, taskItemId, wordId, salt);
     }
 
+    /** 从候选列表中按确定性随机顺序选取干扰项（通用回退逻辑）。 */
     private void addRandomChoiceDistractors(
             WordChoice target,
             List<WordChoice> distractors,
@@ -155,6 +197,7 @@ public class WordChoiceQuestionService {
         }
     }
 
+    /** 尝试添加一个干扰项，去重并校验可用性。 */
     private boolean addDistractor(WordChoice target, List<WordChoice> distractors, WordChoice candidate) {
         if (!canUseCandidate(target, candidate)) {
             return false;
@@ -167,16 +210,22 @@ public class WordChoiceQuestionService {
         return true;
     }
 
+    /** 判断候选词是否可作为干扰项（有释义且不与目标词重复）。 */
     private boolean canUseCandidate(WordChoice target, WordChoice candidate) {
         return candidate.hasDefinition() && !sameChoice(target, candidate);
     }
 
+    /** 判断两个选项是否代表同一个词（同 ID、同拼写或同释义）。 */
     private boolean sameChoice(WordChoice first, WordChoice second) {
         return Objects.equals(first.wordId(), second.wordId())
                 || sameWord(first, second)
                 || sameDefinitions(first, second);
     }
 
+    /**
+     * 计算候选词与目标词的干扰度评分。
+     * <p>评分维度：释义重叠、字符重叠、单词包含关系、相关词关联、词性一致。</p>
+     */
     private long score(WordChoice target, WordChoice candidate) {
         long score = 0;
         for (Definition targetDefinition : target.definitions()) {
@@ -201,6 +250,7 @@ public class WordChoiceQuestionService {
         return score;
     }
 
+    /** 将 Word 实体转换为内部 WordChoice 表示。 */
     private WordChoice toChoice(Word word) {
         List<Definition> definitions = parseDefinitions(word.getTrans());
         String fallbackDefinition = normalizeText(word.getPrimaryDefinition());
@@ -222,6 +272,7 @@ public class WordChoiceQuestionService {
         );
     }
 
+    /** 从释义 JSON 字符串中解析出所有释义条目。 */
     private List<Definition> parseDefinitions(String json) {
         if (!StringUtils.hasText(json)) {
             return List.of();
@@ -236,6 +287,7 @@ public class WordChoiceQuestionService {
         }
     }
 
+    /** 递归遍历 JSON 节点，收集所有释义文本到 Map 中（去重，保留高频）。 */
     private void collectDefinitions(JsonNode node, int inheritedFrequency, Map<String, Definition> definitions) {
         collectDefinitions(node, "", inheritedFrequency, definitions);
     }
@@ -265,6 +317,7 @@ public class WordChoiceQuestionService {
         putDefinition(definitions, inheritedPos, node.asText(), inheritedFrequency);
     }
 
+    /** 递归遍历 JSON 节点，收集所有文本值（支持数组、对象和叶子节点）。 */
     private List<String> collectTextValues(JsonNode node) {
         if (node == null || node.isMissingNode() || node.isNull()) {
             return List.of();
@@ -283,6 +336,7 @@ public class WordChoiceQuestionService {
         return StringUtils.hasText(text) ? List.of(text) : List.of();
     }
 
+    /** 将一条释义放入 Map，相同释义保留频率更高的版本。 */
     private void putDefinition(Map<String, Definition> definitions, String pos, String value, int frequency) {
         String text = normalizeText(value);
         if (!StringUtils.hasText(text)) {
@@ -295,6 +349,7 @@ public class WordChoiceQuestionService {
         }
     }
 
+    /** 从 JSON 节点中读取 frequency 字段，支持数字和字符串格式。 */
     private int readFrequency(JsonNode node, int fallback) {
         JsonNode frequency = node.path("frequency");
         if (frequency.isNumber()) {
@@ -310,6 +365,7 @@ public class WordChoiceQuestionService {
         return fallback;
     }
 
+    /** 从相关词 JSON 中解析出所有关联单词。 */
     private Set<String> parseRelatedWords(String json) {
         if (!StringUtils.hasText(json)) {
             return Set.of();
@@ -337,10 +393,12 @@ public class WordChoiceQuestionService {
         }
     }
 
+    /** 判断两个选项是否为同一个单词（拼写相同）。 */
     private boolean sameWord(WordChoice target, WordChoice candidate) {
         return StringUtils.hasText(target.word()) && target.word().equals(candidate.word());
     }
 
+    /** 判断两个选项的释义是否相同（主释义或释义键相同）。 */
     private boolean sameDefinitions(WordChoice target, WordChoice candidate) {
         String targetDefinition = normalizeForCompare(target.definition());
         String candidateDefinition = normalizeForCompare(candidate.definition());
@@ -350,6 +408,7 @@ public class WordChoiceQuestionService {
         return StringUtils.hasText(target.definitionKey()) && target.definitionKey().equals(candidate.definitionKey());
     }
 
+    /** 生成释义键，用于去重比较。 */
     private String definitionKey(List<Definition> definitions) {
         return definitions.stream()
                 .map(definition -> normalizeForCompare(definition.text()))
@@ -357,6 +416,7 @@ public class WordChoiceQuestionService {
                 .collect(Collectors.joining("|"));
     }
 
+    /** 计算两个字符串的字符重叠度评分（共有字符 +4，独有字符 -1）。 */
     private long commonScore(String first, String second) {
         Set<Integer> firstChars = codePoints(first);
         Set<Integer> secondChars = codePoints(second);
@@ -370,6 +430,7 @@ public class WordChoiceQuestionService {
         return score;
     }
 
+    /** 提取字符串的所有非空白字符 code point 集合。 */
     private Set<Integer> codePoints(String value) {
         if (!StringUtils.hasText(value)) {
             return Set.of();
@@ -381,14 +442,17 @@ public class WordChoiceQuestionService {
                 .collect(Collectors.toCollection(LinkedHashSet::new));
     }
 
+    /** 规范化文本：去除多余空白。 */
     private String normalizeText(String value) {
         return value == null ? "" : value.replaceAll("\\s+", " ").trim();
     }
 
+    /** 规范化文本用于比较：转小写并去除所有空白。 */
     private String normalizeForCompare(String value) {
         return normalizeText(value).toLowerCase(Locale.ROOT).replaceAll("\\s+", "");
     }
 
+    /** 基于任务项 ID、单词 ID 和盐值生成确定性随机种子。 */
     private long seed(Long taskItemId, Long wordId, String salt) {
         long seed = 1_125_899_906_842_597L;
         seed = seed * 31 + (taskItemId == null ? 0 : taskItemId);
@@ -399,9 +463,11 @@ public class WordChoiceQuestionService {
         return seed;
     }
 
+    /** 释义条目：词性、释义文本、使用频率。 */
     private record Definition(String pos, String text, int frequency) {
     }
 
+    /** 单词选择题内部表示，包含单词信息和所有释义。 */
     private record WordChoice(
             Long wordId,
             String word,
@@ -417,6 +483,7 @@ public class WordChoiceQuestionService {
         }
     }
 
+    /** 带评分的候选词。 */
     private record ScoredChoice(WordChoice choice, long score) {
     }
 }

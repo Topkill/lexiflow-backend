@@ -64,6 +64,12 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+/**
+ * 完形填空核心服务。
+ * <p>提供完形填空任务创建、AI 生成、作答提交、结果查询等完整功能。
+ * 支持多种出题来源（今日新词、错词、混合、完成组词）、AI 结果缓存复用、
+ * 分布式锁并发控制、异步任务管理以及学习事件记录。</p>
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j
@@ -103,6 +109,13 @@ public class ClozeQuizService {
     private final RedisDistributedLockService redisDistributedLockService;
     private final ClozeGenerationTaskPublisher clozeGenerationTaskPublisher;
 
+    /**
+     * 创建完形填空生成任务。
+     *
+     * @param userId  当前用户 ID
+     * @param request 创建请求，包含每日任务 ID、出题来源、目标词数等
+     * @return 包含异步任务状态的响应
+     */
     public CreateClozeTaskResponse createClozeTask(Long userId, CreateClozeTaskRequest request) {
         DailyTask dailyTask = getOwnedDailyTask(userId, request.dailyTaskId());
         Long wordbookId = dailyTaskWordbookId(dailyTask);
@@ -125,6 +138,14 @@ public class ClozeQuizService {
         }
     }
 
+    /**
+     * 预热完成组单词的完形填空。
+     * <p>在事务提交后异步执行，若当前任务已完成且来源为每日任务，则自动创建预热任务。
+     * 若在事务中调用，会注册事务同步回调以确保在事务提交后执行。</p>
+     *
+     * @param userId      当前用户 ID
+     * @param dailyTaskId 每日任务 ID
+     */
     public void prefetchCompletedGroupCloze(Long userId, Long dailyTaskId) {
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
@@ -163,6 +184,12 @@ public class ClozeQuizService {
         }
     }
 
+    /**
+     * 处理完形填空生成异步任务（由 MQ 消费者调用）。
+     *
+     * @param taskId      异步任务 ID
+     * @param redelivered 是否为 RabbitMQ 重投递消息
+     */
     public void processClozeTask(Long taskId, boolean redelivered) {
         if (taskId == null) {
             return;
@@ -372,6 +399,13 @@ public class ClozeQuizService {
         }
     }
 
+    /**
+     * 获取完形填空详情，包含空格列表和作答信息。
+     *
+     * @param userId 当前用户 ID
+     * @param quizId 完形填空 ID
+     * @return 完形填空响应
+     */
     @Transactional
     public ClozeQuizResponse getQuiz(Long userId, Long quizId) {
         ClozeQuiz quiz = getOwnedQuiz(userId, quizId);
@@ -385,6 +419,16 @@ public class ClozeQuizService {
         );
     }
 
+    /**
+     * 提交完形填空作答。
+     * <p>校验答案、计算得分、记录作答详情，并为每个答错的单词记录学习事件和错词本。
+     * 每个完形填空仅允许提交一次作答。</p>
+     *
+     * @param userId  当前用户 ID
+     * @param quizId  完形填空 ID
+     * @param request 作答请求，包含各空的答案和用时
+     * @return 作答结果响应
+     */
     @Transactional
     public ClozeAttemptResponse submitAttempt(Long userId, Long quizId, SubmitClozeAttemptRequest request) {
         ClozeQuiz quiz = getOwnedQuiz(userId, quizId);
@@ -464,6 +508,13 @@ public class ClozeQuizService {
         return ClozeAttemptResponse.of(attempt, responses);
     }
 
+    /**
+     * 获取指定作答的详情。
+     *
+     * @param userId    当前用户 ID
+     * @param attemptId 作答 ID
+     * @return 作答响应，包含各空的答案和解析
+     */
     @Transactional
     public ClozeAttemptResponse getAttempt(Long userId, Long attemptId) {
         ClozeAttempt attempt = clozeAttemptMapper.selectOne(new LambdaQueryWrapper<ClozeAttempt>()
@@ -524,6 +575,20 @@ public class ClozeQuizService {
                 .collect(Collectors.toMap(Word::getId, Function.identity()));
     }
 
+    /**
+     * 生成完形填空题目。
+     * <p>选取目标词和背景词，构建 AI 提示词，调用 AI 生成短文并程序化处理挖空。
+     * 支持基于 sourceHash 的缓存复用和分布式锁并发控制，最多重试 {@value #MAX_GENERATE_ATTEMPTS} 次。</p>
+     *
+     * @param userId         当前用户 ID
+     * @param dailyTask      每日任务
+     * @param wordbookId     词书 ID
+     * @param asyncTaskId    异步任务 ID
+     * @param sourceType     出题来源类型
+     * @param targetWordCount 目标挖空词数
+     * @param regenerate     是否强制重新生成
+     * @return 生成的完形填空实体
+     */
     protected ClozeQuiz generateQuiz(Long userId, DailyTask dailyTask, Long wordbookId, Long asyncTaskId, ClozeSourceType sourceType, int targetWordCount, boolean regenerate) {
         ClozeWordSelection selection = selectClozeWords(userId, dailyTask, wordbookId, sourceType, targetWordCount);
         if (selection.targetWords().isEmpty() || selection.blankWords().isEmpty()) {

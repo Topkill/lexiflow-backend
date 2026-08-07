@@ -15,6 +15,12 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+/**
+ * 用户私有 AI 配置接口控制器。
+ *
+ * <p>提供当前登录用户查询和保存私有 AI 配置的接口。
+ * 私有配置用于用户使用自己的 API Key 调用 AI 功能。</p>
+ */
 @Tag(name = "用户私有 AI 配置接口")
 @RestController
 @RequiredArgsConstructor

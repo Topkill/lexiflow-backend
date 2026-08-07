@@ -10,6 +10,11 @@ import com.lexiflow.common.api.PageResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
+/**
+ * 后台 AI 调用日志服务。
+ *
+ * <p>提供管理员查询 AI 调用日志的分页功能，支持按用户、状态、类型、时间范围等条件筛选。</p>
+ */
 @Service
 @RequiredArgsConstructor
 public class AdminAiCallLogService {

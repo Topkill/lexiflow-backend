@@ -9,6 +9,12 @@ import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.stereotype.Component;
 
+/**
+ * 单词导入任务消费者。
+ * <p>监听 RabbitMQ 队列，处理单词导入任务消息。</p>
+ *
+ * @see WordImportService
+ */
 @Component
 @RequiredArgsConstructor
 @Slf4j

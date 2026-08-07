@@ -8,6 +8,12 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import java.math.BigDecimal;
 
+/**
+ * 保存用户私有 AI 配置请求 DTO
+ * <p>
+ * 用户用于配置个人 AI 接口的请求对象，包含 API 地址、密钥、模型名称、温度参数等。
+ * </p>
+ */
 @Schema(description = "保存用户私有 AI 配置请求")
 public record SaveUserAiConfigRequest(
         @Schema(description = "OpenAI 兼容接口 Base URL") @NotBlank @Size(max = 512) String apiBaseUrl,

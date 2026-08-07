@@ -24,6 +24,12 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
+/**
+ * AI 单词问答控制器
+ * <p>
+ * 提供单词 AI 问答相关的 REST 接口，支持同步问答、异步任务创建、状态查询以及 SSE 流式输出。
+ * </p>
+ */
 @Tag(name = "AI 单词问答接口")
 @Validated
 @RestController

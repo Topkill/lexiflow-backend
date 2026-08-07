@@ -11,18 +11,33 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
+/**
+ * Token 版本服务。
+ *
+ * <p>管理用户的 Token 版本号，用于 JWT 失效机制。
+ * 修改密码等安全操作时递增版本号，使旧 Token 失效。
+ * 版本号在 Redis 中缓存 5 分钟，减少数据库查询。</p>
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class TokenVersionService {
 
+    /** 默认 Token 版本号 */
     static final long DEFAULT_VERSION = 1L;
 
+    /** 缓存 TTL：5 分钟 */
     private static final Duration CACHE_TTL = Duration.ofMinutes(5);
 
     private final StringRedisTemplate stringRedisTemplate;
     private final UserMapper userMapper;
 
+    /**
+     * 获取用户当前的 Token 版本号。
+     *
+     * @param userId 用户 ID
+     * @return 当前版本号，用户不存在时返回默认版本
+     */
     public long currentVersion(Long userId) {
         if (userId == null) {
             return DEFAULT_VERSION;
@@ -36,6 +51,12 @@ public class TokenVersionService {
         return version;
     }
 
+    /**
+     * 检查 Token 的版本号是否为当前版本。
+     *
+     * @param claims Token 声明信息
+     * @return 版本号匹配时返回 true
+     */
     public boolean isCurrent(TokenClaims claims) {
         if (claims == null || claims.userId() == null || claims.tokenVersion() == null) {
             return false;
@@ -49,6 +70,14 @@ public class TokenVersionService {
         }
     }
 
+    /**
+     * 递增用户的 Token 版本号。
+     *
+     * <p>通过 SQL 原子递增，并同步更新 Redis 缓存。</p>
+     *
+     * @param userId 用户 ID
+     * @return 递增后的新版本号
+     */
     public long bumpVersion(Long userId) {
         if (userId == null) {
             return DEFAULT_VERSION;

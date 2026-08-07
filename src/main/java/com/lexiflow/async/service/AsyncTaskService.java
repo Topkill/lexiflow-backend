@@ -15,6 +15,14 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+/**
+ * 异步任务服务
+ * <p>
+ * 提供异步任务的创建、状态更新、查询等核心操作。
+ * 支持任务状态流转（PENDING → RUNNING → SUCCESS/FAILED），
+ * 状态更新采用条件更新防止并发冲突，并支持查询用户最近任务列表。
+ * </p>
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j

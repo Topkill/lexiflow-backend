@@ -16,6 +16,13 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+/**
+ * AI 提示词输出 JSON Schema 服务
+ * <p>
+ * 管理各功能类型的默认输出 JSON Schema，提供 Schema 的验证、规范化、解析和提示词构建功能。
+ * 支持字段名格式校验、必填字段检查、嵌套数组元素验证等。
+ * </p>
+ */
 @Service
 @RequiredArgsConstructor
 public class AiPromptOutputSchemaService {

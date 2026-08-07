@@ -56,6 +56,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+/**
+ * 完形填空作答 AI 评阅服务。
+ * <p>负责创建评阅异步任务、调用 AI 生成评阅内容、管理评阅状态与缓存复用，
+ * 并支持 SSE 流式输出评阅结果。评阅内容包含总体评价、薄弱点分析、改进建议和逐空点评。</p>
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j
@@ -81,6 +86,13 @@ public class ClozeAttemptAiReviewService {
     private final ClozeReviewTaskPublisher clozeReviewTaskPublisher;
     private final Map<Long, Object> reviewLocks = new ConcurrentHashMap<>();
 
+    /**
+     * 获取指定作答的 AI 评阅结果。
+     *
+     * @param userId    当前用户 ID
+     * @param attemptId 作答 ID
+     * @return 评阅响应，若评阅不存在或上下文已变化则返回空状态
+     */
     public ClozeAttemptAiReviewResponse getReview(Long userId, Long attemptId) {
         ClozeAttempt attempt = getOwnedAttempt(userId, attemptId);
         ReviewPromptContext context = buildPromptContext(userId, attemptId, attempt);
@@ -97,6 +109,16 @@ public class ClozeAttemptAiReviewService {
         return ClozeAttemptAiReviewResponse.of(review, parseContent(review.getContentJson()), outputSchemaService.schemaNode(context.promptTemplate().outputSchemaJson()), task);
     }
 
+    /**
+     * 创建 AI 评阅任务。
+     * <p>若未请求重新生成且存在新鲜的已完成评阅，则直接返回缓存结果；
+     * 否则创建或复用异步评阅任务并发布到 MQ 队列。</p>
+     *
+     * @param userId      当前用户 ID
+     * @param attemptId   作答 ID
+     * @param regenerate  是否强制重新生成
+     * @return 评阅响应（包含任务状态）
+     */
     public ClozeAttemptAiReviewResponse createReviewTask(Long userId, Long attemptId, boolean regenerate) {
         ClozeAttempt attempt = getOwnedAttempt(userId, attemptId);
         ReviewPromptContext context = buildPromptContext(userId, attemptId, attempt);
@@ -126,6 +148,12 @@ public class ClozeAttemptAiReviewService {
         }
     }
 
+    /**
+     * 处理 AI 评阅异步任务（由 MQ 消费者调用）。
+     *
+     * @param taskId      异步任务 ID
+     * @param redelivered 是否为 RabbitMQ 重投递消息
+     */
     public void processReviewTask(Long taskId, boolean redelivered) {
         if (taskId == null) {
             return;
@@ -157,6 +185,17 @@ public class ClozeAttemptAiReviewService {
         }
     }
 
+    /**
+     * 以 SSE 流式方式输出 AI 评阅结果。
+     * <p>支持缓存命中时直接输出、任务进行中时轮询等待、新任务时实时生成并流式输出。
+     * 同一作答的流式输出通过同步锁保证串行执行。</p>
+     *
+     * @param userId       当前用户 ID
+     * @param attemptId    作答 ID
+     * @param regenerate   是否强制重新生成
+     * @param outputStream 输出流
+     * @throws IOException 写入输出流时发生 IO 异常
+     */
     public void streamReview(Long userId, Long attemptId, boolean regenerate, OutputStream outputStream) throws IOException {
         Object lock = reviewLocks.computeIfAbsent(attemptId, ignored -> new Object());
         synchronized (lock) {

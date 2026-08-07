@@ -9,12 +9,20 @@ import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.listener.ChannelTopic;
 import org.springframework.data.redis.listener.RedisMessageListenerContainer;
 
+/**
+ * Redis 缓存失效订阅配置类。
+ * <p>
+ * 配置 Redis Pub/Sub 消息监听容器，用于监听缓存失效事件。
+ * 仅在 Redis 连接可用且配置启用时生效。
+ * </p>
+ */
 @Configuration
 @RequiredArgsConstructor
 public class RedisCacheInvalidationConfig {
 
     private final RedisCacheInvalidationSubscriber subscriber;
 
+    /** 创建 Redis 缓存失效消息监听容器。 */
     @Bean
     @ConditionalOnBean(RedisConnectionFactory.class)
     @ConditionalOnProperty(prefix = "lexiflow.redis.cache-invalidation", name = "enabled", havingValue = "true", matchIfMissing = true)

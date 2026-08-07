@@ -24,6 +24,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+/**
+ * 学习笔记服务。
+ * <p>提供学习笔记的 CRUD 操作，支持普通笔记、AI 问答摘录、AI 评阅摘录三种来源类型。</p>
+ */
 @Service
 @RequiredArgsConstructor
 public class StudyNoteService {

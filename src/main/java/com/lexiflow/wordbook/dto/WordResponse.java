@@ -2,6 +2,28 @@ package com.lexiflow.wordbook.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 
+/**
+ * 单词响应 DTO。
+ * <p>返回单词的完整信息，包括拼写、音标、释义、例句、短语等。</p>
+ *
+ * @param id 单词ID
+ * @param word 单词拼写
+ * @param normalizedWord 标准化拼写
+ * @param phonetic0 英式音标
+ * @param phonetic1 美式音标
+ * @param trans 释义（JSON格式）
+ * @param sentences 例句（JSON格式）
+ * @param phrases 短语（JSON格式）
+ * @param synos 同近义词（JSON格式）
+ * @param relWords 相关词（JSON格式）
+ * @param etymology 词源（JSON格式）
+ * @param primaryPos 主要词性
+ * @param primaryDefinition 主要释义
+ * @param tags 标签
+ * @param sequenceNo 词库内顺序
+ * @param difficultyLevel 词库内难度
+ * @param examFrequency 考频或权重
+ */
 @Schema(description = "单词响应")
 public record WordResponse(
         @Schema(description = "单词 ID", example = "1900000000000002001") String id,

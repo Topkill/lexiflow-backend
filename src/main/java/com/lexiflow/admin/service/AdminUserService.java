@@ -23,6 +23,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+/**
+ * 后台用户管理服务。
+ *
+ * <p>提供管理员对用户的分页查询、详情查看、禁用和启用等操作。
+ * 禁用/启用操作会同步递增 Token 版本号并清除认证缓存，确保用户立即下线。</p>
+ */
 @Service
 @RequiredArgsConstructor
 public class AdminUserService {

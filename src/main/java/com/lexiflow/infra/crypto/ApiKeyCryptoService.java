@@ -11,10 +11,19 @@ import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 import org.springframework.stereotype.Service;
 
+/**
+ * API Key 加解密服务。
+ * <p>
+ * 使用 AES/GCM/NoPadding 算法对用户 API Key 进行加解密。
+ * 密钥通过 SHA-256 哈希归一化，每次加密使用随机 IV 保证安全性。
+ * </p>
+ */
 @Service
 public class ApiKeyCryptoService {
 
+    /** IV 长度（字节） */
     private static final int IV_LENGTH = 12;
+    /** GCM 认证标签长度（位） */
     private static final int TAG_LENGTH_BITS = 128;
 
     private final SecureRandom secureRandom = new SecureRandom();
@@ -24,6 +33,12 @@ public class ApiKeyCryptoService {
         this.secretKeySpec = new SecretKeySpec(normalizeKey(cryptoProperties.apiKeySecret()), "AES");
     }
 
+    /**
+     * 加密明文。
+     *
+     * @param plainText 明文
+     * @return Base64 编码的密文（包含 IV）
+     */
     public String encrypt(String plainText) {
         try {
             byte[] iv = new byte[IV_LENGTH];
@@ -40,6 +55,12 @@ public class ApiKeyCryptoService {
         }
     }
 
+    /**
+     * 解密密文。
+     *
+     * @param encryptedText Base64 编码的密文（包含 IV）
+     * @return 解密后的明文
+     */
     public String decrypt(String encryptedText) {
         try {
             byte[] payload = Base64.getDecoder().decode(encryptedText);
@@ -56,6 +77,7 @@ public class ApiKeyCryptoService {
         }
     }
 
+    /** 将密钥字符串通过 SHA-256 哈希归一化为 32 字节。 */
     private byte[] normalizeKey(String secret) {
         try {
             return MessageDigest.getInstance("SHA-256").digest(secret.getBytes(StandardCharsets.UTF_8));

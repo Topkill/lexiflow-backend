@@ -9,6 +9,18 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 
+/**
+ * Redis AI 每日配额计数器服务。
+ * <p>
+ * 使用 Redis 原子操作实现用户每日 AI 调用配额的预留和计数。
+ * 支持两种模式：
+ * <ul>
+ *   <li>普通预留：在已初始化的计数器上预留配额</li>
+ *   <li>初始化并预留：首次使用时初始化计数器并设置数据库基线已用量</li>
+ * </ul>
+ * 所有操作通过 Lua 脚本保证原子性。
+ * </p>
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j
@@ -68,6 +80,15 @@ public class RedisAiQuotaCounter {
 
     private final StringRedisTemplate stringRedisTemplate;
 
+    /**
+     * 预留用户每日 AI 调用配额。
+     *
+     * @param userId 用户 ID
+     * @param quota  每日配额上限
+     * @param date   当前日期
+     * @param ttl    缓存过期时间
+     * @return 配额预留结果
+     */
     public RedisQuotaReserveResult reserveDailyQuota(Long userId, int quota, LocalDate date, Duration ttl) {
         if (ttl == null || ttl.isNegative() || ttl.isZero()) {
             return RedisQuotaReserveResult.unavailableResult();
@@ -96,6 +117,19 @@ public class RedisAiQuotaCounter {
         }
     }
 
+    /**
+     * 初始化并预留用户每日 AI 调用配额。
+     * <p>
+     * 首次使用时，将数据库中的已用量作为基线初始化 Redis 计数器。
+     * </p>
+     *
+     * @param userId       用户 ID
+     * @param quota        每日配额上限
+     * @param date         当前日期
+     * @param ttl          缓存过期时间
+     * @param baselineUsed 数据库中的已用量基线
+     * @return 配额预留结果
+     */
     public RedisQuotaReserveResult initializeAndReserveDailyQuota(Long userId, int quota, LocalDate date, Duration ttl, long baselineUsed) {
         if (ttl == null || ttl.isNegative() || ttl.isZero()) {
             return RedisQuotaReserveResult.unavailableResult();

@@ -11,6 +11,10 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+/**
+ * 学习统计控制器。
+ * <p>提供学习统计概览接口，返回用户的学习数据汇总信息。</p>
+ */
 @Tag(name = "学习统计接口")
 @RestController
 @RequiredArgsConstructor
@@ -19,6 +23,7 @@ public class StudyStatisticsController {
 
     private final StudyStatisticsService studyStatisticsService;
 
+    /** 获取当前用户的学习统计概览数据。 */
     @Operation(summary = "学习统计概览")
     @GetMapping("/overview")
     public ApiResponse<StudyStatisticsOverviewResponse> overview() {

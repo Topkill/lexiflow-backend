@@ -4,6 +4,12 @@ import com.lexiflow.user.domain.User;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.LocalDateTime;
 
+/**
+ * 后台用户详情响应 DTO。
+ *
+ * <p>包含用户基础信息、登录记录及学习统计、AI 调用统计。
+ * 通过 {@link #of(User, long, long)} 静态工厂方法组装。</p>
+ */
 @Schema(description = "后台用户详情响应")
 public record AdminUserDetailResponse(
         @Schema(description = "用户 ID") String id,

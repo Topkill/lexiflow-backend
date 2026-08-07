@@ -9,6 +9,18 @@ import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
 
+/**
+ * 认证用户对象，实现 Spring Security 的 {@link UserDetails} 接口。
+ *
+ * <p>作为 SecurityContext 中的 Principal，承载当前登录用户的核心信息。
+ * 通过 {@link #from(User)} 静态工厂方法从 User 实体创建。</p>
+ *
+ * @param id       用户 ID
+ * @param email    邮箱
+ * @param nickname 昵称
+ * @param role     用户角色
+ * @param status   用户状态
+ */
 public record AuthUser(
         Long id,
         String email,
@@ -17,6 +29,7 @@ public record AuthUser(
         UserStatus status
 ) implements UserDetails {
 
+    /** 从 User 实体创建 AuthUser */
     public static AuthUser from(User user) {
         return new AuthUser(
                 user.getId(),

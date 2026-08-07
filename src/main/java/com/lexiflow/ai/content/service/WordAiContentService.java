@@ -49,6 +49,15 @@ import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.*;
 
+/**
+ * 单词 AI 问答内容服务
+ * <p>
+ * 提供单词 AI 问答的核心业务逻辑，包括同步/异步问答生成、SSE 流式输出、缓存复用、
+ * 分布式锁并发控制、任务队列管理等功能。
+ * 通过多层缓存机制（本地分段锁 + Redis 分布式锁 + 数据库缓存记录）避免重复 AI 调用，
+ * 支持任务复用、fallback 降级以及缓存命中计数等高级特性。
+ * </p>
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j

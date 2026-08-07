@@ -5,11 +5,27 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lexiflow.common.error.ErrorCode;
 import com.lexiflow.common.exception.BizException;
 
+/**
+ * AI JSON 工具类
+ * <p>
+ * 提供从 AI 响应文本中提取 JSON 对象的工具方法。
+ * 支持清理  标签、Markdown 代码块等干扰内容，
+ * 并通过大括号深度匹配提取完整的 JSON 对象字符串。
+ * </p>
+ */
 public final class AiJsonUtils {
 
     private AiJsonUtils() {
     }
 
+    /**
+     * 解析 AI 响应文本为 JSON 对象
+     *
+     * @param objectMapper JSON 序列化器
+     * @param content AI 响应文本
+     * @return 解析后的 JSON 节点
+     * @throws BizException 当内容不是合法 JSON 对象或解析失败时
+     */
     public static JsonNode parseObject(ObjectMapper objectMapper, String content) {
         try {
             JsonNode node = objectMapper.readTree(extractObjectJson(content));
@@ -24,6 +40,15 @@ public final class AiJsonUtils {
         }
     }
 
+    /**
+     * 从 AI 响应文本中提取 JSON 对象字符串
+     * <p>
+     * 先清理  标签和 Markdown 代码块，然后通过大括号深度匹配提取完整的 JSON 对象。
+     * </p>
+     *
+     * @param content AI 响应文本
+     * @return 提取的 JSON 对象字符串
+     */
     public static String extractObjectJson(String content) {
         String text = stripMarkdownFence(stripThinking(content == null ? "" : content.trim()));
         int firstBrace = text.indexOf('{');

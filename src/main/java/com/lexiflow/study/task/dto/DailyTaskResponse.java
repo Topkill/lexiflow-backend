@@ -5,6 +5,10 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.LocalDate;
 import java.util.List;
 
+/**
+ * 今日任务响应 DTO。
+ * <p>包含每日任务的完整信息，包括任务状态、进度、计划摘要、完形填空状态和任务明细列表。</p>
+ */
 @Schema(description = "今日任务响应")
 public record DailyTaskResponse(
         @Schema(description = "任务 ID", example = "1900000000000005000") String taskId,
@@ -25,6 +29,7 @@ public record DailyTaskResponse(
         @Schema(description = "本组最近生成的完形填空题目 ID", example = "12") String clozeQuizId,
         @Schema(description = "任务明细") List<DailyTaskItemResponse> items
 ) {
+    /** 从实体对象构建响应。 */
     public static DailyTaskResponse from(
             DailyTask task,
             DailyTaskPlanResponse plan,
@@ -55,10 +60,12 @@ public record DailyTaskResponse(
         );
     }
 
+    /** 计算任务总词数。 */
     private static int totalCount(DailyTask task) {
         return safeCount(task.getNewCount()) + safeCount(task.getReviewCount()) + safeCount(task.getExtraCount());
     }
 
+    /** 安全地将可能为 null 的 Integer 转换为 int。 */
     private static int safeCount(Integer count) {
         return count == null ? 0 : count;
     }

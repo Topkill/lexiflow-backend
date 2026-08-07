@@ -23,6 +23,15 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+/**
+ * AI 配置解析服务
+ * <p>
+ * 根据用户的 AI 密钥模式解析出运行时配置。
+ * 支持公共配置（带本地缓存 + Redis 缓存 + 数据库回源）和私有配置（用户独立配置）。
+ * 实现 {@link RedisCacheInvalidationListener} 以监听 Redis Pub/Sub 缓存失效事件，
+ * 保证分布式环境下公共配置缓存的一致性。
+ * </p>
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j
@@ -38,6 +47,16 @@ public class AiConfigResolver implements RedisCacheInvalidationListener {
     private final RedisJsonCacheService redisJsonCacheService;
     private volatile CachedPublicConfig cachedPublicConfig;
 
+    /**
+     * 解析指定用户的 AI 运行时配置
+     * <p>
+     * 根据用户设置中的 AI 密钥模式，返回公共配置或私有配置。
+     * </p>
+     *
+     * @param userId 用户 ID
+     * @return AI 运行时配置
+     * @throws BizException 当配置不可用时
+     */
     public AiRuntimeConfig resolve(Long userId) {
         UserSettings settings = userService.getOrCreateSettings(userId);
         if (settings.getAiKeyMode() == AiKeyMode.PRIVATE) {
@@ -127,11 +146,19 @@ public class AiConfigResolver implements RedisCacheInvalidationListener {
         );
     }
 
+    /**
+     * 清除公共配置的本地缓存和 Redis 缓存
+     */
     public void evictPublicConfigCache() {
         cachedPublicConfig = null;
         redisJsonCacheService.delete(RedisKeys.aiPublicConfigKey());
     }
 
+    /**
+     * 处理 Redis Pub/Sub 缓存失效通知
+     *
+     * @param payload 缓存失效载荷
+     */
     @Override
     public void onCacheInvalidation(String payload) {
         if (RedisKeys.PUBLIC_AI_CONFIG_EVICT_PAYLOAD.equals(payload)) {

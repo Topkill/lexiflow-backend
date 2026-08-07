@@ -4,6 +4,21 @@ import com.lexiflow.note.domain.StudyNote;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.LocalDateTime;
 
+/**
+ * 学习笔记响应 DTO。
+ * <p>返回学习笔记的详细信息。</p>
+ *
+ * @param noteId 笔记ID
+ * @param sourceType 来源类型
+ * @param sourceId 来源业务结果ID
+ * @param wordbookId 词库ID
+ * @param wordId 单词ID
+ * @param title 标题
+ * @param quotedText 引用快照文本
+ * @param contentMd 笔记内容（Markdown格式）
+ * @param createdAt 创建时间
+ * @param updatedAt 更新时间
+ */
 @Schema(description = "学习笔记响应")
 public record StudyNoteResponse(
         @Schema(description = "笔记 ID") String noteId,

@@ -7,6 +7,11 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
+/**
+ * 后台单词保存请求 DTO。
+ *
+ * <p>用于创建或更新单词，包含单词的详细信息、字典数据及作用域配置。</p>
+ */
 @Schema(description = "后台单词保存请求")
 public record AdminWordRequest(
         @Schema(description = "单词展示值") @NotBlank @Size(max = 128) String word,

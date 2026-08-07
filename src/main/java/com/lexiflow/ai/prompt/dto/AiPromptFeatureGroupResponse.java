@@ -4,6 +4,12 @@ import com.lexiflow.ai.prompt.domain.AiPromptFeatureType;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.util.List;
 
+/**
+ * AI 提示词功能分组响应 DTO
+ * <p>
+ * 返回某个 AI 功能类型的提示词分组信息，包含内置模板、当前生效模板和自定义模板列表。
+ * </p>
+ */
 @Schema(description = "AI 提示词功能分组响应")
 public record AiPromptFeatureGroupResponse(
         @Schema(description = "功能类型") AiPromptFeatureType featureType,

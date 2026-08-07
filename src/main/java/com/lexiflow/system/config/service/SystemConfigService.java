@@ -20,15 +20,22 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+/**
+ * 系统配置服务。
+ * <p>提供系统配置的增删改查功能，包含配置键格式校验、值类型规范化、
+ * 可编辑权限控制和配置键唯一性检查等业务逻辑。</p>
+ */
 @Service
 @RequiredArgsConstructor
 public class SystemConfigService {
 
+    /** 配置键格式正则：小写字母开头的点分隔标识符 */
     private static final Pattern CONFIG_KEY_PATTERN = Pattern.compile("^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$");
 
     private final SystemConfigMapper systemConfigMapper;
     private final ObjectMapper objectMapper;
 
+    /** 分页查询系统配置列表，支持按值类型、可编辑状态和关键词过滤。 */
     public PageResponse<SystemConfigResponse> pageConfigs(SystemConfigQueryRequest request) {
         LambdaQueryWrapper<SystemConfig> wrapper = new LambdaQueryWrapper<SystemConfig>()
                 .orderByAsc(SystemConfig::getConfigKey)
@@ -54,10 +61,12 @@ public class SystemConfigService {
         );
     }
 
+    /** 根据 ID 查询系统配置详情。 */
     public SystemConfigResponse getConfig(Long configId) {
         return SystemConfigResponse.from(requireConfig(configId));
     }
 
+    /** 新增系统配置，校验配置键唯一性并规范化值。 */
     @Transactional
     public SystemConfigResponse createConfig(Long adminUserId, SystemConfigRequest request) {
         String configKey = normalizeConfigKey(request.configKey());
@@ -72,6 +81,7 @@ public class SystemConfigService {
         return SystemConfigResponse.from(config);
     }
 
+    /** 编辑系统配置，校验可编辑权限和配置键唯一性。 */
     @Transactional
     public SystemConfigResponse updateConfig(Long adminUserId, Long configId, SystemConfigRequest request) {
         SystemConfig config = requireConfig(configId);
@@ -84,6 +94,7 @@ public class SystemConfigService {
         return SystemConfigResponse.from(config);
     }
 
+    /** 删除系统配置，仅可删除标记为可编辑的配置。 */
     @Transactional
     public void deleteConfig(Long configId) {
         SystemConfig config = requireConfig(configId);
@@ -91,6 +102,7 @@ public class SystemConfigService {
         systemConfigMapper.deleteById(configId);
     }
 
+    /** 将请求参数应用到配置实体，包含值规范化处理。 */
     private void applyRequest(SystemConfig config, SystemConfigRequest request, String configKey) {
         String normalizedValue = normalizeValue(request.valueType(), request.configValue());
         config.setConfigKey(configKey);
@@ -100,6 +112,7 @@ public class SystemConfigService {
         config.setEditable(request.editable());
     }
 
+    /** 规范化配置键：转小写并校验格式。 */
     private String normalizeConfigKey(String configKey) {
         String normalized = configKey.trim().toLowerCase(Locale.ROOT);
         if (!CONFIG_KEY_PATTERN.matcher(normalized).matches()) {
@@ -108,6 +121,7 @@ public class SystemConfigService {
         return normalized;
     }
 
+    /** 根据值类型对配置值进行规范化处理。 */
     private String normalizeValue(SystemConfigValueType valueType, String value) {
         String trimmedValue = value == null ? null : value.trim();
         return switch (valueType) {
@@ -118,6 +132,7 @@ public class SystemConfigService {
         };
     }
 
+    /** 规范化 NUMBER 类型值：校验并去除尾随零。 */
     private String normalizeNumber(String value) {
         if (!StringUtils.hasText(value)) {
             throw new BizException(ErrorCode.BAD_REQUEST, "NUMBER 类型配置值不能为空");
@@ -129,6 +144,7 @@ public class SystemConfigService {
         }
     }
 
+    /** 规范化 BOOLEAN 类型值：仅接受 true/false。 */
     private String normalizeBoolean(String value) {
         if (!StringUtils.hasText(value)) {
             throw new BizException(ErrorCode.BAD_REQUEST, "BOOLEAN 类型配置值不能为空");
@@ -142,6 +158,7 @@ public class SystemConfigService {
         throw new BizException(ErrorCode.BAD_REQUEST, "BOOLEAN 类型配置值只能是 true 或 false");
     }
 
+    /** 规范化 JSON 类型值：解析并重新序列化为标准格式。 */
     private String normalizeJson(String value) {
         if (!StringUtils.hasText(value)) {
             throw new BizException(ErrorCode.BAD_REQUEST, "JSON 类型配置值不能为空");
@@ -153,6 +170,7 @@ public class SystemConfigService {
         }
     }
 
+    /** 检查配置键是否可用（未被其他配置占用）。 */
     private void ensureConfigKeyAvailable(String configKey, Long excludedId) {
         LambdaQueryWrapper<SystemConfig> wrapper = new LambdaQueryWrapper<SystemConfig>()
                 .eq(SystemConfig::getConfigKey, configKey);
@@ -164,6 +182,7 @@ public class SystemConfigService {
         }
     }
 
+    /** 根据 ID 查询配置，不存在则抛出异常。 */
     private SystemConfig requireConfig(Long configId) {
         SystemConfig config = systemConfigMapper.selectById(configId);
         if (config == null) {
@@ -172,12 +191,14 @@ public class SystemConfigService {
         return config;
     }
 
+    /** 检查配置是否可编辑，不可编辑则抛出异常。 */
     private void ensureEditable(SystemConfig config) {
         if (!Boolean.TRUE.equals(config.getEditable())) {
             throw new BizException(ErrorCode.FORBIDDEN, "当前系统配置不可编辑");
         }
     }
 
+    /** 去除空白，空字符串返回 null。 */
     private String trimToNull(String value) {
         return StringUtils.hasText(value) ? value.trim() : null;
     }

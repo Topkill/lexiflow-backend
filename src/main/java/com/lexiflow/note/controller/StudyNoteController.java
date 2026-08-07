@@ -23,6 +23,12 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+/**
+ * 学习笔记控制器。
+ * <p>提供学习笔记的分页查询、详情查看、创建、更新和删除等接口。</p>
+ *
+ * @see StudyNoteService
+ */
 @Tag(name = "学习笔记接口")
 @Validated
 @RestController

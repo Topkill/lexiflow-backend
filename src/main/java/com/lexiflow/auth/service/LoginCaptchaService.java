@@ -23,17 +23,32 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+/**
+ * 登录图形验证码服务。
+ *
+ * <p>基于 Redis 存储验证码答案，支持图形生成和校验。
+ * 验证码有效期 5 分钟，同一 IP 每秒最多获取一次。
+ * 图形包含随机噪点和字符旋转，增加机器识别难度。</p>
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class LoginCaptchaService {
 
+    /** 验证码有效期：5 分钟 */
     static final Duration CAPTCHA_TTL = Duration.ofMinutes(5);
+    /** 验证码获取最小间隔：1 秒 */
     static final Duration ISSUE_INTERVAL = Duration.ofSeconds(1);
 
     private final StringRedisTemplate stringRedisTemplate;
     private final SecureRandom secureRandom = new SecureRandom();
 
+    /**
+     * 生成图形验证码。
+     *
+     * @param clientIp 客户端 IP，用于限流
+     * @return 验证码响应，包含验证码 ID、图片 Data URL 和有效期
+     */
     public LoginCaptchaResponse issue(String clientIp) {
         assertIssueAllowed(clientIp);
         String captchaId = UUID.randomUUID().toString();
@@ -47,6 +62,12 @@ public class LoginCaptchaService {
         return new LoginCaptchaResponse(captchaId, buildImageDataUrl(code), CAPTCHA_TTL.toSeconds());
     }
 
+    /**
+     * 校验验证码答案，校验后立即删除（一次性使用）。
+     *
+     * @param captchaId   验证码 ID
+     * @param captchaCode 用户输入的验证码
+     */
     public void assertValid(String captchaId, String captchaCode) {
         if (!StringUtils.hasText(captchaId) || !StringUtils.hasText(captchaCode)) {
             throw new BizException(ErrorCode.LOGIN_CAPTCHA_REQUIRED);

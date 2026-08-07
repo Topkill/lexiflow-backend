@@ -27,6 +27,10 @@ import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+/**
+ * 词库服务。
+ * <p>提供词库列表查询、词库详情、单词分页查询、精确查词等功能。</p>
+ */
 @Service
 @RequiredArgsConstructor
 public class WordbookService {

@@ -10,6 +10,12 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import java.math.BigDecimal;
 
+/**
+ * 公共 AI 配置保存请求 DTO
+ * <p>
+ * 管理员用于创建或更新公共 AI 配置的请求对象，包含配置名称、API 地址、密钥、模型参数等信息。
+ * </p>
+ */
 @Schema(description = "公共 AI 配置保存请求")
 public record AiPublicConfigRequest(
         @Schema(description = "配置名称") @NotBlank @Size(max = 128) String name,

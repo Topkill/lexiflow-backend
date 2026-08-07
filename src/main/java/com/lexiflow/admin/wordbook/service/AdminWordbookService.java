@@ -18,6 +18,12 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 import java.util.Locale;
 
+/**
+ * 后台词库与单词管理服务。
+ *
+ * <p>提供管理员对词库和单词的完整 CRUD 功能，包括分页查询、新增、编辑、启用/停用、删除等。
+ * 创建和更新单词时会进行标准化处理、唯一性校验，并同步刷新词库的单词计数。</p>
+ */
 @Service
 @RequiredArgsConstructor
 public class AdminWordbookService {

@@ -5,6 +5,17 @@ import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
+/**
+ * 登录请求 DTO。
+ *
+ * <p>包含邮箱、密码及可选的验证码信息。
+ * 当登录失败次数达到阈值时，验证码为必填项。</p>
+ *
+ * @param email      用户邮箱
+ * @param password   密码
+ * @param captchaId  验证码 ID（可选）
+ * @param captchaCode 验证码答案（可选）
+ */
 @Schema(description = "登录请求")
 public record LoginRequest(
         @Schema(description = "邮箱", example = "student@example.com")

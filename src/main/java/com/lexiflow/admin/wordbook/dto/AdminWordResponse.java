@@ -2,6 +2,11 @@ package com.lexiflow.admin.wordbook.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 
+/**
+ * 后台词库单词响应 DTO。
+ *
+ * <p>包含单词的完整信息，包括字典数据、词性、释义、难度等级等。</p>
+ */
 @Schema(description = "后台词库单词响应")
 public record AdminWordResponse(
         @Schema(description = "单词 ID") String id,

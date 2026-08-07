@@ -13,6 +13,11 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+/**
+ * 后台 AI 调用日志接口控制器。
+ *
+ * <p>提供管理员查询 AI 调用日志的分页接口。</p>
+ */
 @Tag(name = "后台 AI 调用日志接口")
 @RestController
 @RequiredArgsConstructor

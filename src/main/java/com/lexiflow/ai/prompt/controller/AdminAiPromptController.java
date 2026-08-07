@@ -25,6 +25,12 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+/**
+ * 管理员 AI 提示词控制器
+ * <p>
+ * 提供 AI 提示词模板的管理接口，包括模板的查询、创建、编辑、复制、删除以及功能绑定操作。
+ * </p>
+ */
 @Tag(name = "管理员 AI 提示词接口")
 @Validated
 @RestController

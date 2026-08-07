@@ -9,6 +9,16 @@ import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 import java.time.LocalDate;
 
+/**
+ * 创建学习计划请求。
+ *
+ * @param wordbookId          词库 ID
+ * @param name                计划名称
+ * @param newWordsPerGroup    每组新词数量
+ * @param reviewWordsPerGroup 每组复习词数量
+ * @param startDate           计划开始日期
+ * @param isPrimary           是否主计划，空值默认 true
+ */
 @Schema(description = "创建学习计划请求")
 public record CreateStudyPlanRequest(
         @Schema(description = "词库 ID", example = "1900000000000001001")
@@ -40,6 +50,11 @@ public record CreateStudyPlanRequest(
         @Schema(description = "是否主计划，空值默认 true", example = "true")
         Boolean isPrimary
 ) {
+    /**
+     * 返回是否为主计划，空值默认为 true。
+     *
+     * @return 是否主计划
+     */
     public boolean primaryOrDefault() {
         return isPrimary == null || isPrimary;
     }

@@ -29,6 +29,13 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
+/**
+ * AI 完形填空控制器。
+ * <p>提供完形填空任务创建、详情查询、答案提交、作答结果查询、AI 评阅等功能。</p>
+ *
+ * @see ClozeQuizService
+ * @see ClozeAttemptAiReviewService
+ */
 @Tag(name = "AI 完形填空接口")
 @Validated
 @RestController

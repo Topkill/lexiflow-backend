@@ -16,6 +16,14 @@ import java.time.ZonedDateTime;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
+/**
+ * AI 配额管理服务
+ * <p>
+ * 管理用户公共 AI 调用的每日配额。
+ * 采用 Redis 计数器 + 数据库日志双重校验机制，
+ * 确保配额检查的原子性和准确性。配额基于亚洲/上海时区按天重置。
+ * </p>
+ */
 @Service
 @RequiredArgsConstructor
 public class AiQuotaService {
@@ -25,6 +33,17 @@ public class AiQuotaService {
     private final AiCallLogMapper aiCallLogMapper;
     private final RedisAiQuotaCounter redisAiQuotaCounter;
 
+    /**
+     * 检查用户公共 AI 调用配额
+     * <p>
+     * 仅对公共配置生效，通过 Redis 原子操作预留配额，
+     * 若 Redis 计数器未初始化则回源到数据库日志计算已用次数。
+     * </p>
+     *
+     * @param userId 用户 ID
+     * @param config AI 运行时配置
+     * @throws BizException 当配额耗尽时
+     */
     public void checkQuota(Long userId, AiRuntimeConfig config) {
         if (config.scope() != AiConfigScope.PUBLIC) {
             return;

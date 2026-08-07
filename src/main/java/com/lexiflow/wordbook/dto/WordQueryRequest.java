@@ -5,6 +5,14 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Size;
 
+/**
+ * 词库单词查询请求 DTO。
+ * <p>用于分页查询词库内的单词，支持按单词或释义关键字筛选。</p>
+ *
+ * @param page 当前页码，默认为1
+ * @param size 每页数量，默认为20，最大100
+ * @param keyword 单词或释义关键字
+ */
 @Schema(description = "词库单词查询参数")
 public record WordQueryRequest(
         @Schema(description = "当前页码", example = "1") @Min(1) Long page,

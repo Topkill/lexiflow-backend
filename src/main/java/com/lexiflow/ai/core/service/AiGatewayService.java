@@ -15,6 +15,13 @@ import com.lexiflow.common.exception.BizException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
+/**
+ * AI 网关服务
+ * <p>
+ * 统一封装 AI 调用流程：配置解析 → 配额检查 → AI 调用 → 日志记录。
+ * 支持同步 JSON 调用和流式 SSE 调用，调用失败时自动记录错误日志。
+ * </p>
+ */
 @Service
 @RequiredArgsConstructor
 public class AiGatewayService {
@@ -24,10 +31,29 @@ public class AiGatewayService {
     private final SpringAiChatClient springAiChatClient;
     private final AiCallLogMapper aiCallLogMapper;
 
+    /**
+     * 同步调用 AI 生成 JSON 内容
+     *
+     * @param userId 用户 ID
+     * @param contentType 内容类型
+     * @param prompt 提示词对象
+     * @return AI 聊天完成结果
+     * @throws BizException 当配额耗尽或调用失败时
+     */
     public AiChatCompletionResult generateJson(Long userId, AiContentType contentType, AiPrompt prompt) {
         return generateJson(userId, contentType, prompt, null);
     }
 
+    /**
+     * 同步调用 AI 生成 JSON 内容（带异步任务 ID）
+     *
+     * @param userId 用户 ID
+     * @param contentType 内容类型
+     * @param prompt 提示词对象
+     * @param asyncTaskId 关联的异步任务 ID
+     * @return AI 聊天完成结果
+     * @throws BizException 当配额耗尽或调用失败时
+     */
     public AiChatCompletionResult generateJson(Long userId, AiContentType contentType, AiPrompt prompt, Long asyncTaskId) {
         AiRuntimeConfig config = aiConfigResolver.resolve(userId);
         aiQuotaService.checkQuota(userId, config);
@@ -42,10 +68,31 @@ public class AiGatewayService {
         }
     }
 
+    /**
+     * 流式调用 AI 生成 JSON 内容
+     *
+     * @param userId 用户 ID
+     * @param contentType 内容类型
+     * @param prompt 提示词对象
+     * @param deltaHandler 流式增量处理器
+     * @return AI 聊天完成结果
+     * @throws BizException 当配额耗尽或调用失败时
+     */
     public AiChatCompletionResult generateJsonStream(Long userId, AiContentType contentType, AiPrompt prompt, AiStreamDeltaHandler deltaHandler) {
         return generateJsonStream(userId, contentType, prompt, deltaHandler, null);
     }
 
+    /**
+     * 流式调用 AI 生成 JSON 内容（带异步任务 ID）
+     *
+     * @param userId 用户 ID
+     * @param contentType 内容类型
+     * @param prompt 提示词对象
+     * @param deltaHandler 流式增量处理器
+     * @param asyncTaskId 关联的异步任务 ID
+     * @return AI 聊天完成结果
+     * @throws BizException 当配额耗尽或调用失败时
+     */
     public AiChatCompletionResult generateJsonStream(Long userId, AiContentType contentType, AiPrompt prompt, AiStreamDeltaHandler deltaHandler, Long asyncTaskId) {
         AiRuntimeConfig config = aiConfigResolver.resolve(userId);
         aiQuotaService.checkQuota(userId, config);

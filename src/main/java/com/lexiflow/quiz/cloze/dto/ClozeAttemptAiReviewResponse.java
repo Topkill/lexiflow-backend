@@ -7,6 +7,21 @@ import com.lexiflow.quiz.cloze.domain.ClozeAttemptAiReview;
 import com.lexiflow.quiz.cloze.domain.ClozeAttemptAiReviewStatus;
 import io.swagger.v3.oas.annotations.media.Schema;
 
+/**
+ * 完形填空 AI 评阅响应 DTO。
+ * <p>返回 AI 评阅的状态和内容。</p>
+ *
+ * @param reviewId 评阅ID
+ * @param attemptId 作答ID
+ * @param status 状态
+ * @param cacheHit 是否命中缓存
+ * @param content 评阅内容
+ * @param outputSchema 输出 JSON 结构
+ * @param displayText 打字机展示文本
+ * @param errorMessage 错误信息
+ * @param taskId 异步任务ID
+ * @param taskStatus 异步任务状态
+ */
 @Schema(description = "完形填空 AI 评阅响应")
 public record ClozeAttemptAiReviewResponse(
         @Schema(description = "评阅 ID") String reviewId,

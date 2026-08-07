@@ -6,6 +6,12 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
+/**
+ * AI 提示词模板保存请求 DTO
+ * <p>
+ * 用于创建或编辑 AI 提示词模板，包含功能类型、词书范围、系统提示词、规则提示词和输出 Schema。
+ * </p>
+ */
 @Schema(description = "AI 提示词模板保存请求")
 public record AiPromptTemplateRequest(
         @Schema(description = "功能类型") @NotNull AiPromptFeatureType featureType,

@@ -10,6 +10,13 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+/**
+ * Refresh Token 会话服务。
+ *
+ * <p>基于 Redis 管理 Refresh Token 的会话状态。
+ * 登录时存储 Token 会话，刷新时检查会话是否存在且匹配，
+ * 退出登录时删除会话记录。</p>
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j
@@ -17,6 +24,7 @@ public class RefreshTokenSessionService {
 
     private final StringRedisTemplate stringRedisTemplate;
 
+    /** 存储 Refresh Token 会话，TTL 与 Token 剩余有效期一致 */
     public void store(TokenClaims claims) {
         if (claims == null || !StringUtils.hasText(claims.tokenId()) || claims.expiresAt() == null) {
             return;
@@ -36,6 +44,12 @@ public class RefreshTokenSessionService {
         }
     }
 
+    /**
+     * 获取 Refresh Token 会话状态。
+     *
+     * @param claims Token 声明信息
+     * @return 会话状态：ACTIVE-有效，MISSING-不存在，UNAVAILABLE-Redis 不可用
+     */
     public RefreshTokenSessionStatus getStatus(TokenClaims claims) {
         if (claims == null) {
             return RefreshTokenSessionStatus.MISSING;
@@ -57,6 +71,7 @@ public class RefreshTokenSessionService {
         }
     }
 
+    /** 删除 Refresh Token 会话 */
     public void delete(String tokenId) {
         if (!StringUtils.hasText(tokenId)) {
             return;

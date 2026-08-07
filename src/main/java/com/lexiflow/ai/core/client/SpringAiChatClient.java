@@ -27,6 +27,14 @@ import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 import reactor.netty.http.client.HttpClient;
 
+/**
+ * Spring AI 聊天客户端
+ * <p>
+ * 基于 Spring AI 框架封装的 AI 聊天客户端，支持同步 JSON 调用和流式 SSE 调用。
+ * 自动处理 API 端点解析、请求构建、响应提取、Token 统计以及异常转换。
+ * 支持 OpenAI 兼容接口，强制 JSON 对象格式输出。
+ * </p>
+ */
 @Component
 public class SpringAiChatClient {
 
@@ -35,6 +43,18 @@ public class SpringAiChatClient {
     private static final String CHAT_COMPLETIONS_PATH = "/chat/completions";
     private static final RetryTemplate NO_RETRY_TEMPLATE = RetryTemplate.builder().maxAttempts(1).build();
 
+    /**
+     * 同步调用 AI 接口并返回 JSON 结果
+     * <p>
+     * 如果配置启用流式，则内部转为流式调用但忽略增量输出。
+     * </p>
+     *
+     * @param config AI 运行时配置
+     * @param systemPrompt 系统提示词
+     * @param userPrompt 用户提示词
+     * @return AI 聊天完成结果
+     * @throws AiClientException 当调用失败或响应内容为空时
+     */
     public AiChatCompletionResult chatJson(AiRuntimeConfig config, String systemPrompt, String userPrompt) {
         if (config.useStream()) {
             return chatJsonStream(config, systemPrompt, userPrompt, delta -> {
@@ -54,6 +74,19 @@ public class SpringAiChatClient {
         }
     }
 
+    /**
+     * 流式调用 AI 接口并返回 JSON 结果
+     * <p>
+     * 在流式接收过程中通过 deltaHandler 实时回调增量文本片段。
+     * </p>
+     *
+     * @param config AI 运行时配置
+     * @param systemPrompt 系统提示词
+     * @param userPrompt 用户提示词
+     * @param deltaHandler 流式增量文本处理器
+     * @return AI 聊天完成结果
+     * @throws AiClientException 当调用失败或响应内容为空时
+     */
     public AiChatCompletionResult chatJsonStream(AiRuntimeConfig config, String systemPrompt, String userPrompt, AiStreamDeltaHandler deltaHandler) {
         StringBuilder content = new StringBuilder();
         TokenUsageAccumulator usage = new TokenUsageAccumulator();

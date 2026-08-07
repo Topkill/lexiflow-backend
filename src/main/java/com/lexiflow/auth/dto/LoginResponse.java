@@ -2,6 +2,14 @@ package com.lexiflow.auth.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 
+/**
+ * 登录响应 DTO。
+ *
+ * @param accessToken 访问令牌
+ * @param expiresIn   访问令牌过期秒数
+ * @param csrfToken   CSRF Token（MVP 阶段预留）
+ * @param user        当前用户摘要信息
+ */
 @Schema(description = "登录响应")
 public record LoginResponse(
         @Schema(description = "访问令牌") String accessToken,

@@ -6,6 +6,10 @@ import java.util.List;
 import java.util.StringJoiner;
 import org.springframework.util.StringUtils;
 
+/**
+ * 完形填空 AI 评阅显示格式化工具类。
+ * <p>将 AI 评阅内容格式化为 Markdown 文本，用于前端展示。</p>
+ */
 public final class ClozeAttemptAiReviewDisplayFormatter {
 
     private ClozeAttemptAiReviewDisplayFormatter() {

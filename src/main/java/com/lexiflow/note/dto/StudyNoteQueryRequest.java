@@ -6,6 +6,17 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Positive;
 
+/**
+ * 学习笔记分页查询请求 DTO。
+ * <p>用于筛选和分页查询学习笔记列表。</p>
+ *
+ * @param sourceType 来源类型
+ * @param wordbookId 词库ID
+ * @param wordId 单词ID
+ * @param keyword 关键词
+ * @param page 当前页码，默认为1
+ * @param size 每页数量，默认为20，最大100
+ */
 @Schema(description = "学习笔记分页查询参数")
 public record StudyNoteQueryRequest(
         @Schema(description = "来源类型：NORMAL、WORD_QA、CLOZE_REVIEW") StudyNoteSourceType sourceType,

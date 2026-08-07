@@ -5,6 +5,10 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 
+/**
+ * 系统配置分页查询请求 DTO。
+ * <p>支持按值类型、可编辑状态和关键词过滤，默认第 1 页、每页 20 条。</p>
+ */
 @Schema(description = "系统配置分页查询")
 public record SystemConfigQueryRequest(
         @Schema(description = "页码") @Min(1) Long page,

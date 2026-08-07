@@ -5,6 +5,20 @@ import com.lexiflow.quiz.cloze.domain.ClozeQuizBlank;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.util.List;
 
+/**
+ * 完形填空作答明细响应 DTO。
+ * <p>返回每个空的作答详情，包括用户答案、正确答案、是否正确、词性释义和解析。</p>
+ *
+ * @param blankId 空格ID
+ * @param userAnswer 用户答案
+ * @param correctAnswer 正确答案
+ * @param correct 是否正确
+ * @param correctAnswerPos 正确答案本题使用词性
+ * @param correctDefinitionZh 正确答案本题使用中文释义
+ * @param correctDefinitions 正确答案全部词性释义
+ * @param reasonZh 选择原因
+ * @param explanation 解析
+ */
 @Schema(description = "完形填空作答明细响应")
 public record ClozeAttemptAnswerResponse(
         @Schema(description = "空格 ID") String blankId,

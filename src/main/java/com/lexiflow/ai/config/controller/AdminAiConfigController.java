@@ -20,6 +20,12 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+/**
+ * 管理员 AI 公共配置接口控制器。
+ *
+ * <p>提供管理员对 AI 公共配置的 CRUD 操作，包括列表查询、新增、编辑、激活、启用/停用等功能。
+ * 同一时间只能有一个公共配置处于激活状态。</p>
+ */
 @Tag(name = "管理员 AI 配置接口")
 @Validated
 @RestController

@@ -10,6 +10,11 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+/**
+ * 后台看板接口控制器。
+ *
+ * <p>提供管理员数据看板概览接口，展示系统整体统计数据。</p>
+ */
 @Tag(name = "后台看板接口")
 @RestController
 @RequiredArgsConstructor

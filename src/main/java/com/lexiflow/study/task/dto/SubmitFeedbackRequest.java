@@ -6,6 +6,10 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 
+/**
+ * 提交单词反馈请求 DTO。
+ * <p>用户在学习卡片上提交“认识”或“不认识”的反馈。</p>
+ */
 @Schema(description = "提交单词反馈请求")
 public record SubmitFeedbackRequest(
         @Schema(description = "反馈", example = "KNOWN")

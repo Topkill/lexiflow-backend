@@ -12,6 +12,10 @@ import java.util.List;
 import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Param;
 
+/**
+ * 单词 Mapper 接口。
+ * <p>提供对 {@link Word} 实体的数据库操作，包括分页查询、精确查词、管理员查询等。</p>
+ */
 public interface WordMapper extends BaseMapper<Word> {
 
     IPage<WordRow> selectWordPage(

@@ -5,6 +5,14 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import java.time.LocalDate;
 
+/**
+ * 学习报告列表分页查询请求。
+ *
+ * @param page      页码，默认 1
+ * @param size      每页数量，默认 20，最大 100
+ * @param startDate 开始日期（可选）
+ * @param endDate   结束日期（可选）
+ */
 @Schema(description = "学习报告列表查询")
 public record ReportQueryRequest(
         @Schema(description = "页码") @Min(1) Long page,

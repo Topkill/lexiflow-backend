@@ -5,6 +5,19 @@ import com.lexiflow.quiz.cloze.domain.ClozeQuiz;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.util.List;
 
+/**
+ * 完形填空题目详情响应 DTO。
+ * <p>返回完形填空题目的完整信息，包括短文、候选词、空格列表等。</p>
+ *
+ * @param quizId 题目ID
+ * @param wordbookId 词库ID
+ * @param title 标题
+ * @param passage 短文内容
+ * @param passageZh 短文中文翻译
+ * @param candidateWords 候选词
+ * @param blanks 空格列表
+ * @param attempt 已提交作答结果
+ */
 @Schema(description = "完形填空题目详情响应")
 public record ClozeQuizResponse(
         @Schema(description = "题目 ID") String quizId,

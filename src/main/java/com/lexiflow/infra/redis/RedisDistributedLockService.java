@@ -9,6 +9,17 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 
+/**
+ * Redis 分布式锁服务。
+ * <p>
+ * 基于 Redis SETNX 实现分布式锁，支持：
+ * <ul>
+ *   <li>尝试获取锁（带 TTL）</li>
+ *   <li>检查锁状态</li>
+ *   <li>释放锁（使用 Lua 脚本确保只释放自己持有的锁）</li>
+ * </ul>
+ * </p>
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j
@@ -21,6 +32,13 @@ public class RedisDistributedLockService {
 
     private final StringRedisTemplate stringRedisTemplate;
 
+    /**
+     * 尝试获取分布式锁。
+     *
+     * @param key 锁的键名
+     * @param ttl 锁的过期时间
+     * @return 锁尝试结果（成功/被占用/不可用）
+     */
     public RedisLockAttempt tryLock(String key, Duration ttl) {
         String ownerToken = UUID.randomUUID().toString();
         try {
@@ -35,6 +53,7 @@ public class RedisDistributedLockService {
         }
     }
 
+    /** 检查指定键是否被锁定。 */
     public boolean isLocked(String key) {
         try {
             return Boolean.TRUE.equals(stringRedisTemplate.hasKey(key));
@@ -44,6 +63,15 @@ public class RedisDistributedLockService {
         }
     }
 
+    /**
+     * 释放分布式锁。
+     * <p>
+     * 使用 Lua 脚本原子性地检查并删除，确保只释放自己持有的锁。
+     * </p>
+     *
+     * @param lock 要释放的锁
+     * @return 是否成功释放
+     */
     public boolean release(RedisLock lock) {
         if (lock == null || lock.ownerToken() == null) {
             return false;

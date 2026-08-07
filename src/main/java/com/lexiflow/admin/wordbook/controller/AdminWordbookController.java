@@ -26,6 +26,11 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+/**
+ * 后台词库与单词管理接口控制器。
+ *
+ * <p>提供管理员对词库和单词的 CRUD 操作，包括分页查询、详情查看、新增、编辑、启用/停用等功能。</p>
+ */
 @Tag(name = "后台词库与单词管理接口")
 @Validated
 @RestController

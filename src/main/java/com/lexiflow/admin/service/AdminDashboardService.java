@@ -23,10 +23,17 @@ import java.math.RoundingMode;
 import java.time.Duration;
 import java.time.LocalDate;
 
+/**
+ * 后台看板服务。
+ *
+ * <p>提供管理员数据看板概览功能，统计用户、词库、单词、AI 调用等核心业务指标。
+ * 结果缓存 15 秒以减少数据库压力。</p>
+ */
 @Service
 @RequiredArgsConstructor
 public class AdminDashboardService {
 
+    /** 概览数据缓存 TTL：15 秒 */
     private static final Duration OVERVIEW_CACHE_TTL = Duration.ofSeconds(15);
 
     private final UserMapper userMapper;

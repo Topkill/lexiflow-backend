@@ -5,6 +5,10 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Positive;
 
+/**
+ * 创建错词专项复习请求 DTO。
+ * <p>用于发起一次错词巩固练习任务，可指定词库和错词数量。</p>
+ */
 @Schema(description = "创建错词专项复习请求")
 public record CreateWrongWordPracticeRequest(
         @Schema(description = "词库 ID，不传则使用当前计划词库") @Positive Long wordbookId,

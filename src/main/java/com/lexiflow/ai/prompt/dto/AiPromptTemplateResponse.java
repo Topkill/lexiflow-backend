@@ -5,6 +5,12 @@ import com.lexiflow.ai.prompt.domain.AiPromptTemplate;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.LocalDateTime;
 
+/**
+ * AI 提示词模板响应 DTO
+ * <p>
+ * 返回提示词模板的详细信息，支持自定义模板和内置默认模板两种构建方式。
+ * </p>
+ */
 @Schema(description = "AI 提示词模板响应")
 public record AiPromptTemplateResponse(
         @Schema(description = "模板 ID，内置默认模板为空") String id,
@@ -26,10 +32,25 @@ public record AiPromptTemplateResponse(
         @Schema(description = "创建时间") LocalDateTime createdAt,
         @Schema(description = "更新时间") LocalDateTime updatedAt
 ) {
+    /**
+     * 从实体对象构建响应
+     *
+     * @param template 提示词模板实体
+     * @param active 是否为当前生效模板
+     * @return 提示词模板响应 DTO
+     */
     public static AiPromptTemplateResponse from(AiPromptTemplate template, boolean active) {
         return from(template, active, template.getOutputSchemaJson());
     }
 
+    /**
+     * 从实体对象构建响应，可指定输出 Schema
+     *
+     * @param template 提示词模板实体
+     * @param active 是否为当前生效模板
+     * @param outputSchemaJson 输出 JSON Schema
+     * @return 提示词模板响应 DTO
+     */
     public static AiPromptTemplateResponse from(AiPromptTemplate template, boolean active, String outputSchemaJson) {
         return new AiPromptTemplateResponse(
                 template.getId() == null ? null : String.valueOf(template.getId()),
@@ -53,6 +74,18 @@ public record AiPromptTemplateResponse(
         );
     }
 
+    /**
+     * 构建内置默认模板的响应
+     *
+     * @param featureType 功能类型
+     * @param name 模板名称
+     * @param systemPrompt 系统提示词
+     * @param instructionPrompt 规则提示词
+     * @param outputSchemaJson 输出 JSON Schema
+     * @param active 是否为当前生效模板
+     * @param templateKey 模板键
+     * @return 内置模板响应 DTO
+     */
     public static AiPromptTemplateResponse builtin(AiPromptFeatureType featureType, String name, String systemPrompt, String instructionPrompt, String outputSchemaJson, boolean active, String templateKey) {
         return new AiPromptTemplateResponse(
                 null,

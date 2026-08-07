@@ -13,6 +13,10 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+/**
+ * 单词词典 JSON 服务。
+ * <p>提供单词标准化、JSON 构建、摘要派生等工具方法。</p>
+ */
 @Service
 @RequiredArgsConstructor
 public class WordDictionaryJsonService {

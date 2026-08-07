@@ -32,6 +32,12 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+/**
+ * 后台单词导入控制器。
+ * <p>提供 Excel 模板下载、Excel 文件上传导入、JSON URL 导入、导入任务查询、错误报告下载等功能。</p>
+ *
+ * @see WordImportService
+ */
 @Tag(name = "后台 Excel 单词导入接口")
 @Validated
 @RestController

@@ -4,6 +4,14 @@ import com.fasterxml.jackson.databind.JsonNode;
 import io.swagger.v3.oas.annotations.media.Schema;
 import org.springframework.util.StringUtils;
 
+/**
+ * 完形填空 AI 评阅逐空点评响应 DTO。
+ * <p>包含对每个空的点评和建议。</p>
+ *
+ * @param blankNo 空格序号
+ * @param comment 点评
+ * @param tip 学习建议
+ */
 @Schema(description = "完形填空 AI 评阅逐空点评")
 public record ClozeAttemptAiReviewBlankReviewResponse(
         @Schema(description = "空格序号") Integer blankNo,

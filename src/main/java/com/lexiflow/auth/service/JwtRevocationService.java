@@ -9,6 +9,13 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+/**
+ * JWT 撤销服务。
+ *
+ * <p>基于 Redis 实现 Access Token 和 Refresh Token 的撤销与检查。
+ * 撤销信息以 Token ID 为键存储，TTL 与 Token 剩余有效期一致，
+ * Token 过期后自动清除撤销记录。</p>
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j
@@ -16,6 +23,7 @@ public class JwtRevocationService {
 
     private final StringRedisTemplate stringRedisTemplate;
 
+    /** 撤销 Access Token */
     public void revokeAccessToken(String tokenId, Instant expiresAt) {
         if (!StringUtils.hasText(tokenId)) {
             return;
@@ -23,6 +31,7 @@ public class JwtRevocationService {
         revoke(RedisKeys.authRevokedAccessTokenKey(tokenId), tokenId, expiresAt);
     }
 
+    /** 撤销 Refresh Token */
     public void revokeRefreshToken(String tokenId, Instant expiresAt) {
         if (!StringUtils.hasText(tokenId)) {
             return;
@@ -30,6 +39,7 @@ public class JwtRevocationService {
         revoke(RedisKeys.authRevokedRefreshTokenKey(tokenId), tokenId, expiresAt);
     }
 
+    /** 检查 Access Token 是否已被撤销 */
     public boolean isAccessTokenRevoked(String tokenId) {
         if (!StringUtils.hasText(tokenId)) {
             return false;
@@ -37,6 +47,7 @@ public class JwtRevocationService {
         return isRevoked(RedisKeys.authRevokedAccessTokenKey(tokenId), tokenId);
     }
 
+    /** 检查 Refresh Token 是否已被撤销 */
     public boolean isRefreshTokenRevoked(String tokenId) {
         if (!StringUtils.hasText(tokenId)) {
             return false;

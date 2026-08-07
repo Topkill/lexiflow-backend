@@ -6,6 +6,14 @@ import java.util.ArrayList;
 import java.util.List;
 import org.springframework.util.StringUtils;
 
+/**
+ * 完形填空 AI 评阅薄弱点响应 DTO。
+ * <p>包含薄弱点标签、相关空格序号和点评。</p>
+ *
+ * @param tag 标签
+ * @param blankNos 相关空格序号
+ * @param comment 点评
+ */
 @Schema(description = "完形填空 AI 评阅薄弱点")
 public record ClozeAttemptAiReviewWeaknessResponse(
         @Schema(description = "标签") String tag,

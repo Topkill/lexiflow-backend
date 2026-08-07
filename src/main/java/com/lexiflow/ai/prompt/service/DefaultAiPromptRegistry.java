@@ -7,6 +7,13 @@ import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Component;
 
+/**
+ * 内置 AI 提示词注册表
+ * <p>
+ * 管理系统所有内置的 AI 提示词定义，在初始化时注册各功能类型（单词问答、完形填空、评阅）的
+ * 默认系统提示词、规则提示词和输出 Schema。支持按功能类型查询和列表获取。
+ * </p>
+ */
 @Component
 public class DefaultAiPromptRegistry {
 
@@ -34,10 +41,21 @@ public class DefaultAiPromptRegistry {
         register(new DefaultAiPromptDefinition(AiPromptFeatureType.CLOZE_REVIEW, "builtin:CLOZE_REVIEW", "默认 AI 评阅提示词", CLOZE_REVIEW_SYSTEM_PROMPT, CLOZE_REVIEW_INSTRUCTION_PROMPT, outputSchemaService.defaultSchemaJson(AiPromptFeatureType.CLOZE_REVIEW)));
     }
 
+    /**
+     * 获取指定功能类型的内置提示词定义
+     *
+     * @param featureType AI 功能类型
+     * @return 内置提示词定义，不存在时返回 null
+     */
     public DefaultAiPromptDefinition get(AiPromptFeatureType featureType) {
         return definitions.get(featureType);
     }
 
+    /**
+     * 获取所有内置提示词定义列表
+     *
+     * @return 所有内置提示词定义列表
+     */
     public List<DefaultAiPromptDefinition> list() {
         return Arrays.stream(AiPromptFeatureType.values())
                 .map(definitions::get)

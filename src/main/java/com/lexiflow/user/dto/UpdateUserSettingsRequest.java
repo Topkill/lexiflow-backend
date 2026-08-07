@@ -8,6 +8,17 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
+/**
+ * 更新用户设置请求 DTO。
+ *
+ * <p>包含用户可修改的所有个性化配置项，所有字段均为必填。</p>
+ *
+ * @param targetExam      目标考试类型
+ * @param dailyNewWords   每日新词数，范围 1-300
+ * @param aiKeyMode       AI Key 使用模式
+ * @param enableDailyReport 是否启用日报入口
+ * @param timezone        用户时区，如 Asia/Shanghai
+ */
 @Schema(description = "更新用户设置请求")
 public record UpdateUserSettingsRequest(
         @Schema(description = "目标考试", example = "CET4") TargetExam targetExam,

@@ -6,6 +6,18 @@ import java.util.ArrayList;
 import java.util.List;
 import org.springframework.util.StringUtils;
 
+/**
+ * 完形填空 AI 评阅内容响应 DTO。
+ * <p>包含 AI 评阅的完整内容，包括总体评价、错因标签、亮点、薄弱点、学习建议、逐空点评和语法小知识。</p>
+ *
+ * @param overall 总体评价
+ * @param mistakeTags 错因标签
+ * @param strengths 亮点
+ * @param weaknesses 薄弱点
+ * @param suggestions 学习建议
+ * @param blankReviews 逐空点评
+ * @param grammarTip 语法小知识
+ */
 @Schema(description = "完形填空 AI 评阅内容")
 public record ClozeAttemptAiReviewContentResponse(
         @Schema(description = "总体评价") String overall,

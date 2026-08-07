@@ -4,6 +4,12 @@ import com.lexiflow.wordbook.domain.Wordbook;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.LocalDateTime;
 
+/**
+ * 后台词库响应 DTO。
+ *
+ * <p>将 {@link Wordbook} 实体转换为管理员查看的词库详情格式。
+ * 通过 {@link #from(Wordbook)} 静态工厂方法进行转换。</p>
+ */
 @Schema(description = "后台词库响应")
 public record AdminWordbookResponse(
         @Schema(description = "词库 ID") String id,

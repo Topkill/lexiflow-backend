@@ -4,6 +4,12 @@ import com.lexiflow.user.domain.User;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.LocalDateTime;
 
+/**
+ * 后台用户响应 DTO。
+ *
+ * <p>用于用户列表展示，包含用户基础信息。
+ * 通过 {@link #from(User)} 静态工厂方法进行转换。</p>
+ */
 @Schema(description = "后台用户响应")
 public record AdminUserResponse(
         @Schema(description = "用户 ID") String id,

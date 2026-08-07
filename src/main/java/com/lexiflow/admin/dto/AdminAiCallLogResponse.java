@@ -4,6 +4,12 @@ import com.lexiflow.ai.content.domain.AiCallLog;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.LocalDateTime;
 
+/**
+ * 后台 AI 调用日志响应 DTO。
+ *
+ * <p>将 {@link AiCallLog} 实体转换为管理员查看的日志详情格式。
+ * 通过 {@link #from(AiCallLog)} 静态工厂方法进行转换。</p>
+ */
 @Schema(description = "后台 AI 调用日志响应")
 public record AdminAiCallLogResponse(
         @Schema(description = "日志 ID") String id,

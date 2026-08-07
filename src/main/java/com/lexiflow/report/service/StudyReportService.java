@@ -47,6 +47,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.AmqpException;
 import org.springframework.stereotype.Service;
 
+/**
+ * AI 学习报告服务。
+ * <p>负责创建报告生成异步任务、收集学习统计数据、调用 AI 生成报告内容、
+ * 管理报告查询与分页。报告包含今日学习统计、正确率、错词提醒和 AI 建议。</p>
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j
@@ -65,6 +70,13 @@ public class StudyReportService {
     private final ObjectMapper objectMapper;
     private final StudyReportTaskPublisher studyReportTaskPublisher;
 
+    /**
+     * 创建学习报告生成任务并发布到 MQ。
+     *
+     * @param userId  当前用户 ID
+     * @param request 包含每日任务 ID 和报告日期
+     * @return 包含异步任务状态的响应
+     */
     public CreateReportTaskResponse createReportTask(Long userId, CreateReportTaskRequest request) {
         getOwnedDailyTask(userId, request.dailyTaskId());
         String requestJson = toJson(Map.of(
@@ -81,6 +93,12 @@ public class StudyReportService {
         }
     }
 
+    /**
+     * 处理学习报告生成异步任务（由 MQ 消费者调用）。
+     *
+     * @param taskId      异步任务 ID
+     * @param redelivered 是否为 RabbitMQ 重投递消息
+     */
     public void processReportTask(Long taskId, boolean redelivered) {
         if (taskId == null) {
             return;
@@ -137,6 +155,13 @@ public class StudyReportService {
         }
     }
 
+    /**
+     * 查询指定学习报告详情。
+     *
+     * @param userId   当前用户 ID
+     * @param reportId 报告 ID
+     * @return 报告响应
+     */
     public StudyReportResponse getReport(Long userId, Long reportId) {
         StudyReport report = studyReportMapper.selectOne(new LambdaQueryWrapper<StudyReport>()
                 .eq(StudyReport::getId, reportId)
@@ -148,6 +173,13 @@ public class StudyReportService {
         return StudyReportResponse.of(report, parseJsonNode(report.getSummaryJson()));
     }
 
+    /**
+     * 分页查询当前用户的学习报告列表。
+     *
+     * @param userId  当前用户 ID
+     * @param request 分页查询参数
+     * @return 分页报告响应
+     */
     public PageResponse<StudyReportResponse> pageReports(Long userId, ReportQueryRequest request) {
         LambdaQueryWrapper<StudyReport> wrapper = new LambdaQueryWrapper<StudyReport>()
                 .eq(StudyReport::getUserId, userId)
@@ -166,6 +198,16 @@ public class StudyReportService {
         return PageResponse.of(records, page.getTotal(), page.getCurrent(), page.getSize());
     }
 
+    /**
+     * 生成学习报告。
+     * <p>收集当日学习统计数据，调用 AI 生成结构化总结和 Markdown 内容，并插入或更新报告记录。</p>
+     *
+     * @param userId      当前用户 ID
+     * @param dailyTask   每日任务
+     * @param asyncTaskId 异步任务 ID
+     * @param reportDate  报告日期
+     * @return 生成的报告实体
+     */
     protected StudyReport generateReport(Long userId, DailyTask dailyTask, Long asyncTaskId, LocalDate reportDate) {
         StudyPlan plan = studyPlanMapper.selectById(dailyTask.getPlanId());
         if (plan == null) {

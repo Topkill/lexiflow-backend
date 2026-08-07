@@ -14,6 +14,12 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+/**
+ * 异步任务控制器
+ * <p>
+ * 提供异步任务状态查询的 REST 接口，客户端可通过任务 ID 查询任务执行进度和结果。
+ * </p>
+ */
 @Tag(name = "异步任务接口")
 @Validated
 @RestController

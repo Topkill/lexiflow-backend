@@ -9,6 +9,11 @@ import org.springframework.amqp.support.AmqpHeaders;
 import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.stereotype.Component;
 
+/**
+ * 学习报告生成任务消费者。
+ * <p>监听 {@link RabbitMqNames#STUDY_REPORT_QUEUE} 队列，将消息委派给
+ * {@link StudyReportService#processReportTask} 执行。</p>
+ */
 @Component
 @RequiredArgsConstructor
 @Slf4j
@@ -16,6 +21,12 @@ public class StudyReportTaskConsumer {
 
     private final StudyReportService studyReportService;
 
+    /**
+     * 处理学习报告生成 MQ 消息。
+     *
+     * @param message     报告任务消息，包含异步任务 ID
+     * @param redelivered 是否为 RabbitMQ 重投递消息
+     */
     @RabbitListener(queues = RabbitMqNames.STUDY_REPORT_QUEUE)
     public void handle(StudyReportTaskMessage message, @Header(name = AmqpHeaders.REDELIVERED, required = false) Boolean redelivered) {
         if (message == null || message.taskId() == null) {

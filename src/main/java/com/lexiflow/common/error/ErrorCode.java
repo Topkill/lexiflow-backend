@@ -3,6 +3,27 @@ package com.lexiflow.common.error;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 
+/**
+ * 全局业务错误码枚举。
+ * <p>
+ * 每个错误码包含业务状态码、错误消息和对应的 HTTP 状态码。
+ * 错误码分段规划：
+ * <ul>
+ *   <li>0      - 成功</li>
+ *   <li>10xxx  - 通用/认证错误</li>
+ *   <li>11xxx  - 登录相关错误</li>
+ *   <li>20xxx  - 词库相关错误</li>
+ *   <li>30xxx  - 学习计划相关错误</li>
+ *   <li>31xxx  - 学习进度相关错误</li>
+ *   <li>40xxx  - AI 相关错误</li>
+ *   <li>41xxx  - 完形填空相关错误</li>
+ *   <li>42xxx  - 学习报告相关错误</li>
+ *   <li>50xxx  - 异步任务相关错误</li>
+ *   <li>60xxx  - 文件上传相关错误</li>
+ *   <li>90xxx  - 其他通用错误</li>
+ * </ul>
+ * </p>
+ */
 @Getter
 @RequiredArgsConstructor
 public enum ErrorCode {

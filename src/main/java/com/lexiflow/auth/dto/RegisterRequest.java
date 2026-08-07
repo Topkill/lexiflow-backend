@@ -6,6 +6,13 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
+/**
+ * 注册请求 DTO。
+ *
+ * @param email    用户邮箱，必须合法且未注册
+ * @param password 密码，长度 8-64，必须包含字母和数字
+ * @param nickname 用户昵称，长度 1-64
+ */
 @Schema(description = "注册请求")
 public record RegisterRequest(
         @Schema(description = "邮箱", example = "student@example.com")

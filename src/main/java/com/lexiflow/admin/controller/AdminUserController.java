@@ -18,6 +18,11 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+/**
+ * 后台用户管理接口控制器。
+ *
+ * <p>提供管理员对用户进行分页查询、查看详情、禁用和启用等操作接口。</p>
+ */
 @Tag(name = "后台用户管理接口")
 @Validated
 @RestController

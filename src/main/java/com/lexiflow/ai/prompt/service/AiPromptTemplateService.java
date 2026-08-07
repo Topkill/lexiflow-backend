@@ -31,6 +31,15 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 
+/**
+ * AI 提示词模板服务
+ * <p>
+ * 提供提示词模板的完整生命周期管理，包括模板的创建、编辑、复制、删除、功能绑定等。
+ * 支持按功能类型和词书范围解析当前生效的提示词模板，
+ * 采用本地缓存 + Redis Pub/Sub 缓存失效机制保证分布式环境下的数据一致性。
+ * 解析优先级：词书范围自定义模板 → 全局自定义模板 → 内置默认模板。
+ * </p>
+ */
 @Service
 @RequiredArgsConstructor
 public class AiPromptTemplateService implements RedisCacheInvalidationListener {
