@@ -410,11 +410,16 @@ public class ClozeQuizService {
     public ClozeQuizResponse getQuiz(Long userId, Long quizId) {
         ClozeQuiz quiz = getOwnedQuiz(userId, quizId);
         List<ClozeQuizBlank> blanks = listBlanks(quizId);
+        Map<Long, Word> wordMap = loadWordMap(blanks);
         return ClozeQuizResponse.of(
                 quiz,
                 resolveQuizWordbookId(quiz),
                 parseJsonNode(quiz.getCandidateWords()),
-                blanks.stream().map(ClozeBlankResponse::from).toList(),
+                blanks.stream().map(blank -> {
+                    Word word = wordMap.get(blank.getWordId());
+                    ClozeExplanationDetail explanation = resolveExplanationDetail(blank, word);
+                    return ClozeBlankResponse.from(blank, explanation.usedPos(), explanation.definitionZh());
+                }).toList(),
                 findQuizAttemptResponse(userId, quizId)
         );
     }
