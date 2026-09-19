@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import java.time.LocalDateTime;
+import java.time.LocalDate;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -46,6 +47,10 @@ public class StudyEvent {
     private Integer durationSeconds;
     /** 来源引用 ID（如作答 ID） */
     private Long sourceRefId;
+    private String attemptId;
+    private AttemptType attemptType;
+    private LocalDate businessDate;
+    private Boolean algorithmApplied;
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
 }

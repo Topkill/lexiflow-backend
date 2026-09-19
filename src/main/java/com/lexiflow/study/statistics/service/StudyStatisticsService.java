@@ -22,6 +22,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Duration;
 import java.time.LocalDate;
+import com.lexiflow.study.progress.service.StudyBusinessTime;
 import java.util.HashSet;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
@@ -120,7 +121,7 @@ public class StudyStatisticsService {
         LambdaQueryWrapper<UserWordState> wrapper = new LambdaQueryWrapper<UserWordState>()
                 .eq(UserWordState::getUserId, userId)
                 .eq(UserWordState::getLearned, true)
-                .le(UserWordState::getNextReviewDate, LocalDate.now());
+                .le(UserWordState::getNextReviewDate, LocalDate.now(StudyBusinessTime.ZONE));
         if (wordbookId != null) {
             wrapper.eq(UserWordState::getWordbookId, wordbookId);
         }
@@ -143,7 +144,7 @@ public class StudyStatisticsService {
     /** 计算连续学习天数（从今天或昨天开始向前连续有学习记录的天数）。 */
     private int calculateStreakDays(Long userId) {
         Set<LocalDate> activeDates = new HashSet<>(studyEventMapper.selectActiveDates(userId));
-        LocalDate cursor = LocalDate.now();
+        LocalDate cursor = LocalDate.now(StudyBusinessTime.ZONE);
         if (!activeDates.contains(cursor)) {
             cursor = cursor.minusDays(1);
         }
@@ -160,7 +161,7 @@ public class StudyStatisticsService {
         LambdaQueryWrapper<DailyTask> wrapper = new LambdaQueryWrapper<DailyTask>()
                 .eq(DailyTask::getUserId, userId)
                 .eq(DailyTask::getTaskType, DailyTaskType.DAILY)
-                .eq(DailyTask::getTaskDate, LocalDate.now());
+                .eq(DailyTask::getTaskDate, LocalDate.now(StudyBusinessTime.ZONE));
         if (planId != null) {
             wrapper.eq(DailyTask::getPlanId, planId);
         }

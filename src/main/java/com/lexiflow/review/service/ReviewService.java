@@ -20,6 +20,7 @@ import com.lexiflow.wordbook.domain.Word;
 import com.lexiflow.wordbook.mapper.WordMapper;
 import com.lexiflow.wordbook.service.WordbookService;
 import java.time.LocalDate;
+import com.lexiflow.study.progress.service.StudyBusinessTime;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -56,7 +57,7 @@ public class ReviewService {
                 .eq(UserWordState::getUserId, userId)
                 .eq(UserWordState::getLearned, true)
                 .isNotNull(UserWordState::getNextReviewDate)
-                .le(UserWordState::getNextReviewDate, LocalDate.now())
+                .le(UserWordState::getNextReviewDate, LocalDate.now(StudyBusinessTime.ZONE))
                 .orderByAsc(UserWordState::getNextReviewDate)
                 .orderByDesc(UserWordState::getUpdatedAt);
         if (request.wordbookId() != null) {
@@ -115,7 +116,7 @@ public class ReviewService {
             throw new BizException(ErrorCode.WRONG_WORD_NOT_FOUND);
         }
         wrongWord.setResolved(true);
-        wrongWord.setResolvedAt(LocalDateTime.now());
+        wrongWord.setResolvedAt(LocalDateTime.now(StudyBusinessTime.ZONE));
         wrongWordMapper.updateById(wrongWord);
     }
 

@@ -14,6 +14,7 @@ import com.lexiflow.study.mapper.StudyPlanMapper;
 import com.lexiflow.study.progress.domain.MasteryStatus;
 import com.lexiflow.study.progress.domain.StudyEvent;
 import com.lexiflow.study.progress.domain.StudyFeedback;
+import com.lexiflow.study.progress.domain.AttemptType;
 import com.lexiflow.study.progress.domain.StudyScene;
 import com.lexiflow.study.progress.domain.UserWordState;
 import com.lexiflow.study.progress.domain.WrongWord;
@@ -99,8 +100,8 @@ class DailyTaskServiceTest {
         when(dailyTaskItemMapper.selectOne(any())).thenReturn(item);
         when(dailyTaskMapper.selectOne(any())).thenReturn(sourceTask);
         when(dailyTaskItemMapper.update(any(DailyTaskItem.class), any())).thenReturn(1);
-        when(spacedRepetitionService.applyFeedback(USER_ID, WORDBOOK_ID, WORD_ID, PLAN_ID, StudyFeedback.KNOWN, StudyScene.NEW))
-                .thenReturn(new SpacedRepetitionResult(nextReviewDate, 4, MasteryStatus.NEW, MasteryStatus.REVIEWING));
+        when(spacedRepetitionService.applyFeedback(USER_ID, WORDBOOK_ID, WORD_ID, PLAN_ID, StudyFeedback.KNOWN, StudyScene.NEW, AttemptType.INITIAL_LEARNING))
+                .thenReturn(new SpacedRepetitionResult(nextReviewDate, 4, MasteryStatus.NEW, MasteryStatus.REVIEWING, AttemptType.INITIAL_LEARNING, LocalDate.now(), true, LocalDate.now().atStartOfDay()));
         when(studyPlanMapper.selectById(PLAN_ID)).thenReturn(plan);
         when(dailyTaskMapper.update(any(DailyTask.class), any())).thenReturn(1);
         when(dailyTaskMapper.selectById(TASK_ID)).thenReturn(refreshedTask);
@@ -108,7 +109,7 @@ class DailyTaskServiceTest {
         SubmitFeedbackResponse response = dailyTaskService.submitFeedback(
                 USER_ID,
                 ITEM_ID,
-                new SubmitFeedbackRequest(StudyFeedback.KNOWN, 12)
+                new SubmitFeedbackRequest(StudyFeedback.KNOWN, 12, AttemptType.INITIAL_LEARNING, "known-attempt")
         );
 
         assertThat(response.status()).isEqualTo(DailyTaskItemStatus.DONE.name());
@@ -144,13 +145,13 @@ class DailyTaskServiceTest {
         SubmitFeedbackResponse response = dailyTaskService.submitFeedback(
                 USER_ID,
                 ITEM_ID,
-                new SubmitFeedbackRequest(StudyFeedback.KNOWN, 12)
+                new SubmitFeedbackRequest(StudyFeedback.KNOWN, 12, AttemptType.INITIAL_LEARNING, "known-attempt")
         );
 
         assertThat(response.status()).isEqualTo(DailyTaskItemStatus.DONE.name());
         assertThat(response.feedback()).isEqualTo(StudyFeedback.KNOWN.name());
         assertThat(response.taskProgress().doneCount()).isEqualTo(1);
-        verify(spacedRepetitionService, never()).applyFeedback(any(), any(), any(), any(), any(), any());
+        verify(spacedRepetitionService, never()).applyFeedback(any(), any(), any(), any(), any(), any(), any());
         verify(studyEventMapper, never()).insert(any(StudyEvent.class));
         verify(dailyTaskMapper, never()).update(any(DailyTask.class), any());
     }
@@ -171,14 +172,14 @@ class DailyTaskServiceTest {
         SubmitFeedbackResponse response = dailyTaskService.submitFeedback(
                 USER_ID,
                 ITEM_ID,
-                new SubmitFeedbackRequest(StudyFeedback.UNKNOWN, 12)
+                new SubmitFeedbackRequest(StudyFeedback.UNKNOWN, 12, AttemptType.IN_DAY_RETRY, "unknown-attempt")
         );
 
         assertThat(response.status()).isEqualTo(DailyTaskItemStatus.PENDING.name());
         assertThat(response.feedback()).isEqualTo(StudyFeedback.UNKNOWN.name());
         assertThat(response.nextReviewDate()).isEqualTo(state.getNextReviewDate());
         assertThat(response.taskProgress().doneCount()).isZero();
-        verify(spacedRepetitionService, never()).applyFeedback(any(), any(), any(), any(), any(), any());
+        verify(spacedRepetitionService, never()).applyFeedback(any(), any(), any(), any(), any(), any(), any());
         verify(studyEventMapper, never()).insert(any(StudyEvent.class));
         verify(wrongWordMapper, never()).insert(any(WrongWord.class));
         verify(dailyTaskMapper, never()).update(any(DailyTask.class), any());

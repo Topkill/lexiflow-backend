@@ -15,6 +15,7 @@ import com.lexiflow.study.progress.domain.FavoriteWord;
 import com.lexiflow.study.progress.domain.MasteryStatus;
 import com.lexiflow.study.progress.domain.StudyEvent;
 import com.lexiflow.study.progress.domain.StudyFeedback;
+import com.lexiflow.study.progress.domain.AttemptType;
 import com.lexiflow.study.progress.domain.StudyScene;
 import com.lexiflow.study.progress.domain.UserWordState;
 import com.lexiflow.study.progress.domain.WrongWord;
@@ -47,6 +48,7 @@ import com.lexiflow.wordbook.dto.WordPickRow;
 import com.lexiflow.wordbook.mapper.WordMapper;
 import com.lexiflow.wordbook.service.WordbookService;
 import java.time.LocalDate;
+import com.lexiflow.study.progress.service.StudyBusinessTime;
 import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.Comparator;
@@ -110,7 +112,7 @@ public class DailyTaskService {
     @Transactional
     public DailyTaskResponse getTodayTask(Long userId) {
         StudyPlan plan = studyPlanService.getPrimaryActivePlanEntity(userId);
-        LocalDate today = LocalDate.now();
+        LocalDate today = LocalDate.now(StudyBusinessTime.ZONE);
         DailyTask task = findLatestDoneTaskAwaitingClozeAttempt(userId, plan.getId(), today);
         if (task != null) {
             return toResponse(task, plan);
@@ -161,7 +163,7 @@ public class DailyTaskService {
         if (!plan.getWordbookId().equals(targetWordbookId)) {
             throw new BizException(ErrorCode.WORDBOOK_NOT_FOUND);
         }
-        LocalDate today = LocalDate.now();
+        LocalDate today = LocalDate.now(StudyBusinessTime.ZONE);
         List<WrongWord> wrongWords = wrongWordMapper.selectList(new LambdaQueryWrapper<WrongWord>()
                 .eq(WrongWord::getUserId, userId)
                 .eq(WrongWord::getWordbookId, targetWordbookId)
@@ -206,14 +208,22 @@ public class DailyTaskService {
      */
     @Transactional
     public SubmitFeedbackResponse submitFeedback(Long userId, Long itemId, SubmitFeedbackRequest request) {
+        spacedRepetitionService.lockUser(userId);
         DailyTaskItem item = getOwnedTaskItem(userId, itemId);
         DailyTask sourceTask = getOwnedTask(userId, item.getDailyTaskId());
+        StudyEvent previous = studyEventMapper.selectOne(new LambdaQueryWrapper<StudyEvent>()
+                .eq(StudyEvent::getUserId, userId).eq(StudyEvent::getAttemptId, request.attemptId()));
+        if (previous != null) {
+            if (!itemId.equals(previous.getDailyTaskItemId()) || previous.getFeedback() != request.feedback()) {
+                throw new BizException(ErrorCode.BAD_REQUEST, "attemptId 已用于其他反馈");
+            }
+            return buildCurrentFeedbackResponse(userId, item, request.feedback());
+        }
+        if (request.attemptType() == AttemptType.QUIZ) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "卡片反馈不能使用 QUIZ 类型");
+        }
         if (!claimFeedbackSubmission(userId, item, request.feedback())) {
             return buildAlreadyAppliedFeedbackResponse(userId, item, request.feedback());
-        }
-
-        if (sourceTask.getTaskType() == DailyTaskType.WRONG_WORD_PRACTICE) {
-            return submitWrongWordPracticeFeedback(userId, item, request);
         }
 
         StudyScene scene = toStudyScene(item.getItemType());
@@ -223,9 +233,11 @@ public class DailyTaskService {
                 item.getWordId(),
                 item.getPlanId(),
                 request.feedback(),
-                scene
+                scene,
+                sourceTask.getTaskType() == DailyTaskType.WRONG_WORD_PRACTICE
+                        ? AttemptType.IN_DAY_RETRY : request.attemptType()
         );
-        StudyEvent event = createStudyEvent(userId, item, request.feedback(), request.durationSeconds(), scene, repetitionResult.qualityScore());
+        StudyEvent event = createStudyEvent(userId, item, request, scene, repetitionResult);
         if (request.feedback() == StudyFeedback.UNKNOWN) {
             upsertWrongWord(userId, item, event.getId(), scene);
         } else if (item.getItemType() == DailyTaskItemType.EXTRA) {
@@ -239,29 +251,13 @@ public class DailyTaskService {
         return SubmitFeedbackResponse.from(item, request.feedback(), repetitionResult.nextReviewDate(), task.getStatus() == DailyTaskStatus.DONE, progress);
     }
 
-    /** 处理错词练习任务的反馈，认识则标记错词为已解决，不认识则更新错词记录。 */
-    private SubmitFeedbackResponse submitWrongWordPracticeFeedback(Long userId, DailyTaskItem item, SubmitFeedbackRequest request) {
-        StudyScene scene = StudyScene.EXTRA;
-        StudyEvent event = createStudyEvent(userId, item, request.feedback(), request.durationSeconds(), scene, qualityScore(request.feedback()));
-        boolean completed = request.feedback() == StudyFeedback.KNOWN;
-        if (completed) {
-            resolveWrongWord(userId, item);
-        } else {
-            upsertWrongWord(userId, item, event.getId(), scene);
-        }
-
-        DailyTask task = completed ? incrementDoneCountAndRefreshTask(item.getDailyTaskId()) : getDailyTaskForProgress(item.getDailyTaskId());
-        TaskProgressResponse progress = TaskProgressResponse.from(task.getDoneCount(), totalCount(task));
-        return SubmitFeedbackResponse.from(item, request.feedback(), null, task.getStatus() == DailyTaskStatus.DONE, progress);
-    }
-
     /** 幂等性领取反馈提交，通过 CAS 更新确保同一任务项不被重复提交。 */
     private boolean claimFeedbackSubmission(Long userId, DailyTaskItem item, StudyFeedback feedback) {
         DailyTaskItem update = new DailyTaskItem();
         update.setFeedback(feedback.name());
         if (feedback == StudyFeedback.KNOWN) {
             update.setStatus(DailyTaskItemStatus.DONE);
-            update.setDoneAt(LocalDateTime.now());
+            update.setDoneAt(LocalDateTime.now(StudyBusinessTime.ZONE));
         } else {
             update.setStatus(DailyTaskItemStatus.PENDING);
         }
@@ -270,12 +266,7 @@ public class DailyTaskService {
                 .eq(DailyTaskItem::getId, item.getId())
                 .eq(DailyTaskItem::getUserId, userId)
                 .eq(DailyTaskItem::getStatus, DailyTaskItemStatus.PENDING);
-        if (feedback == StudyFeedback.UNKNOWN) {
-            wrapper.and(nested -> nested
-                    .isNull(DailyTaskItem::getFeedback)
-                    .or()
-                    .ne(DailyTaskItem::getFeedback, StudyFeedback.UNKNOWN.name()));
-        }
+        // 网络重试由 attemptId 去重。新的 UNKNOWN 即使原反馈相同也是真实新尝试。
 
         boolean updated = dailyTaskItemMapper.update(update, wrapper) > 0;
         if (updated) {
@@ -292,12 +283,14 @@ public class DailyTaskService {
         if (!isAlreadyAppliedFeedback(current, feedback)) {
             throw new BizException(ErrorCode.TASK_ITEM_NOT_SUBMITTABLE);
         }
+        return buildCurrentFeedbackResponse(userId, current, feedback);
+    }
+
+    private SubmitFeedbackResponse buildCurrentFeedbackResponse(Long userId, DailyTaskItem current, StudyFeedback feedback) {
         UserWordState state = findUserWordState(userId, current.getWordbookId(), current.getWordId());
         DailyTask task = getDailyTaskForProgress(current.getDailyTaskId());
         TaskProgressResponse progress = TaskProgressResponse.from(task.getDoneCount(), totalCount(task));
-        LocalDate nextReviewDate = task.getTaskType() == DailyTaskType.WRONG_WORD_PRACTICE
-                ? null
-                : state == null ? null : state.getNextReviewDate();
+        LocalDate nextReviewDate = state == null ? null : state.getNextReviewDate();
         return SubmitFeedbackResponse.from(
                 current,
                 feedback,
@@ -335,7 +328,7 @@ public class DailyTaskService {
     private boolean markTaskDoneIfComplete(Long dailyTaskId) {
         DailyTask update = new DailyTask();
         update.setStatus(DailyTaskStatus.DONE);
-        update.setCompletedAt(LocalDateTime.now());
+        update.setCompletedAt(LocalDateTime.now(StudyBusinessTime.ZONE));
         return dailyTaskMapper.update(update, new LambdaUpdateWrapper<DailyTask>()
                 .eq(DailyTask::getId, dailyTaskId)
                 .ne(DailyTask::getStatus, DailyTaskStatus.DONE)
@@ -350,14 +343,6 @@ public class DailyTaskService {
             throw new BizException(ErrorCode.TODAY_TASK_NOT_FOUND);
         }
         return task;
-    }
-
-    /** 根据反馈类型返回对应的质量评分。 */
-    private int qualityScore(StudyFeedback feedback) {
-        return switch (feedback) {
-            case UNKNOWN -> 2;
-            case KNOWN -> 4;
-        };
     }
 
     /** 查询用户最新的待处理每日任务。 */
@@ -767,7 +752,7 @@ public class DailyTaskService {
     }
 
     /** 创建学习事件记录。 */
-    private StudyEvent createStudyEvent(Long userId, DailyTaskItem item, StudyFeedback feedback, Integer durationSeconds, StudyScene scene, int qualityScore) {
+    private StudyEvent createStudyEvent(Long userId, DailyTaskItem item, SubmitFeedbackRequest request, StudyScene scene, SpacedRepetitionResult result) {
         StudyEvent event = new StudyEvent();
         event.setUserId(userId);
         event.setPlanId(item.getPlanId());
@@ -776,10 +761,15 @@ public class DailyTaskService {
         event.setDailyTaskId(item.getDailyTaskId());
         event.setDailyTaskItemId(item.getId());
         event.setScene(scene);
-        event.setFeedback(feedback);
-        event.setQualityScore(qualityScore);
-        event.setIsCorrect(feedback != StudyFeedback.UNKNOWN);
-        event.setDurationSeconds(durationSeconds);
+        event.setFeedback(request.feedback());
+        event.setQualityScore(result.qualityScore());
+        event.setIsCorrect(request.feedback() != StudyFeedback.UNKNOWN);
+        event.setDurationSeconds(request.durationSeconds());
+        event.setAttemptId(request.attemptId());
+        event.setAttemptType(result.attemptType());
+        event.setBusinessDate(result.businessDate());
+        event.setAlgorithmApplied(result.algorithmApplied());
+        event.setCreatedAt(result.occurredAt());
         studyEventMapper.insert(event);
         return event;
     }
@@ -799,7 +789,7 @@ public class DailyTaskService {
             wrongWord.setWrongCount(1);
             wrongWord.setLastSource(scene);
             wrongWord.setLastEventId(eventId);
-            wrongWord.setLastWrongAt(LocalDateTime.now());
+            wrongWord.setLastWrongAt(LocalDateTime.now(StudyBusinessTime.ZONE));
             wrongWord.setResolved(false);
             wrongWord.setDeleted(0);
             wrongWordMapper.insert(wrongWord);
@@ -808,7 +798,7 @@ public class DailyTaskService {
         wrongWord.setWrongCount(wrongWord.getWrongCount() + 1);
         wrongWord.setLastSource(scene);
         wrongWord.setLastEventId(eventId);
-        wrongWord.setLastWrongAt(LocalDateTime.now());
+        wrongWord.setLastWrongAt(LocalDateTime.now(StudyBusinessTime.ZONE));
         wrongWord.setResolved(false);
         wrongWord.setResolvedAt(null);
         wrongWordMapper.updateById(wrongWord);
@@ -826,7 +816,7 @@ public class DailyTaskService {
             return;
         }
         wrongWord.setResolved(true);
-        wrongWord.setResolvedAt(LocalDateTime.now());
+        wrongWord.setResolvedAt(LocalDateTime.now(StudyBusinessTime.ZONE));
         wrongWordMapper.updateById(wrongWord);
     }
 
@@ -843,7 +833,7 @@ public class DailyTaskService {
         task.setDoneCount(countTaskItems(dailyTaskId, DailyTaskItemStatus.DONE));
         if (task.getDoneCount() >= totalCount(task) && totalCount(task) > 0) {
             task.setStatus(DailyTaskStatus.DONE);
-            task.setCompletedAt(LocalDateTime.now());
+            task.setCompletedAt(LocalDateTime.now(StudyBusinessTime.ZONE));
         } else {
             task.setStatus(DailyTaskStatus.PENDING);
             task.setCompletedAt(null);

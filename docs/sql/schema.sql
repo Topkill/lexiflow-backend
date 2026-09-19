@@ -279,7 +279,12 @@ CREATE TABLE IF NOT EXISTS `study_event` (
   `duration_seconds` INT NULL COMMENT '停留或作答耗时',
   `source_ref_id` BIGINT NULL COMMENT '测验、报告等来源 ID',
   `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+  `attempt_id` VARCHAR(64) NULL COMMENT '真实尝试 ID，网络重试复用',
+  `attempt_type` VARCHAR(32) NULL,
+  `business_date` DATE NULL COMMENT 'Asia/Shanghai',
+  `algorithm_applied` TINYINT(1) NULL COMMENT '是否应用 EF/间隔规则，历史未知为 NULL',
   PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_study_event_attempt` (`user_id`, `attempt_id`),
   KEY `idx_study_event_user_time` (`user_id`, `created_at`),
   KEY `idx_study_event_time_user` (`created_at`, `user_id`),
   KEY `idx_study_event_user_wordbook_time_correct` (`user_id`, `wordbook_id`, `created_at`, `is_correct`),
@@ -621,3 +626,16 @@ CREATE TABLE IF NOT EXISTS `system_config` (
   UNIQUE KEY `uk_system_config_key` (`config_key`, `deleted`),
   KEY `idx_system_config_editable` (`editable`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='系统配置表';
+
+CREATE TABLE IF NOT EXISTS study_daily_word_effect (
+  id BIGINT NOT NULL AUTO_INCREMENT,
+  user_id INT NOT NULL,
+  word_id INT NOT NULL,
+  business_date DATE NOT NULL,
+  unknown_ef_applied TINYINT(1) NOT NULL DEFAULT 0,
+  known_review_applied TINYINT(1) NOT NULL DEFAULT 0,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_daily_word_effect (user_id, word_id, business_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

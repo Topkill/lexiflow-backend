@@ -1,6 +1,9 @@
 package com.lexiflow.study.task.dto;
 
 import com.lexiflow.study.progress.domain.StudyFeedback;
+import com.lexiflow.study.progress.domain.AttemptType;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -19,6 +22,8 @@ public record SubmitFeedbackRequest(
         @Schema(description = "学习耗时秒数", example = "8")
         @Min(0)
         @Max(3600)
-        Integer durationSeconds
+        Integer durationSeconds,
+        @NotNull AttemptType attemptType,
+        @NotBlank @Size(max = 64) String attemptId
 ) {
 }

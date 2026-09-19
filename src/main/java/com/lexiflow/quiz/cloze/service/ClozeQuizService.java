@@ -37,6 +37,9 @@ import com.lexiflow.study.progress.domain.WrongWord;
 import com.lexiflow.study.progress.mapper.StudyEventMapper;
 import com.lexiflow.study.progress.mapper.WrongWordMapper;
 import com.lexiflow.study.progress.service.SpacedRepetitionService;
+import com.lexiflow.study.progress.service.StudyBusinessTime;
+import com.lexiflow.study.progress.service.SpacedRepetitionService.SpacedRepetitionResult;
+import com.lexiflow.study.progress.domain.AttemptType;
 import com.lexiflow.study.task.domain.*;
 import com.lexiflow.study.task.mapper.DailyTaskItemMapper;
 import com.lexiflow.study.task.mapper.DailyTaskMapper;
@@ -436,12 +439,16 @@ public class ClozeQuizService {
      */
     @Transactional
     public ClozeAttemptResponse submitAttempt(Long userId, Long quizId, SubmitClozeAttemptRequest request) {
+        if (request.attemptType() != AttemptType.QUIZ) {
+            throw new BizException(ErrorCode.BAD_REQUEST, "完形填空必须使用 QUIZ 类型");
+        }
+        spacedRepetitionService.lockUser(userId);
         ClozeQuiz quiz = getOwnedQuiz(userId, quizId);
         boolean submitted = clozeAttemptMapper.selectCount(new LambdaQueryWrapper<ClozeAttempt>()
                 .eq(ClozeAttempt::getQuizId, quizId)
                 .eq(ClozeAttempt::getUserId, userId)) > 0;
         if (submitted) {
-            throw new BizException(ErrorCode.CLOZE_ATTEMPT_SUBMITTED);
+            return findQuizAttemptResponse(userId, quizId);
         }
 
         List<ClozeQuizBlank> blanks = listBlanks(quizId);
@@ -483,27 +490,20 @@ public class ClozeQuizService {
         attempt.setWrongCount(wrongCount);
         attempt.setScore(calculateScore(correctCount, totalBlanks));
         attempt.setDurationSeconds(request.durationSeconds());
-        attempt.setSubmittedAt(LocalDateTime.now());
+        attempt.setSubmittedAt(LocalDateTime.now(StudyBusinessTime.ZONE));
         attempt.setDeleted(0);
         clozeAttemptMapper.insert(attempt);
 
-        boolean skipScheduling = isWrongWordPracticeQuiz(quiz);
         for (ClozeAttemptAnswer answer : answerEntities) {
             answer.setAttemptId(attempt.getId());
             clozeAttemptAnswerMapper.insert(answer);
-            StudyEvent event = createStudyEvent(userId, quiz, answer, request.durationSeconds(), attempt.getId());
+            SpacedRepetitionResult result = spacedRepetitionService.applyFeedback(
+                    userId, quiz.getWordbookId(), answer.getWordId(), null,
+                    answer.getCorrect() ? StudyFeedback.KNOWN : StudyFeedback.UNKNOWN,
+                    StudyScene.QUIZ, AttemptType.QUIZ);
+            StudyEvent event = createStudyEvent(userId, quiz, answer, request.durationSeconds(), attempt.getId(), result);
             if (!answer.getCorrect()) {
                 upsertWrongWord(userId, quiz.getWordbookId(), answer.getWordId(), event.getId());
-                if (!skipScheduling) {
-                    spacedRepetitionService.applyFeedback(
-                            userId,
-                            quiz.getWordbookId(),
-                            answer.getWordId(),
-                            null,
-                            StudyFeedback.UNKNOWN,
-                            StudyScene.QUIZ
-                    );
-                }
             }
         }
 
@@ -1413,14 +1413,6 @@ public class ClozeQuizService {
         return quiz;
     }
 
-    private boolean isWrongWordPracticeQuiz(ClozeQuiz quiz) {
-        if (quiz.getDailyTaskId() == null) {
-            return false;
-        }
-        DailyTask task = dailyTaskMapper.selectById(quiz.getDailyTaskId());
-        return task != null && task.getTaskType() == DailyTaskType.WRONG_WORD_PRACTICE;
-    }
-
     private List<ClozeQuizBlank> listBlanks(Long quizId) {
         return clozeQuizBlankMapper.selectList(new LambdaQueryWrapper<ClozeQuizBlank>()
                 .eq(ClozeQuizBlank::getQuizId, quizId)
@@ -1449,7 +1441,7 @@ public class ClozeQuizService {
         return item == null ? null : item.getWordbookId();
     }
 
-    private StudyEvent createStudyEvent(Long userId, ClozeQuiz quiz, ClozeAttemptAnswer answer, Integer durationSeconds, Long attemptId) {
+    private StudyEvent createStudyEvent(Long userId, ClozeQuiz quiz, ClozeAttemptAnswer answer, Integer durationSeconds, Long attemptId, SpacedRepetitionResult result) {
         StudyEvent event = new StudyEvent();
         event.setUserId(userId);
         event.setPlanId(null);
@@ -1458,11 +1450,16 @@ public class ClozeQuizService {
         event.setDailyTaskId(quiz.getDailyTaskId());
         event.setDailyTaskItemId(null);
         event.setScene(StudyScene.QUIZ);
-        event.setFeedback(null);
+        event.setFeedback(answer.getCorrect() ? StudyFeedback.KNOWN : StudyFeedback.UNKNOWN);
         event.setQualityScore(spacedRepetitionService.qualityScore(answer.getCorrect() ? StudyFeedback.KNOWN : StudyFeedback.UNKNOWN));
         event.setIsCorrect(answer.getCorrect());
         event.setDurationSeconds(durationSeconds);
         event.setSourceRefId(attemptId);
+        event.setAttemptId("quiz:" + quiz.getId() + ":" + answer.getBlankId());
+        event.setAttemptType(AttemptType.QUIZ);
+        event.setBusinessDate(result.businessDate());
+        event.setAlgorithmApplied(result.algorithmApplied());
+        event.setCreatedAt(result.occurredAt());
         studyEventMapper.insert(event);
         return event;
     }
@@ -1481,7 +1478,7 @@ public class ClozeQuizService {
             wrongWord.setWrongCount(1);
             wrongWord.setLastSource(StudyScene.QUIZ);
             wrongWord.setLastEventId(eventId);
-            wrongWord.setLastWrongAt(LocalDateTime.now());
+            wrongWord.setLastWrongAt(LocalDateTime.now(StudyBusinessTime.ZONE));
             wrongWord.setResolved(false);
             wrongWord.setDeleted(0);
             wrongWordMapper.insert(wrongWord);
@@ -1490,7 +1487,7 @@ public class ClozeQuizService {
         wrongWord.setWrongCount(wrongWord.getWrongCount() + 1);
         wrongWord.setLastSource(StudyScene.QUIZ);
         wrongWord.setLastEventId(eventId);
-        wrongWord.setLastWrongAt(LocalDateTime.now());
+        wrongWord.setLastWrongAt(LocalDateTime.now(StudyBusinessTime.ZONE));
         wrongWord.setResolved(false);
         wrongWord.setResolvedAt(null);
         wrongWordMapper.updateById(wrongWord);

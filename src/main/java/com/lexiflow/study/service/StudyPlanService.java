@@ -25,6 +25,7 @@ import com.lexiflow.wordbook.mapper.WordMapper;
 import com.lexiflow.wordbook.domain.Wordbook;
 import com.lexiflow.wordbook.service.WordbookService;
 import java.time.LocalDate;
+import com.lexiflow.study.progress.service.StudyBusinessTime;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
@@ -178,7 +179,7 @@ public class StudyPlanService {
             throw new BizException(ErrorCode.STUDY_PLAN_STATUS_INVALID);
         }
         plan.setStatus(StudyPlanStatus.ENDED);
-        plan.setActualFinishDate(LocalDate.now());
+        plan.setActualFinishDate(LocalDate.now(StudyBusinessTime.ZONE));
         studyPlanMapper.updateById(plan);
         return toResponse(plan);
     }
@@ -186,7 +187,7 @@ public class StudyPlanService {
     private void endExistingPrimaryPlans(Long userId) {
         StudyPlan update = new StudyPlan();
         update.setStatus(StudyPlanStatus.ENDED);
-        update.setActualFinishDate(LocalDate.now());
+        update.setActualFinishDate(LocalDate.now(StudyBusinessTime.ZONE));
         studyPlanMapper.update(update, new LambdaUpdateWrapper<StudyPlan>()
                 .eq(StudyPlan::getUserId, userId)
                 .eq(StudyPlan::getIsPrimary, true)
