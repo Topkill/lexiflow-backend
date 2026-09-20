@@ -67,7 +67,7 @@ import org.springframework.transaction.annotation.Transactional;
  * 每日学习任务服务。
  * <p>管理每日学习任务的完整生命周期，包括：
  * <ul>
- *   <li>任务生成：根据学习计划配置自动生成包含 NEW/REVIEW/EXTRA 三类任务项的每日任务</li>
+ *   <li>任务生成：根据学习计划配置自动生成包含 NEW/REVIEW 两类任务项的每日任务</li>
  *   <li>任务查询：查询今日任务、指定任务和学习卡片详情</li>
  *   <li>反馈处理：接收用户的认识/不认识反馈，更新单词状态、错词记录和学习计划进度</li>
  *   <li>错词练习：创建错词专项复习任务</li>
@@ -450,10 +450,8 @@ public class DailyTaskService {
                 plan.getCurrentSequenceNo(),
                 newWordsPerGroup(plan)
         );
-        // 查询未解决的错词，用于 EXTRA 加练
-        List<WrongWord> wrongWords = selectUnresolvedWrongWords(userId, plan.getWordbookId(), newWordsPerGroup(plan));
 
-        if (dueReviewStates.isEmpty() && newWords.isEmpty() && wrongWords.isEmpty()) {
+        if (dueReviewStates.isEmpty() && newWords.isEmpty()) {
             throw new BizException(ErrorCode.TODAY_TASK_NOT_FOUND);
         }
 
@@ -467,7 +465,7 @@ public class DailyTaskService {
         task.setStatus(DailyTaskStatus.PENDING);
         task.setNewCount(newWords.size());
         task.setReviewCount(dueReviewStates.size());
-        task.setExtraCount(wrongWords.size());
+        task.setExtraCount(0);
         task.setDoneCount(0);
         task.setSkippedCount(0);
         task.setDeleted(0);
@@ -490,9 +488,6 @@ public class DailyTaskService {
             item.setDeleted(0);
             dailyTaskItemMapper.insert(item);
         }
-
-        // 插入错词加练任务项（EXTRA）
-        insertExtraItems(task, wrongWords, 0);
 
         // 更新学习计划的进度：当前序号和已学单词数
         if (!newWords.isEmpty()) {
@@ -560,28 +555,6 @@ public class DailyTaskService {
                 .orderByDesc(UserWordState::getWrongCount)
                 .orderByAsc(UserWordState::getUpdatedAt)
                 .orderByAsc(UserWordState::getId)
-                .last("LIMIT " + limit));
-    }
-
-    /**
-     * 查询用户在该词书下未解决的错词列表，按错误次数降序排列。
-     *
-     * @param userId     用户ID
-     * @param wordbookId 词书ID
-     * @param limit      最大返回数量
-     * @return 未解决的错词列表
-     */
-    private List<WrongWord> selectUnresolvedWrongWords(Long userId, Long wordbookId, int limit) {
-        if (limit <= 0) {
-            return Collections.emptyList();
-        }
-        return wrongWordMapper.selectList(new LambdaQueryWrapper<WrongWord>()
-                .eq(WrongWord::getUserId, userId)
-                .eq(WrongWord::getWordbookId, wordbookId)
-                .eq(WrongWord::getResolved, false)
-                .orderByDesc(WrongWord::getWrongCount)
-                .orderByDesc(WrongWord::getLastWrongAt)
-                .orderByAsc(WrongWord::getId)
                 .last("LIMIT " + limit));
     }
 
