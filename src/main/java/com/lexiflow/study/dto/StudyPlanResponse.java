@@ -32,18 +32,19 @@ public record StudyPlanResponse(
         @Schema(description = "计划状态", example = "ACTIVE") String status,
         @Schema(description = "总词数", example = "4500") Integer totalWords,
         @Schema(description = "已学新词数", example = "120") Integer learnedCount,
-        @Schema(description = "已掌握词数", example = "80") Integer masteredCount,
+        @Schema(description = "已掌握词数（实时聚合自 user_word_state）", example = "80") Integer masteredCount,
         @Schema(description = "当前学习位置", example = "120") Integer currentSequenceNo,
         @Schema(description = "预计完成日期", example = "2026-10-10") LocalDate expectedFinishDate
 ) {
     /**
      * 从计划实体和词书实体构造响应。
      *
-     * @param plan     学习计划实体
-     * @param wordbook 词书实体
+     * @param plan         学习计划实体
+     * @param wordbook     词书实体
+     * @param masteredCount 已掌握词数（实时聚合自单词状态，不再读取计划冗余字段）
      * @return 响应实例
      */
-    public static StudyPlanResponse from(StudyPlan plan, Wordbook wordbook) {
+    public static StudyPlanResponse from(StudyPlan plan, Wordbook wordbook, long masteredCount) {
         return new StudyPlanResponse(
                 String.valueOf(plan.getId()),
                 String.valueOf(plan.getWordbookId()),
@@ -54,7 +55,7 @@ public record StudyPlanResponse(
                 plan.getStatus().name(),
                 plan.getTotalWords(),
                 plan.getLearnedCount(),
-                plan.getMasteredCount(),
+                (int) masteredCount,
                 plan.getCurrentSequenceNo(),
                 plan.getExpectedFinishDate()
         );

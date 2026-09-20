@@ -10,6 +10,7 @@ import com.lexiflow.study.dto.CreateStudyPlanRequest;
 import com.lexiflow.study.dto.StudyPlanResponse;
 import com.lexiflow.study.dto.UpdateStudyPlanRequest;
 import com.lexiflow.study.mapper.StudyPlanMapper;
+import com.lexiflow.study.progress.domain.MasteryStatus;
 import com.lexiflow.study.progress.domain.UserWordState;
 import com.lexiflow.study.progress.mapper.UserWordStateMapper;
 import com.lexiflow.study.task.domain.DailyTask;
@@ -81,14 +82,13 @@ public class StudyPlanService {
         plan.setTotalWords(wordbook.getWordCount());
         plan.setLearnedCount(0);
         plan.setReviewedCount(0);
-        plan.setMasteredCount(0);
         plan.setCurrentSequenceNo(0);
         plan.setIsPrimary(primary);
         plan.setDeleted(0);
         plan.setVersion(0);
         studyPlanMapper.insert(plan);
 
-        return StudyPlanResponse.from(plan, wordbook);
+        return toResponse(plan);
     }
 
     /**
@@ -216,7 +216,24 @@ public class StudyPlanService {
 
     private StudyPlanResponse toResponse(StudyPlan plan) {
         Wordbook wordbook = wordbookService.getEnabledWordbook(plan.getWordbookId());
-        return StudyPlanResponse.from(plan, wordbook);
+        long masteredCount = countMasteredWords(plan.getUserId(), plan.getWordbookId());
+        return StudyPlanResponse.from(plan, wordbook, masteredCount);
+    }
+
+    /**
+     * 实时统计用户在该词库下已掌握（MASTERED）的单词数。
+     * <p>掌握数不再由计划上的冗余字段维护，统一按 {@code user_word_state} 聚合，
+     * 避免卡片与完形反馈路径分别更新导致计数漂移。</p>
+     *
+     * @param userId     用户 ID
+     * @param wordbookId 词书 ID
+     * @return 已掌握单词数
+     */
+    private long countMasteredWords(Long userId, Long wordbookId) {
+        return userWordStateMapper.selectCount(new LambdaQueryWrapper<UserWordState>()
+                .eq(UserWordState::getUserId, userId)
+                .eq(UserWordState::getWordbookId, wordbookId)
+                .eq(UserWordState::getMasteryStatus, MasteryStatus.MASTERED));
     }
 
     private void replanLatestPendingTask(Long userId, StudyPlan plan) {

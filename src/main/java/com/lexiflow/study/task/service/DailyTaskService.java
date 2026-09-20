@@ -244,7 +244,7 @@ public class DailyTaskService {
             resolveWrongWord(userId, item);
         }
         boolean completed = request.feedback() == StudyFeedback.KNOWN;
-        updateStudyPlanProgress(item, scene, repetitionResult, completed);
+        updateStudyPlanProgress(item, scene, completed);
 
         DailyTask task = completed ? incrementDoneCountAndRefreshTask(item.getDailyTaskId()) : getDailyTaskForProgress(item.getDailyTaskId());
         TaskProgressResponse progress = TaskProgressResponse.from(task.getDoneCount(), totalCount(task));
@@ -834,19 +834,14 @@ public class DailyTaskService {
                 .eq(DailyTaskItem::getStatus, status)).intValue();
     }
 
-    /** 更新学习计划的进度统计（复习数、精通数）。 */
-    private void updateStudyPlanProgress(DailyTaskItem item, StudyScene scene, SpacedRepetitionResult repetitionResult, boolean completed) {
+    /** 更新学习计划的进度统计（复习数）。已掌握数不再由计划冗余字段维护，统一按单词状态实时聚合。 */
+    private void updateStudyPlanProgress(DailyTaskItem item, StudyScene scene, boolean completed) {
         StudyPlan plan = studyPlanMapper.selectById(item.getPlanId());
         if (plan == null) {
             throw new BizException(ErrorCode.STUDY_PLAN_NOT_FOUND);
         }
         if (completed && scene == StudyScene.REVIEW) {
             plan.setReviewedCount(plan.getReviewedCount() + 1);
-        }
-        if (repetitionResult.oldMasteryStatus() != MasteryStatus.MASTERED && repetitionResult.newMasteryStatus() == MasteryStatus.MASTERED) {
-            plan.setMasteredCount(plan.getMasteredCount() + 1);
-        } else if (repetitionResult.oldMasteryStatus() == MasteryStatus.MASTERED && repetitionResult.newMasteryStatus() != MasteryStatus.MASTERED) {
-            plan.setMasteredCount(Math.max(0, plan.getMasteredCount() - 1));
         }
         studyPlanMapper.updateById(plan);
     }
