@@ -2,6 +2,7 @@ package com.lexiflow.study.progress.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.lexiflow.study.progress.domain.AttemptType;
+import com.lexiflow.study.progress.domain.MasteryStatus;
 import com.lexiflow.study.progress.domain.StudyDailyWordEffect;
 import com.lexiflow.study.progress.domain.StudyFeedback;
 import com.lexiflow.study.progress.domain.StudyScene;
@@ -28,6 +29,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -82,15 +84,17 @@ class SpacedRepetitionServiceConcurrencyTest {
         CountDownLatch go = new CountDownLatch(1);
         CountDownLatch done = new CountDownLatch(threads);
         List<Throwable> errors = Collections.synchronizedList(new ArrayList<>());
+        List<SpacedRepetitionService.SpacedRepetitionResult> results = Collections.synchronizedList(new ArrayList<>());
 
         for (int i = 0; i < threads; i++) {
             pool.submit(() -> {
                 ready.countDown();
                 try {
                     go.await();
-                    spacedRepetitionService.applyFeedback(
+                    SpacedRepetitionService.SpacedRepetitionResult r = spacedRepetitionService.applyFeedback(
                             TEST_USER_ID, TEST_WORDBOOK_ID, TEST_WORD_ID, null,
                             StudyFeedback.UNKNOWN, StudyScene.NEW, AttemptType.INITIAL_LEARNING);
+                    results.add(r);
                 } catch (Throwable t) {
                     errors.add(t);
                 } finally {
@@ -126,5 +130,17 @@ class SpacedRepetitionServiceConcurrencyTest {
                 .eq(StudyDailyWordEffect::getWordId, TEST_WORD_ID)
                 .eq(StudyDailyWordEffect::getBusinessDate, TODAY));
         assertEquals(Boolean.TRUE, effect.getUnknownEfApplied(), "UNKNOWN 惩罚应只应用一次");
+
+        // 算法快照：首个推进调度的反馈应带完整前后状态与算法版本
+        assertFalse(results.isEmpty(), "应至少有一个反馈结果");
+        SpacedRepetitionService.SpacedRepetitionResult first = results.get(0);
+        assertEquals(new BigDecimal("2.50"), first.efBefore(), "快照变更前 EF 应为初始值");
+        assertEquals(new BigDecimal("2.30"), first.efAfter(), "快照变更后 EF 应只扣一次");
+        assertEquals(1, first.intervalDaysAfter(), "快照变更后间隔应为 1 天");
+        assertEquals(0, first.repetitionBefore(), "快照变更前 repetition 应为 0");
+        assertEquals(0, first.repetitionAfter(), "UNKNOWN 后 repetition 应为 0");
+        assertEquals(MasteryStatus.NEW, first.oldMasteryStatus(), "快照变更前掌握状态应为 NEW");
+        assertEquals(MasteryStatus.LEARNING, first.newMasteryStatus(), "首次失败 EF>1.70 应为 LEARNING");
+        assertEquals("V2_BOUNDED_STEP", first.algorithmVersion(), "快照应带算法版本号");
     }
 }

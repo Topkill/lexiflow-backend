@@ -24,6 +24,7 @@ import com.lexiflow.study.progress.mapper.UserWordStateMapper;
 import com.lexiflow.study.progress.mapper.WrongWordMapper;
 import com.lexiflow.study.progress.service.SpacedRepetitionService;
 import com.lexiflow.study.progress.service.SpacedRepetitionService.SpacedRepetitionResult;
+import java.math.BigDecimal;
 import com.lexiflow.study.service.StudyPlanService;
 import com.lexiflow.study.task.domain.DailyTask;
 import com.lexiflow.study.task.domain.DailyTaskItem;
@@ -101,7 +102,8 @@ class DailyTaskServiceTest {
         when(dailyTaskMapper.selectOne(any())).thenReturn(sourceTask);
         when(dailyTaskItemMapper.update(any(DailyTaskItem.class), any())).thenReturn(1);
         when(spacedRepetitionService.applyFeedback(USER_ID, WORDBOOK_ID, WORD_ID, PLAN_ID, StudyFeedback.KNOWN, StudyScene.NEW, AttemptType.INITIAL_LEARNING))
-                .thenReturn(new SpacedRepetitionResult(nextReviewDate, 4, MasteryStatus.NEW, MasteryStatus.REVIEWING, AttemptType.INITIAL_LEARNING, LocalDate.now(), true, LocalDate.now().atStartOfDay()));
+                .thenReturn(new SpacedRepetitionResult(nextReviewDate, 4, MasteryStatus.NEW, MasteryStatus.REVIEWING, AttemptType.INITIAL_LEARNING, LocalDate.now(), true, LocalDate.now().atStartOfDay(),
+                new BigDecimal("2.50"), new BigDecimal("2.70"), 1, 1, 0, 1, SpacedRepetitionService.ALGORITHM_VERSION));
         when(studyPlanMapper.selectById(PLAN_ID)).thenReturn(plan);
         when(dailyTaskMapper.update(any(DailyTask.class), any())).thenReturn(1);
         when(dailyTaskMapper.selectById(TASK_ID)).thenReturn(refreshedTask);

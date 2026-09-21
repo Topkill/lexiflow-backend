@@ -7,6 +7,7 @@ import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import java.time.LocalDateTime;
 import java.time.LocalDate;
+import java.math.BigDecimal;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -51,6 +52,30 @@ public class StudyEvent {
     private AttemptType attemptType;
     private LocalDate businessDate;
     private Boolean algorithmApplied;
+
+    /** 算法版本号，历史事件为 NULL，新事件由应用写入 */
+    private String algorithmVersion;
+
+    /** 变更前 EF */
+    private BigDecimal efBefore;
+    /** 变更前间隔(天) */
+    private Integer intervalDaysBefore;
+    /** 变更前连续成功次数 */
+    private Integer repetitionBefore;
+    /** 变更前掌握状态 */
+    private String statusBefore;
+
+    /** 变更后 EF */
+    private BigDecimal efAfter;
+    /** 变更后间隔(天) */
+    private Integer intervalDaysAfter;
+    /** 变更后连续成功次数 */
+    private Integer repetitionAfter;
+    /** 变更后掌握状态 */
+    private String statusAfter;
+    /** 计算出的下次复习日期 */
+    private LocalDate nextReviewDateAfter;
+
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
 }

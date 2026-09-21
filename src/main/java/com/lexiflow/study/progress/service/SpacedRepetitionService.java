@@ -15,6 +15,9 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 @RequiredArgsConstructor
 public class SpacedRepetitionService {
+    /** 调度算法版本：EF 上下限 1.30~2.70、间隔 1~365、DIFFICULT 按 EF≤1.70 判定并自然脱困。 */
+    public static final String ALGORITHM_VERSION = "V2_BOUNDED_STEP";
+
     private final UserWordStateMapper userWordStateMapper;
     private final StudyDailyWordEffectMapper dailyEffectMapper;
     private final StudyBusinessTime businessTime;
@@ -51,6 +54,9 @@ public class SpacedRepetitionService {
                   && !Boolean.TRUE.equals(state.getLearned()) && !day.getUnknownEfApplied()
                     ? AttemptType.INITIAL_LEARNING : AttemptType.IN_DAY_RETRY;
         boolean firstUnknown = feedback == StudyFeedback.UNKNOWN && !day.getUnknownEfApplied();
+        BigDecimal efBefore = state.getEasinessFactor();
+        Integer intervalBefore = state.getIntervalDays();
+        Integer repetitionBefore = state.getRepetition();
         boolean applied = ReviewSchedulingPolicy.apply(state, feedback, effectiveType, today, firstUnknown, formalAllowed);
         if (firstUnknown) day.setUnknownEfApplied(true);
         if (applied && feedback == StudyFeedback.KNOWN) day.setKnownReviewApplied(true);
@@ -66,7 +72,11 @@ public class SpacedRepetitionService {
         if (newState) userWordStateMapper.insert(state);
         else userWordStateMapper.updateById(state);
         return new SpacedRepetitionResult(state.getNextReviewDate(), qualityScore(feedback), oldMastery,
-                state.getMasteryStatus(), effectiveType, today, applied, now);
+                state.getMasteryStatus(), effectiveType, today, applied, now,
+                efBefore, state.getEasinessFactor(),
+                intervalBefore, state.getIntervalDays(),
+                repetitionBefore, state.getRepetition(),
+                ALGORITHM_VERSION);
     }
 
     public int qualityScore(StudyFeedback feedback) {
@@ -93,5 +103,9 @@ public class SpacedRepetitionService {
 
     public record SpacedRepetitionResult(LocalDate nextReviewDate, int qualityScore,
             MasteryStatus oldMasteryStatus, MasteryStatus newMasteryStatus,
-            AttemptType attemptType, LocalDate businessDate, boolean algorithmApplied, LocalDateTime occurredAt) {}
+            AttemptType attemptType, LocalDate businessDate, boolean algorithmApplied, LocalDateTime occurredAt,
+            BigDecimal efBefore, BigDecimal efAfter,
+            Integer intervalDaysBefore, Integer intervalDaysAfter,
+            Integer repetitionBefore, Integer repetitionAfter,
+            String algorithmVersion) {}
 }

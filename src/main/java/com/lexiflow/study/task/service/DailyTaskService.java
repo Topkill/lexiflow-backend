@@ -742,6 +742,16 @@ public class DailyTaskService {
         event.setAttemptType(result.attemptType());
         event.setBusinessDate(result.businessDate());
         event.setAlgorithmApplied(result.algorithmApplied());
+        event.setAlgorithmVersion(result.algorithmVersion());
+        event.setEfBefore(result.efBefore());
+        event.setEfAfter(result.efAfter());
+        event.setIntervalDaysBefore(result.intervalDaysBefore());
+        event.setIntervalDaysAfter(result.intervalDaysAfter());
+        event.setRepetitionBefore(result.repetitionBefore());
+        event.setRepetitionAfter(result.repetitionAfter());
+        event.setStatusBefore(result.oldMasteryStatus().name());
+        event.setStatusAfter(result.newMasteryStatus().name());
+        event.setNextReviewDateAfter(result.nextReviewDate());
         event.setCreatedAt(result.occurredAt());
         studyEventMapper.insert(event);
         return event;
