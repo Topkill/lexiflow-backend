@@ -98,6 +98,7 @@ public class DailyTaskService {
     private final ClozeAttemptMapper clozeAttemptMapper;
     private final ClozeQuizService clozeQuizService;
     private final SpacedRepetitionService spacedRepetitionService;
+    private final StudyBusinessTime businessTime;
     private final WordChoiceQuestionService wordChoiceQuestionService;
 
     /**
@@ -112,7 +113,7 @@ public class DailyTaskService {
     @Transactional
     public DailyTaskResponse getTodayTask(Long userId) {
         StudyPlan plan = studyPlanService.getPrimaryActivePlanEntity(userId);
-        LocalDate today = LocalDate.now(StudyBusinessTime.ZONE);
+        LocalDate today = businessTime.businessDate();
         DailyTask task = findLatestDoneTaskAwaitingClozeAttempt(userId, plan.getId(), today);
         if (task != null) {
             return toResponse(task, plan);
@@ -163,7 +164,7 @@ public class DailyTaskService {
         if (!plan.getWordbookId().equals(targetWordbookId)) {
             throw new BizException(ErrorCode.WORDBOOK_NOT_FOUND);
         }
-        LocalDate today = LocalDate.now(StudyBusinessTime.ZONE);
+        LocalDate today = businessTime.businessDate();
         List<WrongWord> wrongWords = wrongWordMapper.selectList(new LambdaQueryWrapper<WrongWord>()
                 .eq(WrongWord::getUserId, userId)
                 .eq(WrongWord::getWordbookId, targetWordbookId)

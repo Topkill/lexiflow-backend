@@ -8,6 +8,7 @@ import com.lexiflow.ai.content.mapper.AiCallLogMapper;
 import com.lexiflow.infra.redis.RedisJsonCacheService;
 import com.lexiflow.infra.redis.RedisKeys;
 import com.lexiflow.study.progress.mapper.StudyEventMapper;
+import com.lexiflow.study.progress.service.StudyBusinessTime;
 import com.lexiflow.user.domain.User;
 import com.lexiflow.user.domain.UserStatus;
 import com.lexiflow.user.mapper.UserMapper;
@@ -58,8 +59,8 @@ public class AdminDashboardService {
             return cached;
         }
 
-        // 统计基础用户数据
-        LocalDate today = LocalDate.now();
+        // 统计基础用户数据（自然日活跃统计；学习核心使用偏移业务日，两者口径分离）
+        LocalDate today = LocalDate.now(StudyBusinessTime.ZONE);
         long registeredUsers = userMapper.selectCount(new LambdaQueryWrapper<User>());
         long activeUsers = userMapper.selectCount(new LambdaQueryWrapper<User>().eq(User::getStatus, UserStatus.ACTIVE));
         long todayLearners = studyEventMapper.countDistinctUsersBetween(today.atStartOfDay(), today.plusDays(1).atStartOfDay());

@@ -33,7 +33,7 @@ public class SpacedRepetitionService {
                                                 StudyFeedback feedback, StudyScene scene, AttemptType requestedType) {
         dailyEffectMapper.lockUser(userId);
         LocalDateTime now = businessTime.now();
-        LocalDate today = now.toLocalDate();
+        LocalDate today = businessTime.businessDate();
         dailyEffectMapper.ensureDay(userId, wordId, today);
         StudyDailyWordEffect day = dailyEffectMapper.lockDay(userId, wordId, today);
         UserWordState state = userWordStateMapper.selectOne(new LambdaQueryWrapper<UserWordState>()

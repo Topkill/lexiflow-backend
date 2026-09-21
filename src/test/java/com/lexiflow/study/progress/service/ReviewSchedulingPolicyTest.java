@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 import static com.lexiflow.study.progress.domain.AttemptType.FORMAL_REVIEW;
 import static com.lexiflow.study.progress.domain.AttemptType.INITIAL_LEARNING;
@@ -135,5 +136,98 @@ class ReviewSchedulingPolicyTest {
         assertEquals(efAfterFirst, state.getEasinessFactor(), "同日重复失败不应重复扣 EF");
         assertEquals(wrongAfterFirst + 1, state.getWrongCount(), "统计字段每次失败都累计（纯统计）");
         assertEquals(1, state.getIntervalDays());
+    }
+
+    // ---- Anki Good 档逾期折半公式：(原间隔 + 逾期天数/2) × EF ----
+
+    @Test
+    void 准时复习沿用间隔乘EF() {
+        UserWordState state = newState();
+        state.setEasinessFactor(new BigDecimal("2.50"));
+        state.setRepetition(2);
+        state.setIntervalDays(10);
+        state.setNextReviewDate(TODAY); // 今天到期、今天复习 → 逾期 0 天
+
+        ReviewSchedulingPolicy.apply(state, KNOWN, FORMAL_REVIEW, TODAY, false, true);
+
+        assertEquals(26, state.getIntervalDays(), "准时复习应退化为 间隔×(EF+0.05)：10×2.55=25.5 → HALF_UP=26");
+    }
+
+    @Test
+    void 逾期六天答对间隔按折半公式平滑增长() {
+        UserWordState state = newState();
+        state.setEasinessFactor(new BigDecimal("2.50"));
+        state.setRepetition(2);
+        state.setIntervalDays(10);
+        state.setNextReviewDate(TODAY.minusDays(6)); // 逾期 6 天
+
+        ReviewSchedulingPolicy.apply(state, KNOWN, FORMAL_REVIEW, TODAY, false, true);
+
+        assertEquals(33, state.getIntervalDays(), "(10+6÷2)×2.5=32.5 → HALF_UP=33");
+    }
+
+    @Test
+    void 逾期三十天答对间隔大幅奖励但封顶() {
+        UserWordState state = newState();
+        state.setEasinessFactor(new BigDecimal("2.50"));
+        state.setRepetition(2);
+        state.setIntervalDays(10);
+        state.setNextReviewDate(TODAY.minusDays(30)); // 逾期 30 天
+
+        ReviewSchedulingPolicy.apply(state, KNOWN, FORMAL_REVIEW, TODAY, false, true);
+
+        assertEquals(64, state.getIntervalDays(), "(10+30÷2)×(2.50+0.05)=63.75 → HALF_UP=64");
+    }
+
+    @Test
+    void 断卡很久答对间隔封顶365天() {
+        UserWordState state = newState();
+        state.setEasinessFactor(new BigDecimal("2.50"));
+        state.setRepetition(2);
+        state.setIntervalDays(100);
+        state.setNextReviewDate(TODAY.minusDays(300)); // 断卡 300 天
+
+        ReviewSchedulingPolicy.apply(state, KNOWN, FORMAL_REVIEW, TODAY, false, true);
+
+        assertEquals(365, state.getIntervalDays(), "(100+300÷2)×2.5 超出上限应封顶 365");
+    }
+
+    @Test
+    void 间隔不低于前次间隔加一天防倒退() {
+        UserWordState state = newState();
+        state.setEasinessFactor(new BigDecimal("1.30"));
+        state.setRepetition(2);
+        state.setIntervalDays(200);
+        state.setNextReviewDate(TODAY);
+
+        ReviewSchedulingPolicy.apply(state, KNOWN, FORMAL_REVIEW, TODAY, false, true);
+
+        assertTrue(state.getIntervalDays() >= 201, "新间隔不得低于 prev+1（防倒退）");
+    }
+
+    @Test
+    void 前两次复习间隔保持1天和3天阶梯() {
+        UserWordState state = newState();
+        ReviewSchedulingPolicy.apply(state, KNOWN, INITIAL_LEARNING, TODAY, false, false);
+        assertEquals(1, state.getIntervalDays(), "第一次复习间隔应为 1 天");
+        assertEquals(1, state.getRepetition());
+
+        ReviewSchedulingPolicy.apply(state, KNOWN, FORMAL_REVIEW, TODAY, false, true);
+        assertEquals(3, state.getIntervalDays(), "第二次复习间隔应为 3 天（阶梯不被公式接管）");
+        assertEquals(2, state.getRepetition());
+    }
+
+    // ---- 业务日偏移（凌晨 4 点算新一天） ----
+
+    @Test
+    void 深夜学习与次日凌晨归属同一业务日() {
+        assertEquals(LocalDate.of(2026, 9, 21), StudyBusinessTime.businessDateOf(LocalDateTime.of(2026, 9, 21, 23, 59)),
+                "23:59 仍属当天业务日");
+        assertEquals(LocalDate.of(2026, 9, 21), StudyBusinessTime.businessDateOf(LocalDateTime.of(2026, 9, 22, 0, 1)),
+                "00:01 仍属前一天业务日，避免跨午夜跳变");
+        assertEquals(LocalDate.of(2026, 9, 21), StudyBusinessTime.businessDateOf(LocalDateTime.of(2026, 9, 21, 4, 0)),
+                "凌晨 4 点整进入新业务日");
+        assertEquals(LocalDate.of(2026, 9, 20), StudyBusinessTime.businessDateOf(LocalDateTime.of(2026, 9, 21, 3, 59)),
+                "凌晨 4 点前仍属前一天业务日");
     }
 }

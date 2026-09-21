@@ -4,6 +4,7 @@ import com.lexiflow.study.progress.domain.*;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
 
 /** 二元反馈的纯计算规则；每日额度与正式复习资格由事务服务判定。 */
 final class ReviewSchedulingPolicy {
@@ -40,10 +41,26 @@ final class ReviewSchedulingPolicy {
         state.setEasinessFactor(ef);
         int repetition = state.getRepetition() + 1;
         state.setRepetition(repetition);
-        int interval = repetition == 1 ? 1 : repetition == 2 ? 3
-                : BigDecimal.valueOf(state.getIntervalDays()).multiply(ef)
-                        .setScale(0, RoundingMode.HALF_UP)
-                        .max(BigDecimal.ONE).min(BigDecimal.valueOf(365)).intValueExact();
+        int interval;
+        if (repetition == 1) {
+            interval = 1;
+        } else if (repetition == 2) {
+            interval = 3;
+        } else {
+            // Anki Good 档逾期折半公式：(原间隔 + 逾期天数/2) × EF
+            // 逾期答对按折半奖励基准；下限 prev+1 防止间隔倒退；上限 365 封顶
+            int delay = 0;
+            if (state.getNextReviewDate() != null && today.isAfter(state.getNextReviewDate())) {
+                delay = (int) ChronoUnit.DAYS.between(state.getNextReviewDate(), today);
+            }
+            interval = BigDecimal.valueOf(state.getIntervalDays())
+                    .add(BigDecimal.valueOf(delay).divide(BigDecimal.valueOf(2), 2, RoundingMode.HALF_UP))
+                    .multiply(ef)
+                    .setScale(0, RoundingMode.HALF_UP)
+                    .max(BigDecimal.valueOf(state.getIntervalDays() + 1L))
+                    .min(BigDecimal.valueOf(365))
+                    .intValueExact();
+        }
         schedule(state, today, interval);
         // 自然脱困法：MASTERED 判定保持不变；DIFFICULT 摘除以 EF 回血 > 1.70 或标记成 MASTERED 为准，
         // 重度词（EF 未回血）即使答对也继续保持观察
