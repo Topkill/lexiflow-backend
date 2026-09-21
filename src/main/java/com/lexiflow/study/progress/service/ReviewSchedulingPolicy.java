@@ -9,17 +9,23 @@ import java.time.LocalDate;
 final class ReviewSchedulingPolicy {
     private static final BigDecimal MIN_EF = new BigDecimal("1.30");
     private static final BigDecimal MAX_EF = new BigDecimal("2.70");
+    /** DIFFICULT 的 EF 阈值：EF 是认知强度的动态画像，净失败 4 次（<=1.70）才算困难词。 */
+    private static final BigDecimal DIFFICULT_EF_THRESHOLD = new BigDecimal("1.70");
     private ReviewSchedulingPolicy() {}
 
     static boolean apply(UserWordState state, StudyFeedback feedback, AttemptType type,
                          LocalDate today, boolean firstUnknown, boolean formalAllowed) {
         if (feedback == StudyFeedback.UNKNOWN) {
+            // 历史失败次数仅作统计（排序、报表），不再参与状态判定
             state.setWrongCount(state.getWrongCount() + 1);
-            state.setMasteryStatus(state.getWrongCount() >= 3 ? MasteryStatus.DIFFICULT : MasteryStatus.LEARNING);
+            // 当日第二次及以后的失败不再改变调度与状态，避免日内重练刷爆标签
             if (!firstUnknown) return false;
-            state.setEasinessFactor(state.getEasinessFactor().subtract(new BigDecimal("0.20")).max(MIN_EF).min(MAX_EF));
+            BigDecimal nextEf = state.getEasinessFactor().subtract(new BigDecimal("0.20")).max(MIN_EF).min(MAX_EF);
+            state.setEasinessFactor(nextEf);
             state.setRepetition(0);
             schedule(state, today, 1);
+            state.setMasteryStatus(nextEf.compareTo(DIFFICULT_EF_THRESHOLD) <= 0
+                    ? MasteryStatus.DIFFICULT : MasteryStatus.LEARNING);
             return true;
         }
         state.setCorrectCount(state.getCorrectCount() + 1);
@@ -39,7 +45,15 @@ final class ReviewSchedulingPolicy {
                         .setScale(0, RoundingMode.HALF_UP)
                         .max(BigDecimal.ONE).min(BigDecimal.valueOf(365)).intValueExact();
         schedule(state, today, interval);
-        state.setMasteryStatus(repetition >= 3 ? MasteryStatus.MASTERED : MasteryStatus.REVIEWING);
+        // 自然脱困法：MASTERED 判定保持不变；DIFFICULT 摘除以 EF 回血 > 1.70 或标记成 MASTERED 为准，
+        // 重度词（EF 未回血）即使答对也继续保持观察
+        if (repetition >= 3) {
+            state.setMasteryStatus(MasteryStatus.MASTERED);
+        } else if (ef.compareTo(DIFFICULT_EF_THRESHOLD) > 0) {
+            state.setMasteryStatus(MasteryStatus.REVIEWING);
+        } else {
+            state.setMasteryStatus(MasteryStatus.DIFFICULT);
+        }
         return true;
     }
 
