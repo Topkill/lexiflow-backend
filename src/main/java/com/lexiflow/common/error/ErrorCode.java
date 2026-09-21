@@ -47,6 +47,8 @@ public enum ErrorCode {
     STUDY_PLAN_NOT_FOUND(30001, "学习计划不存在", 404),
     TODAY_TASK_NOT_FOUND(30002, "今日任务不存在或生成失败", 500),
     TASK_ITEM_NOT_SUBMITTABLE(30003, "当前任务项不可提交", 409),
+    /** 词库已全部学完、今日无到期复习：业务完成态（HTTP 200），前端展示完成空页。 */
+    TODAY_TASK_COMPLETED(30005, "本词库单词已全部学过，今日暂无到期复习", 200),
     STUDY_PLAN_STATUS_INVALID(30004, "学习计划状态不可变更", 409),
 
     WRONG_WORD_NOT_FOUND(31001, "错词不存在", 404),

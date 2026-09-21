@@ -158,6 +158,15 @@
         LIMIT #{limit}
     </select>
 
+    <select id="countNewWordCandidates" resultType="long">
+        SELECT COUNT(*)
+        FROM word w
+        WHERE w.deleted = 0
+          AND w.enabled = 1
+          AND w.wordbook_id = #{wordbookId}
+          AND w.sequence_no &gt; #{startSequenceNo}
+    </select>
+
     <select id="selectChoiceQuestionCandidates" resultType="com.lexiflow.wordbook.domain.Word">
         SELECT
             w.id AS id,

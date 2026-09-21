@@ -453,7 +453,9 @@ public class DailyTaskService {
         );
 
         if (dueReviewStates.isEmpty() && newWords.isEmpty()) {
-            throw new BizException(ErrorCode.TODAY_TASK_NOT_FOUND);
+            // 无到期复习且无新词候选：区分"词库已学完"（30005 完成态）与"尚未学完但今日无到期"（30002）
+            boolean hasMoreNewWords = wordMapper.countNewWordCandidates(plan.getWordbookId(), plan.getCurrentSequenceNo()) > 0;
+            throw new BizException(hasMoreNewWords ? ErrorCode.TODAY_TASK_NOT_FOUND : ErrorCode.TODAY_TASK_COMPLETED);
         }
 
         // 创建每日任务记录

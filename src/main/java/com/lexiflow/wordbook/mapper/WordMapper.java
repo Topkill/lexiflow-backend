@@ -58,6 +58,9 @@ public interface WordMapper extends BaseMapper<Word> {
             @Param("limit") Integer limit
     );
 
+    /** 统计词库中序号大于当前序号、仍可作新词候选的启用单词数（用于判断词库是否已学完）。 */
+    long countNewWordCandidates(@Param("wordbookId") Long wordbookId, @Param("startSequenceNo") Integer startSequenceNo);
+
     List<Word> selectChoiceQuestionCandidates(@Param("wordbookId") Long wordbookId);
 
     @Delete("DELETE FROM word WHERE wordbook_id = #{wordbookId}")

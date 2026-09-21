@@ -1,11 +1,14 @@
 package com.lexiflow.study.task.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.lexiflow.common.error.ErrorCode;
+import com.lexiflow.common.exception.BizException;
 import com.lexiflow.quiz.cloze.mapper.ClozeAttemptMapper;
 import com.lexiflow.quiz.cloze.mapper.ClozeQuizMapper;
 import com.lexiflow.quiz.cloze.service.ClozeQuizService;
@@ -18,6 +21,8 @@ import com.lexiflow.study.progress.domain.AttemptType;
 import com.lexiflow.study.progress.domain.StudyScene;
 import com.lexiflow.study.progress.domain.UserWordState;
 import com.lexiflow.study.progress.domain.WrongWord;
+import com.lexiflow.study.progress.service.StudyBusinessTime;
+import java.time.LocalDate;
 import com.lexiflow.study.progress.mapper.FavoriteWordMapper;
 import com.lexiflow.study.progress.mapper.StudyEventMapper;
 import com.lexiflow.study.progress.mapper.UserWordStateMapper;
@@ -84,6 +89,8 @@ class DailyTaskServiceTest {
     private ClozeQuizService clozeQuizService;
     @Mock
     private SpacedRepetitionService spacedRepetitionService;
+    @Mock
+    private StudyBusinessTime businessTime;
     @Mock
     private WordChoiceQuestionService wordChoiceQuestionService;
 
@@ -218,8 +225,43 @@ class DailyTaskServiceTest {
     private StudyPlan studyPlan() {
         StudyPlan plan = new StudyPlan();
         plan.setId(PLAN_ID);
+        plan.setWordbookId(WORDBOOK_ID);
         plan.setReviewedCount(0);
         plan.setMasteredCount(0);
         return plan;
+    }
+
+    // ---- 词库学完 / 无到期任务的状态区分 ----
+
+    @Test
+    void 词库全部学完且无到期复习时返回完成态错误码() {
+        when(studyPlanService.getPrimaryActivePlanEntity(USER_ID)).thenReturn(studyPlan());
+        when(businessTime.businessDate()).thenReturn(LocalDate.of(2026, 9, 21));
+        when(dailyTaskMapper.selectList(any())).thenReturn(java.util.List.of());
+        when(dailyTaskMapper.selectOne(any())).thenReturn(null);
+        when(userWordStateMapper.selectList(any())).thenReturn(java.util.List.of());
+        when(wordMapper.selectNewWordCandidates(any(), any(), any())).thenReturn(java.util.List.of());
+        when(wordMapper.countNewWordCandidates(any(), any())).thenReturn(0L);
+
+        assertThatThrownBy(() -> dailyTaskService.getTodayTask(USER_ID))
+                .isInstanceOf(BizException.class)
+                .extracting(e -> ((BizException) e).getErrorCode())
+                .isEqualTo(ErrorCode.TODAY_TASK_COMPLETED);
+    }
+
+    @Test
+    void 词库未学完但今日无到期也无新词时保持普通无任务错误码() {
+        when(studyPlanService.getPrimaryActivePlanEntity(USER_ID)).thenReturn(studyPlan());
+        when(businessTime.businessDate()).thenReturn(LocalDate.of(2026, 9, 21));
+        when(dailyTaskMapper.selectList(any())).thenReturn(java.util.List.of());
+        when(dailyTaskMapper.selectOne(any())).thenReturn(null);
+        when(userWordStateMapper.selectList(any())).thenReturn(java.util.List.of());
+        when(wordMapper.selectNewWordCandidates(any(), any(), any())).thenReturn(java.util.List.of());
+        when(wordMapper.countNewWordCandidates(any(), any())).thenReturn(5L);
+
+        assertThatThrownBy(() -> dailyTaskService.getTodayTask(USER_ID))
+                .isInstanceOf(BizException.class)
+                .extracting(e -> ((BizException) e).getErrorCode())
+                .isEqualTo(ErrorCode.TODAY_TASK_NOT_FOUND);
     }
 }
