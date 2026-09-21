@@ -5,7 +5,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 
 /**
  * 词库响应 DTO。
- * <p>返回词库的基本信息和当前用户的学习进度。</p>
+ * <p>返回词库的基本信息。</p>
  *
  * @param id 词库ID
  * @param name 词库名称
@@ -16,7 +16,6 @@ import io.swagger.v3.oas.annotations.media.Schema;
  * @param difficultyLevel 难度等级
  * @param wordCount 单词数量
  * @param enabled 是否启用
- * @param progress 当前用户学习进度
  */
 @Schema(description = "词库响应")
 public record WordbookResponse(
@@ -28,10 +27,9 @@ public record WordbookResponse(
         @Schema(description = "封面图") String coverUrl,
         @Schema(description = "难度等级", example = "2") Integer difficultyLevel,
         @Schema(description = "单词数量", example = "4500") Integer wordCount,
-        @Schema(description = "是否启用", example = "true") Boolean enabled,
-        @Schema(description = "当前用户进度，未接入学习模块前为空") WordbookProgressResponse progress
+        @Schema(description = "是否启用", example = "true") Boolean enabled
 ) {
-    public static WordbookResponse from(Wordbook wordbook, WordbookProgressResponse progress) {
+    public static WordbookResponse from(Wordbook wordbook) {
         return new WordbookResponse(
                 String.valueOf(wordbook.getId()),
                 wordbook.getName(),
@@ -41,8 +39,7 @@ public record WordbookResponse(
                 wordbook.getCoverUrl(),
                 wordbook.getDifficultyLevel(),
                 wordbook.getWordCount(),
-                wordbook.getEnabled(),
-                progress
+                wordbook.getEnabled()
         );
     }
 }

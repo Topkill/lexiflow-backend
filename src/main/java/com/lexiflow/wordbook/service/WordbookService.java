@@ -51,12 +51,12 @@ public class WordbookService {
             wrapper.like(Wordbook::getName, request.keyword().trim());
         }
         return wordbookMapper.selectList(wrapper).stream()
-                .map(wordbook -> WordbookResponse.from(wordbook, null))
+                .map(WordbookResponse::from)
                 .toList();
     }
 
     public WordbookResponse getWordbook(Long wordbookId) {
-        return WordbookResponse.from(getEnabledWordbook(wordbookId), null);
+        return WordbookResponse.from(getEnabledWordbook(wordbookId));
     }
 
     public PageResponse<WordResponse> pageWords(Long wordbookId, WordQueryRequest request) {
