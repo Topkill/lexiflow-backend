@@ -548,6 +548,7 @@ CREATE TABLE IF NOT EXISTS `cloze_attempt` (
   `updated_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
   `deleted` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '逻辑删除，0 未删除，1 已删除',
   PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_cloze_attempt_user_quiz` (`user_id`, `quiz_id`),
   KEY `idx_cloze_attempt_user_time` (`user_id`, `submitted_at`),
   KEY `idx_cloze_attempt_user_wordbook_time` (`user_id`, `wordbook_id`, `submitted_at`),
   KEY `idx_cloze_attempt_quiz` (`quiz_id`),
