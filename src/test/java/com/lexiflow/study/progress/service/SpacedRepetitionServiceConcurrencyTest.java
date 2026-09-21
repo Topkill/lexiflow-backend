@@ -29,7 +29,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -131,16 +130,19 @@ class SpacedRepetitionServiceConcurrencyTest {
                 .eq(StudyDailyWordEffect::getBusinessDate, TODAY));
         assertEquals(Boolean.TRUE, effect.getUnknownEfApplied(), "UNKNOWN 惩罚应只应用一次");
 
-        // 算法快照：首个推进调度的反馈应带完整前后状态与算法版本
-        assertFalse(results.isEmpty(), "应至少有一个反馈结果");
-        SpacedRepetitionService.SpacedRepetitionResult first = results.get(0);
-        assertEquals(new BigDecimal("2.50"), first.efBefore(), "快照变更前 EF 应为初始值");
-        assertEquals(new BigDecimal("2.30"), first.efAfter(), "快照变更后 EF 应只扣一次");
-        assertEquals(1, first.intervalDaysAfter(), "快照变更后间隔应为 1 天");
-        assertEquals(0, first.repetitionBefore(), "快照变更前 repetition 应为 0");
-        assertEquals(0, first.repetitionAfter(), "UNKNOWN 后 repetition 应为 0");
-        assertEquals(MasteryStatus.NEW, first.oldMasteryStatus(), "快照变更前掌握状态应为 NEW");
-        assertEquals(MasteryStatus.LEARNING, first.newMasteryStatus(), "首次失败 EF>1.70 应为 LEARNING");
-        assertEquals("V2_BOUNDED_STEP", first.algorithmVersion(), "快照应带算法版本号");
+        // 算法快照：从并发结果中筛选出真正生效的那次调度进行断言
+        // （不能用 results.get(0)：add 在事务提交后才执行，后续线程可能抢先入列）
+        SpacedRepetitionService.SpacedRepetitionResult appliedResult = results.stream()
+                .filter(SpacedRepetitionService.SpacedRepetitionResult::algorithmApplied)
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("未找到生效的算法调度结果"));
+        assertEquals(new BigDecimal("2.50"), appliedResult.efBefore(), "快照变更前 EF 应为初始值");
+        assertEquals(new BigDecimal("2.30"), appliedResult.efAfter(), "快照变更后 EF 应只扣一次");
+        assertEquals(1, appliedResult.intervalDaysAfter(), "快照变更后间隔应为 1 天");
+        assertEquals(0, appliedResult.repetitionBefore(), "快照变更前 repetition 应为 0");
+        assertEquals(0, appliedResult.repetitionAfter(), "UNKNOWN 后 repetition 应为 0");
+        assertEquals(MasteryStatus.NEW, appliedResult.oldMasteryStatus(), "快照变更前掌握状态应为 NEW");
+        assertEquals(MasteryStatus.LEARNING, appliedResult.newMasteryStatus(), "首次失败 EF>1.70 应为 LEARNING");
+        assertEquals("V2_BOUNDED_STEP", appliedResult.algorithmVersion(), "快照应带算法版本号");
     }
 }
