@@ -48,7 +48,7 @@ final class ReviewSchedulingPolicy {
             interval = 3;
         } else {
             // Anki Good 档逾期折半公式：(原间隔 + 逾期天数/2) × EF
-            // 逾期答对按折半奖励基准；下限 prev+1 防止间隔倒退；上限 365 封顶
+            // 逾期答对按折半奖励基准；下限 max(1, prev+1) 既防倒退也兜住外部脏数据；上限 365 封顶
             int delay = 0;
             if (state.getNextReviewDate() != null && today.isAfter(state.getNextReviewDate())) {
                 delay = (int) ChronoUnit.DAYS.between(state.getNextReviewDate(), today);
@@ -57,7 +57,7 @@ final class ReviewSchedulingPolicy {
                     .add(BigDecimal.valueOf(delay).divide(BigDecimal.valueOf(2), 2, RoundingMode.HALF_UP))
                     .multiply(ef)
                     .setScale(0, RoundingMode.HALF_UP)
-                    .max(BigDecimal.valueOf(state.getIntervalDays() + 1L))
+                    .max(BigDecimal.valueOf(Math.max(1, state.getIntervalDays() + 1L)))
                     .min(BigDecimal.valueOf(365))
                     .intValueExact();
         }

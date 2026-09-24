@@ -206,6 +206,33 @@ class ReviewSchedulingPolicyTest {
     }
 
     @Test
+    void 外部脏数据导致间隔为负时兜底为1天() {
+        UserWordState state = newState();
+        state.setEasinessFactor(new BigDecimal("2.50"));
+        state.setRepetition(2);
+        state.setIntervalDays(-5); // 正常代码不会产生，仅防御手工改库/坏导入
+        state.setNextReviewDate(TODAY);
+
+        ReviewSchedulingPolicy.apply(state, KNOWN, FORMAL_REVIEW, TODAY, false, true);
+
+        assertEquals(1, state.getIntervalDays(), "间隔下限应为绝对值 1，不得被负值穿透");
+        assertEquals(TODAY.plusDays(1), state.getNextReviewDate(), "下次复习日应落在未来");
+    }
+
+    @Test
+    void 间隔为零时兜底为1天() {
+        UserWordState state = newState();
+        state.setEasinessFactor(new BigDecimal("2.50"));
+        state.setRepetition(2);
+        state.setIntervalDays(0); // schema 默认值
+        state.setNextReviewDate(TODAY);
+
+        ReviewSchedulingPolicy.apply(state, KNOWN, FORMAL_REVIEW, TODAY, false, true);
+
+        assertEquals(1, state.getIntervalDays(), "零间隔应被抬到 1");
+    }
+
+    @Test
     void 前两次复习间隔保持1天和3天阶梯() {
         UserWordState state = newState();
         ReviewSchedulingPolicy.apply(state, KNOWN, INITIAL_LEARNING, TODAY, false, false);

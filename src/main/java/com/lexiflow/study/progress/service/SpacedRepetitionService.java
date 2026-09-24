@@ -15,7 +15,17 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 @RequiredArgsConstructor
 public class SpacedRepetitionService {
-    /** 调度算法版本：EF 上下限 1.30~2.70、间隔 1~365、DIFFICULT 按 EF≤1.70 判定并自然脱困。 */
+    /**
+     * 调度算法版本：EF 上下限 1.30~2.70、间隔 1~365、DIFFICULT 按 EF≤1.70 判定并自然脱困。
+     * <p>V2 内部包含两代间隔实现，版本号不再细分，做效果归因时以事件快照
+     * （{@code interval_days_before/after} 等）为准：</p>
+     * <ul>
+     *   <li>2026-09-19 起：rep≥3 用 {@code 间隔 × EF}，HALF_UP，钳制 1~365；</li>
+     *   <li>2026-09-21 起（提交 666100c）：rep≥3 改用 Anki Good 档逾期折半
+     *       {@code (原间隔 + 逾期天数/2) × EF}，下限 {@code max(1, prev+1)} 防倒退，上限 365；
+     *       同时业务日改为 Asia/Shanghai 凌晨 4 点偏移。</li>
+     * </ul>
+     */
     public static final String ALGORITHM_VERSION = "V2_BOUNDED_STEP";
 
     private final UserWordStateMapper userWordStateMapper;
