@@ -44,6 +44,7 @@ public class ReviewService {
     private final FavoriteWordMapper favoriteWordMapper;
     private final WordMapper wordMapper;
     private final WordbookService wordbookService;
+    private final StudyBusinessTime businessTime;
 
     /**
      * 分页查询到期复习词。
@@ -53,11 +54,14 @@ public class ReviewService {
      * @return 分页复习词响应
      */
     public PageResponse<ReviewWordResponse> pageDueWords(Long userId, ReviewQueryRequest request) {
+        // 与调度器（SpacedRepetitionService.formalAllowed）统一用偏移业务日，
+        // 否则凌晨 0-4 点会列出尚不可推进的"到期词"
+        LocalDate businessDay = businessTime.businessDate();
         LambdaQueryWrapper<UserWordState> wrapper = new LambdaQueryWrapper<UserWordState>()
                 .eq(UserWordState::getUserId, userId)
                 .eq(UserWordState::getLearned, true)
                 .isNotNull(UserWordState::getNextReviewDate)
-                .le(UserWordState::getNextReviewDate, LocalDate.now(StudyBusinessTime.ZONE))
+                .le(UserWordState::getNextReviewDate, businessDay)
                 .orderByAsc(UserWordState::getNextReviewDate)
                 .orderByDesc(UserWordState::getUpdatedAt);
         if (request.wordbookId() != null) {

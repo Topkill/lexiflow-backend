@@ -52,10 +52,14 @@ public class SpacedRepetitionService {
         boolean newState = state == null;
         if (newState) state = newState(userId, wordbookId, wordId, planId, today);
         MasteryStatus oldMastery = state.getMasteryStatus();
+        // lastStudiedAt 与 today 必须同口径：都用偏移业务日比较，
+        // 否则凌晨 0-4 点会出现"已被选进到期任务却无法作为正式复习推进"的无效复习。
+        boolean studiedOnEarlierBusinessDay = state.getLastStudiedAt() != null
+                && StudyBusinessTime.businessDateOf(state.getLastStudiedAt()).isBefore(today);
         boolean formalAllowed = scene == StudyScene.REVIEW
                 && requestedType == AttemptType.FORMAL_REVIEW
                 && Boolean.TRUE.equals(state.getLearned())
-                && state.getLastStudiedAt() != null && state.getLastStudiedAt().toLocalDate().isBefore(today)
+                && studiedOnEarlierBusinessDay
                 && state.getNextReviewDate() != null && !state.getNextReviewDate().isAfter(today)
                 && !day.getUnknownEfApplied() && !day.getKnownReviewApplied();
         AttemptType effectiveType = scene == StudyScene.QUIZ ? AttemptType.QUIZ
